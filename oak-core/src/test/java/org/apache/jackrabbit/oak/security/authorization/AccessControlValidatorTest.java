@@ -17,8 +17,11 @@
 package org.apache.jackrabbit.oak.security.authorization;
 
 import java.security.Principal;
+import javax.jcr.AccessDeniedException;
+import javax.jcr.security.AccessControlManager;
 
 import org.apache.jackrabbit.JcrConstants;
+import org.apache.jackrabbit.api.security.JackrabbitAccessControlList;
 import org.apache.jackrabbit.api.security.authorization.PrivilegeManager;
 import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.api.Tree;
@@ -71,7 +74,7 @@ public class AccessControlValidatorTest extends AbstractAccessControlTest implem
         return new NodeUtil(root.getTree(testPath));
     }
 
-    private NodeUtil createAcl() {
+    private NodeUtil createAcl() throws AccessDeniedException {
         NodeUtil testRoot = getTestRoot();
         testRoot.setNames(JcrConstants.JCR_MIXINTYPES, MIX_REP_ACCESS_CONTROLLABLE);
 
@@ -81,7 +84,7 @@ public class AccessControlValidatorTest extends AbstractAccessControlTest implem
         return acl;
     }
 
-    private static NodeUtil createACE(NodeUtil acl, String aceName, String ntName, String principalName, String... privilegeNames) {
+    private static NodeUtil createACE(NodeUtil acl, String aceName, String ntName, String principalName, String... privilegeNames) throws AccessDeniedException {
         NodeUtil ace = acl.addChild(aceName, ntName);
         ace.setString(REP_PRINCIPAL_NAME, principalName);
         ace.setNames(REP_PRIVILEGES, privilegeNames);
@@ -89,7 +92,7 @@ public class AccessControlValidatorTest extends AbstractAccessControlTest implem
     }
 
     @Test
-    public void testPolicyWithOutChildOrder() {
+    public void testPolicyWithOutChildOrder() throws AccessDeniedException {
         NodeUtil testRoot = getTestRoot();
         testRoot.setNames(JcrConstants.JCR_MIXINTYPES, MIX_REP_ACCESS_CONTROLLABLE);
         testRoot.addChild(REP_POLICY, NT_REP_ACL);
@@ -119,7 +122,7 @@ public class AccessControlValidatorTest extends AbstractAccessControlTest implem
     }
 
     @Test
-    public void testAddInvalidRepoPolicy() {
+    public void testAddInvalidRepoPolicy() throws Exception {
         NodeUtil testRoot = getTestRoot();
         testRoot.setNames(JcrConstants.JCR_MIXINTYPES, MIX_REP_ACCESS_CONTROLLABLE);
         NodeUtil policy = getTestRoot().addChild(REP_REPO_POLICY, NT_REP_ACL);
@@ -135,7 +138,7 @@ public class AccessControlValidatorTest extends AbstractAccessControlTest implem
     }
 
     @Test
-    public void testAddPolicyWithAcContent() {
+    public void testAddPolicyWithAcContent() throws Exception {
         NodeUtil acl = createAcl();
         NodeUtil ace = acl.getChild(aceName);
 
@@ -155,7 +158,7 @@ public class AccessControlValidatorTest extends AbstractAccessControlTest implem
     }
 
     @Test
-    public void testAddRepoPolicyWithAcContent() {
+    public void testAddRepoPolicyWithAcContent() throws Exception {
         NodeUtil acl = createAcl();
         NodeUtil ace = acl.getChild(aceName);
 
@@ -175,7 +178,7 @@ public class AccessControlValidatorTest extends AbstractAccessControlTest implem
     }
 
     @Test
-    public void testAddAceWithAcContent() {
+    public void testAddAceWithAcContent() throws Exception {
         NodeUtil acl = createAcl();
         NodeUtil ace = acl.getChild(aceName);
 
@@ -195,7 +198,7 @@ public class AccessControlValidatorTest extends AbstractAccessControlTest implem
     }
 
     @Test
-    public void testAddRestrictionWithAcContent() {
+    public void testAddRestrictionWithAcContent() throws Exception {
         NodeUtil acl = createAcl();
         NodeUtil ace = acl.getChild(aceName);
 
@@ -215,7 +218,7 @@ public class AccessControlValidatorTest extends AbstractAccessControlTest implem
     }
 
     @Test
-    public void testAddIsolatedPolicy() {
+    public void testAddIsolatedPolicy() throws Exception {
         String[] policyNames = new String[]{"isolatedACL", REP_POLICY, REP_REPO_POLICY};
         NodeUtil node = getTestRoot();
 
@@ -236,7 +239,7 @@ public class AccessControlValidatorTest extends AbstractAccessControlTest implem
     }
 
     @Test
-    public void testAddIsolatedAce() {
+    public void testAddIsolatedAce() throws Exception {
         String[] ntNames = new String[]{NT_REP_DENY_ACE, NT_REP_GRANT_ACE};
         NodeUtil node = getTestRoot();
 
@@ -256,7 +259,7 @@ public class AccessControlValidatorTest extends AbstractAccessControlTest implem
     }
 
     @Test
-    public void testAddIsolatedRestriction() {
+    public void testAddIsolatedRestriction() throws Exception {
         NodeUtil node = getTestRoot();
         NodeUtil restriction = node.addChild("isolatedRestriction", NT_REP_RESTRICTIONS);
         try {
@@ -272,7 +275,7 @@ public class AccessControlValidatorTest extends AbstractAccessControlTest implem
     }
 
     @Test
-    public void testInvalidPrivilege() {
+    public void testInvalidPrivilege() throws Exception {
         NodeUtil acl = createAcl();
 
         String privName = "invalidPrivilegeName";
@@ -324,6 +327,27 @@ public class AccessControlValidatorTest extends AbstractAccessControlTest implem
             fail("Creating restriction with invalid type should fail.");
         } catch (CommitFailedException e) {
             // success
+            assertTrue(e.isAccessControlViolation());
+        }
+    }
+
+    @Test
+    public void testDuplicateAce() throws Exception {
+        AccessControlManager acMgr = getAccessControlManager(root);
+        JackrabbitAccessControlList acl = org.apache.jackrabbit.commons.jackrabbit.authorization.AccessControlUtils.getAccessControlList(acMgr, testPath);
+        acl.addAccessControlEntry(testPrincipal, privilegesFromNames(PrivilegeConstants.JCR_ADD_CHILD_NODES));
+        acMgr.setPolicy(testPath, acl);
+
+        // add duplicate ac-entry on OAK-API
+        NodeUtil policy = new NodeUtil(root.getTree(testPath + "/rep:policy"));
+        NodeUtil ace = policy.addChild("duplicateAce", NT_REP_GRANT_ACE);
+        ace.setString(REP_PRINCIPAL_NAME, testPrincipal.getName());
+        ace.setStrings(AccessControlConstants.REP_PRIVILEGES, PrivilegeConstants.JCR_ADD_CHILD_NODES);
+
+        try {
+            root.commit();
+            fail("Creating duplicate ACE must be detected");
+        } catch (CommitFailedException e) {
             assertTrue(e.isAccessControlViolation());
         }
     }

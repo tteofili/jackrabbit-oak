@@ -22,6 +22,7 @@ import javax.annotation.Nonnull;
 import javax.jcr.ItemExistsException;
 import javax.jcr.PathNotFoundException;
 import javax.jcr.RepositoryException;
+import javax.jcr.nodetype.ConstraintViolationException;
 
 import org.apache.jackrabbit.oak.api.AuthInfo;
 import org.apache.jackrabbit.oak.api.CommitFailedException;
@@ -160,6 +161,16 @@ public class SessionDelegate {
         return updateCount;
     }
 
+    public void checkProtectedNode(String path) throws RepositoryException {
+        NodeDelegate node = getNode(path);
+        if (node == null) {
+            throw new PathNotFoundException(
+                    "Node " + path + " does not exist.");
+        } else if (node.isProtected()) {
+            throw new ConstraintViolationException(
+                    "Node " + path + " is protected.");
+        }
+    }
 
     @Nonnull
     public AuthInfo getAuthInfo() {
