@@ -49,15 +49,17 @@ import org.apache.jackrabbit.commons.xml.Exporter;
 import org.apache.jackrabbit.commons.xml.ParsingContentHandler;
 import org.apache.jackrabbit.commons.xml.SystemViewExporter;
 import org.apache.jackrabbit.commons.xml.ToXmlContentHandler;
+import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.jcr.delegate.ItemDelegate;
 import org.apache.jackrabbit.oak.jcr.delegate.NodeDelegate;
 import org.apache.jackrabbit.oak.jcr.delegate.PropertyDelegate;
 import org.apache.jackrabbit.oak.jcr.delegate.SessionDelegate;
-import org.apache.jackrabbit.oak.jcr.delegate.SessionOperation;
+import org.apache.jackrabbit.oak.jcr.operation.SessionOperation;
+import org.apache.jackrabbit.oak.jcr.security.AccessManager;
 import org.apache.jackrabbit.oak.jcr.xml.ImportHandler;
 import org.apache.jackrabbit.oak.spi.security.authentication.ImpersonationCredentials;
-import org.apache.jackrabbit.oak.util.TODO;
+import org.apache.jackrabbit.oak.spi.security.authorization.permission.Permissions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.xml.sax.ContentHandler;
@@ -90,14 +92,14 @@ public class SessionImpl implements JackrabbitSession {
 
     private abstract class ReadOperation<T> extends SessionOperation<T> {
         @Override
-        protected void checkPreconditions() throws RepositoryException {
+        public void checkPreconditions() throws RepositoryException {
             sd.checkAlive();
         }
     }
 
     private abstract class WriteOperation<T> extends SessionOperation<T> {
         @Override
-        protected void checkPreconditions() throws RepositoryException {
+        public void checkPreconditions() throws RepositoryException {
             sd.checkAlive();
         }
 
@@ -254,7 +256,7 @@ public class SessionImpl implements JackrabbitSession {
     public Node getRootNode() throws RepositoryException {
         return perform(new ReadOperation<Node>() {
             @Override
-            protected Node perform() throws AccessDeniedException, RepositoryException {
+            public Node perform() throws RepositoryException {
                 NodeDelegate nd = sd.getRootNode();
                 if (nd == null) {
                     throw new AccessDeniedException("Root node is not accessible.");
@@ -334,15 +336,15 @@ public class SessionImpl implements JackrabbitSession {
 
     @Override
     public void move(String srcAbsPath, final String destAbsPath) throws RepositoryException {
+        checkIndexOnName(sessionContext, destAbsPath);
         final String srcOakPath = getOakPathOrThrowNotFound(srcAbsPath);
         final String destOakPath = getOakPathOrThrowNotFound(destAbsPath);
         sd.perform(new WriteOperation<Void>() {
             @Override
-            protected void checkPreconditions() throws RepositoryException {
+            public void checkPreconditions() throws RepositoryException {
                 super.checkPreconditions();
                 sd.checkProtectedNode(getParentPath(srcOakPath));
                 sd.checkProtectedNode(getParentPath(destOakPath));
-                checkIndexOnName(sessionContext, destAbsPath);
             }
 
             @Override
@@ -359,7 +361,7 @@ public class SessionImpl implements JackrabbitSession {
         final String oakPath = getOakPathOrThrowNotFound(absPath);
         perform(new WriteOperation<Void>() {
             @Override
-            protected Void perform() throws RepositoryException {
+            public Void perform() throws RepositoryException {
                 ItemDelegate item = sd.getItem(oakPath);
                 if (item == null) {
                     throw new PathNotFoundException(absPath);
@@ -380,7 +382,7 @@ public class SessionImpl implements JackrabbitSession {
     public void save() throws RepositoryException {
         perform(new WriteOperation<Void>() {
             @Override
-            protected Void perform() throws RepositoryException {
+            public Void perform() throws RepositoryException {
                 sd.save();
                 sessionContext.refresh(false);
                 return null;
@@ -392,7 +394,7 @@ public class SessionImpl implements JackrabbitSession {
     public void refresh(final boolean keepChanges) throws RepositoryException {
         perform(new WriteOperation<Void>() {
             @Override
-            protected Void perform() throws RepositoryException {
+            public Void perform() throws RepositoryException {
                 sd.refresh(keepChanges);
                 sessionContext.refresh(false);
                 return null;
@@ -568,11 +570,11 @@ public class SessionImpl implements JackrabbitSession {
     }
 
     @Override
-    public boolean hasPermission(final String absPath, final String actions) throws RepositoryException {
+    public boolean hasPermission(String absPath, final String actions) throws RepositoryException {
+        final String oakPath = getOakPathOrThrow(absPath);
         return perform(new ReadOperation<Boolean>() {
             @Override
-            protected Boolean perform() throws RepositoryException {
-                String oakPath = getOakPathOrThrow(absPath);
+            public Boolean perform() throws RepositoryException {
                 return sessionContext.getAccessManager().hasPermissions(oakPath, actions);
             }
         });
@@ -589,8 +591,59 @@ public class SessionImpl implements JackrabbitSession {
     public boolean hasCapability(String methodName, Object target, Object[] arguments) throws RepositoryException {
         sd.checkAlive();
 
-        // TODO
-        return TODO.unimplemented().returnValue(false);
+        if (target instanceof ItemImpl) {
+            ItemDelegate dlg = ((ItemImpl) target).dlg;
+            if (dlg.isProtected()) {
+                return false;
+            }
+
+            boolean isNode = ((ItemImpl) target).isNode();
+            Node parent = (isNode) ? (Node) target : ((ItemImpl) target).getParent();
+            if (!parent.isCheckedOut()) {
+                return false;
+            }
+            if (parent.isLocked()) {
+                return false;
+            }
+
+            AccessManager accessMgr = sessionContext.getAccessManager();
+            long permission = Permissions.NO_PERMISSION;
+            if (isNode) {
+                Tree tree = ((NodeDelegate) dlg).getTree();
+                if ("addNode".equals(methodName)) {
+                    if (arguments != null && arguments.length > 0) {
+                        // add-node needs to be checked on the (path of) the
+                        // new node that has/will be added
+                        String path = PathUtils.concat(tree.getPath(), sessionContext.getOakName(arguments[0].toString()));
+                        return accessMgr.hasPermissions(path, Session.ACTION_ADD_NODE);
+                    }
+                } else if ("setPrimaryType".equals(methodName) || "addMixin".equals(methodName) || "removeMixin".equals(methodName)) {
+                    permission = Permissions.NODE_TYPE_MANAGEMENT;
+                } else if ("orderBefore".equals(methodName)) {
+                    if (tree.isRoot()) {
+                        return false;
+                    } else {
+                        permission = Permissions.MODIFY_CHILD_NODE_COLLECTION;
+                        tree = tree.getParent();
+                    }
+                } else if ("setProperty".equals(methodName)) {
+                    permission = Permissions.ADD_PROPERTY;
+                } else if ("remove".equals(methodName)) {
+                    permission = Permissions.REMOVE_NODE;
+                }
+                return accessMgr.hasPermissions(tree, null, permission);
+            } else {
+                if (methodName.equals("setValue")) {
+                    permission = Permissions.MODIFY_PROPERTY;
+                } else if ("remove".equals(methodName)) {
+                    permission = Permissions.REMOVE_PROPERTY;
+                }
+                Tree tree = dlg.getParent().getTree();
+                return accessMgr.hasPermissions(tree, ((PropertyDelegate) dlg).getPropertyState(), permission);
+            }
+        }
+        // TODO: add more best-effort checks
+        return true;
     }
 
     @Override

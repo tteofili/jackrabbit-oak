@@ -110,11 +110,15 @@ public class ImporterImpl implements Importer {
             throw new RepositoryException("Pending changes on session. Cannot run workspace import.");
         }
 
+        this.uuidBehavior = uuidBehavior;
+        userID = sessionContext.getSessionDelegate().getAuthInfo().getUserID();
+
         importTargetTree = root.getTree(absPath);
         if (!importTargetTree.exists()) {
             throw new PathNotFoundException(absPath);
         }
 
+        // TODO: review usage of write-root and object obtained from session-context (OAK-931)
         VersionManager vMgr = sessionContext.getVersionManager();
         if (!vMgr.isCheckedOut(absPath)) {
             throw new VersionException("Target node is checked in.");
@@ -122,16 +126,12 @@ public class ImporterImpl implements Importer {
         if (sessionContext.getLockManager().isLocked(absPath)) {
             throw new LockException("Target node is locked.");
         }
-
         ntTypesRoot = root.getTree(NODE_TYPES_PATH);
-
-        this.uuidBehavior = uuidBehavior;
-
-        userID = sessionContext.getSessionDelegate().getAuthInfo().getUserID();
         accessManager = sessionContext.getAccessManager();
         idManager = new IdentifierManager(root);
         effectiveNodeTypeProvider = sessionContext.getEffectiveNodeTypeProvider();
         definitionProvider = sessionContext.getDefinitionProvider();
+        // TODO: end
 
         refTracker = new ReferenceChangeTracker();
 
@@ -139,7 +139,6 @@ public class ImporterImpl implements Importer {
         parents.push(importTargetTree);
 
         pItemImporters.clear();
-
         for (ProtectedItemImporter importer : sessionContext.getProtectedItemImporters()) {
             if (importer.init(sessionContext.getSession(), root, sessionContext, isWorkspaceImport, uuidBehavior, refTracker)) {
                 pItemImporters.add(importer);
@@ -338,8 +337,8 @@ public class ImporterImpl implements Importer {
                 } else {
                     // edge case: colliding node does have same uuid
                     // (see http://issues.apache.org/jira/browse/JCR-1128)
-                    String uuid = TreeUtil.getString(existing, JcrConstants.JCR_UUID);
-                    if (uuid != null && !(uuid.equals(id)
+                    String existingIdentifier = IdentifierManager.getIdentifier(existing);
+                    if (!(existingIdentifier.equals(id)
                             && (uuidBehavior == ImportUUIDBehavior.IMPORT_UUID_COLLISION_REMOVE_EXISTING
                             || uuidBehavior == ImportUUIDBehavior.IMPORT_UUID_COLLISION_REPLACE_EXISTING))) {
                         throw new ItemExistsException(
