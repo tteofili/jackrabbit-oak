@@ -43,7 +43,7 @@ import com.google.common.collect.Sets;
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.api.Type;
-import org.apache.jackrabbit.oak.core.RootImpl.Move;
+import org.apache.jackrabbit.oak.core.AbstractRoot.Move;
 import org.apache.jackrabbit.oak.plugins.memory.MemoryPropertyBuilder;
 import org.apache.jackrabbit.oak.plugins.memory.MultiStringPropertyState;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
@@ -55,7 +55,7 @@ public class MutableTree extends AbstractTree {
     /**
      * Underlying {@code Root} of this {@code Tree} instance
      */
-    private final RootImpl root;
+    private final AbstractRoot root;
 
     /**
      * Parent of this tree. Null for the root.
@@ -65,13 +65,13 @@ public class MutableTree extends AbstractTree {
     /** Pointer into the list of pending moves */
     private Move pendingMoves;
 
-    MutableTree(RootImpl root, NodeBuilder builder, Move pendingMoves) {
+    MutableTree(AbstractRoot root, NodeBuilder builder, Move pendingMoves) {
         super("", builder);
         this.root = checkNotNull(root);
         this.pendingMoves = checkNotNull(pendingMoves);
     }
 
-    private MutableTree(RootImpl root, MutableTree parent, String name, Move pendingMoves) {
+    private MutableTree(AbstractRoot root, MutableTree parent, String name, Move pendingMoves) {
         super(name, parent.nodeBuilder.getChildNode(name));
         this.root = checkNotNull(root);
         this.parent = checkNotNull(parent);
@@ -135,8 +135,12 @@ public class MutableTree extends AbstractTree {
 
     @Override
     public Status getPropertyStatus(String name) {
-        // TODO: see OAK-212
-        Status nodeStatus = getStatus();
+        // make sure we don't expose information about a non-accessible property
+        if (!hasProperty(name)) {
+            return null;
+        }
+        // get status of this tree without checking for it's existence
+        Status nodeStatus = super.getStatus();
         if (nodeStatus == NEW) {
             return (super.hasProperty(name)) ? NEW : null;
         }

@@ -32,18 +32,15 @@ import java.util.List;
 import javax.annotation.Nonnull;
 import javax.security.auth.Subject;
 
-import org.apache.jackrabbit.oak.Oak;
 import org.apache.jackrabbit.oak.api.Blob;
 import org.apache.jackrabbit.oak.api.BlobFactory;
 import org.apache.jackrabbit.oak.api.CommitFailedException;
-import org.apache.jackrabbit.oak.api.ContentSession;
 import org.apache.jackrabbit.oak.api.QueryEngine;
 import org.apache.jackrabbit.oak.api.Root;
 import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.plugins.index.diffindex.UUIDDiffIndexProviderWrapper;
 import org.apache.jackrabbit.oak.query.QueryEngineImpl;
-import org.apache.jackrabbit.oak.security.authentication.SystemSubject;
 import org.apache.jackrabbit.oak.spi.commit.CommitHook;
 import org.apache.jackrabbit.oak.spi.commit.CompositeEditorProvider;
 import org.apache.jackrabbit.oak.spi.commit.CompositeHook;
@@ -52,10 +49,8 @@ import org.apache.jackrabbit.oak.spi.commit.EmptyHook;
 import org.apache.jackrabbit.oak.spi.commit.PostCommitHook;
 import org.apache.jackrabbit.oak.spi.commit.PostValidationHook;
 import org.apache.jackrabbit.oak.spi.commit.ValidatorProvider;
-import org.apache.jackrabbit.oak.spi.query.CompositeQueryIndexProvider;
 import org.apache.jackrabbit.oak.spi.query.QueryIndexProvider;
 import org.apache.jackrabbit.oak.spi.security.Context;
-import org.apache.jackrabbit.oak.spi.security.OpenSecurityProvider;
 import org.apache.jackrabbit.oak.spi.security.SecurityConfiguration;
 import org.apache.jackrabbit.oak.spi.security.SecurityProvider;
 import org.apache.jackrabbit.oak.spi.security.authorization.AccessControlConfiguration;
@@ -64,8 +59,9 @@ import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.apache.jackrabbit.oak.spi.state.NodeStore;
 import org.apache.jackrabbit.oak.spi.state.NodeStoreBranch;
+import org.apache.jackrabbit.oak.util.LazyValue;
 
-public class RootImpl implements Root {
+public abstract class AbstractRoot implements Root {
 
     /**
      * Number of {@link #updated} calls for which changes are kept in memory.
@@ -95,19 +91,19 @@ public class RootImpl implements Root {
     private final MutableTree rootTree;
 
     /**
-     * Current branch this root operates on
+     * Secured builder for the root tree
      */
-    private NodeStoreBranch branch;
+    private final SecureNodeBuilder secureBuilder;
 
     /**
      * Unsecured builder for the root tree
      */
-    private NodeBuilder builder;
+    private final NodeBuilder builder;
 
     /**
-     * Secured builder for the root tree
+     * Current branch this root operates on
      */
-    private SecureNodeBuilder secureBuilder;
+    private NodeStoreBranch branch;
 
     /**
      * Sentinel for the next move operation to take place on the this root
@@ -120,7 +116,12 @@ public class RootImpl implements Root {
      */
     private long modCount;
 
-    private PermissionProvider permissionProvider;
+    private LazyValue<PermissionProvider> permissionProvider = new LazyValue<PermissionProvider>() {
+        @Override
+        protected PermissionProvider createValue() {
+            return getAcConfig().getPermissionProvider(AbstractRoot.this, subject.getPrincipals());
+        }
+    };
 
     /**
      * New instance bases on a given {@link NodeStore} and a workspace
@@ -132,13 +133,13 @@ public class RootImpl implements Root {
      * @param securityProvider the security configuration.
      * @param indexProvider    the query index provider.
      */
-    public RootImpl(NodeStore store,
-                    CommitHook hook,
-                    PostCommitHook postHook,
-                    String workspaceName,
-                    Subject subject,
-                    SecurityProvider securityProvider,
-                    QueryIndexProvider indexProvider) {
+    protected AbstractRoot(NodeStore store,
+            CommitHook hook,
+            PostCommitHook postHook,
+            String workspaceName,
+            Subject subject,
+            SecurityProvider securityProvider,
+            QueryIndexProvider indexProvider) {
         this.store = checkNotNull(store);
         this.hook = checkNotNull(hook);
         this.postHook = postHook;
@@ -150,21 +151,10 @@ public class RootImpl implements Root {
         branch = this.store.branch();
         NodeState root = branch.getHead();
         builder = root.builder();
-        secureBuilder = new SecureNodeBuilder(builder, getPermissionProvider(), getAcContext());
+        secureBuilder = new SecureNodeBuilder(builder, permissionProvider, getAcContext());
         rootTree = new MutableTree(this, secureBuilder, lastMove);
     }
-
-    // TODO: review if these constructors really make sense and cannot be replaced.
-    public RootImpl(NodeStore store) {
-        this(store, EmptyHook.INSTANCE);
-    }
-
-    public RootImpl(NodeStore store, CommitHook hook) {
-        // FIXME: define proper default or pass workspace name with the constructor
-        this(store, hook, PostCommitHook.EMPTY, Oak.DEFAULT_WORKSPACE_NAME, SystemSubject.INSTANCE,
-                new OpenSecurityProvider(), new CompositeQueryIndexProvider());
-    }
-
+ 
     /**
      * Called whenever a method on this instance or on any {@code Tree} instance
      * obtained from this {@code Root} is called. This default implementation
@@ -176,16 +166,7 @@ public class RootImpl implements Root {
 
     }
 
-    protected String getWorkspaceName() {
-        return workspaceName;
-    }
-
     //---------------------------------------------------------------< Root >---
-
-    @Override
-    public ContentSession getContentSession() {
-        throw new UnsupportedOperationException();
-    }
 
     @Override
     public boolean move(String sourcePath, String destPath) {
@@ -237,7 +218,7 @@ public class RootImpl implements Root {
             branch.rebase();
             reset();
             if (permissionProvider != null) {
-                permissionProvider.refresh();
+                permissionProvider.get().refresh();
             }
         }
     }
@@ -249,7 +230,7 @@ public class RootImpl implements Root {
         reset();
         modCount = 0;
         if (permissionProvider != null) {
-            permissionProvider.refresh();
+            permissionProvider.get().refresh();
         }
     }
 
@@ -263,8 +244,7 @@ public class RootImpl implements Root {
             @Override
             public CommitFailedException run() {
                 try {
-                    NodeState base = branch.getBase();
-                    NodeState newHead = branch.merge(getCommitHook(), postHook);
+                    branch.merge(getCommitHook(), postHook);
                     return null;
                 } catch (CommitFailedException e) {
                     return e;
@@ -314,7 +294,7 @@ public class RootImpl implements Root {
      */
     private Subject getCommitSubject() {
         return new Subject(true, subject.getPrincipals(),
-                Collections.singleton(getPermissionProvider()), Collections.<Object>emptySet());
+                Collections.singleton(permissionProvider.get()), Collections.<Object>emptySet());
     }
 
     @Override
@@ -330,7 +310,7 @@ public class RootImpl implements Root {
 
             @Override
             protected NodeState getRootState() {
-                return RootImpl.this.getRootState();
+                return AbstractRoot.this.getRootState();
             }
 
             @Override
@@ -383,7 +363,7 @@ public class RootImpl implements Root {
      */
     NodeState getSecureBase() {
         NodeState root = branch.getBase();
-        return new SecureNodeState(root, getPermissionProvider(), getAcContext());
+        return new SecureNodeState(root, permissionProvider.get(), getAcContext());
     }
 
     // TODO better way to determine purge limit. See OAK-175
@@ -406,14 +386,6 @@ public class RootImpl implements Root {
         return builder.getNodeState();
     }
 
-    @Nonnull
-    private PermissionProvider getPermissionProvider() {
-        if (permissionProvider == null) {
-            permissionProvider = createPermissionProvider();
-        }
-        return permissionProvider;
-    }
-
     /**
      * Purge all pending changes to the underlying {@link NodeStoreBranch}.
      */
@@ -428,11 +400,6 @@ public class RootImpl implements Root {
     private void reset() {
         NodeState root = branch.getHead();
         secureBuilder.reset(root);
-    }
-
-    @Nonnull
-    private PermissionProvider createPermissionProvider() {
-        return getAcConfig().getPermissionProvider(this, subject.getPrincipals());
     }
 
     @Nonnull
