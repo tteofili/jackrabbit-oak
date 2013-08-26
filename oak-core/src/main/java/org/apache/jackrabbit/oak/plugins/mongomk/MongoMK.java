@@ -21,15 +21,11 @@ import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
-import java.util.SortedSet;
-import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
@@ -37,6 +33,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
@@ -53,7 +50,6 @@ import org.apache.jackrabbit.oak.cache.CacheStats;
 import org.apache.jackrabbit.oak.cache.CacheValue;
 import org.apache.jackrabbit.oak.cache.EmpiricalWeigher;
 import org.apache.jackrabbit.oak.commons.PathUtils;
-import org.apache.jackrabbit.oak.plugins.mongomk.DocumentStore.Collection;
 import org.apache.jackrabbit.oak.plugins.mongomk.Node.Children;
 import org.apache.jackrabbit.oak.plugins.mongomk.Revision.RevisionComparator;
 import org.apache.jackrabbit.oak.plugins.mongomk.blob.MongoBlobStore;
@@ -67,10 +63,13 @@ import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.Weigher;
 import com.mongodb.DB;
 
+import static com.google.common.base.Preconditions.checkNotNull;
+import static com.google.common.base.Preconditions.checkState;
+
 /**
  * A MicroKernel implementation that stores the data in a MongoDB.
  */
-public class MongoMK implements MicroKernel {
+public class MongoMK implements MicroKernel, RevisionContext {
 
     /**
      * The threshold where special handling for many child node starts.
@@ -141,6 +140,14 @@ public class MongoMK implements MicroKernel {
      * The unique cluster id, similar to the unique machine id in MongoDB.
      */
     private final int clusterId;
+    
+    /**
+     * The splitting point in milliseconds. If a document is split, revisions
+     * older than this number of milliseconds are moved to a different document.
+     * The default is 0, meaning documents are never split. Revisions that are
+     * newer than this are kept in the newest document.
+     */
+    private final long splitDocumentAgeMillis;
 
     /**
      * The node cache.
@@ -223,6 +230,7 @@ public class MongoMK implements MicroKernel {
         this.store = s;
         this.blobStore = builder.getBlobStore();
         int cid = builder.getClusterId();
+        splitDocumentAgeMillis = builder.getSplitDocumentAgeMillis();
         cid = Integer.getInteger("oak.mongoMK.clusterId", cid);
         if (cid == 0) {
             clusterNodeInfo = ClusterNodeInfo.getInstance(store);
@@ -273,7 +281,7 @@ public class MongoMK implements MicroKernel {
             commit.applyToDocumentStore();
         } else {
             // initialize branchCommits
-            branches.init(store, clusterId);
+            branches.init(store, this);
         }
         backgroundThread = new Thread(
                 new BackgroundOperation(this, isDisposed),
@@ -329,21 +337,20 @@ public class MongoMK implements MicroKernel {
     
     void backgroundRead() {
         String id = Utils.getIdFromPath("/");
-        Map<String, Object> map = store.find(DocumentStore.Collection.NODES, id, asyncDelay);
-        @SuppressWarnings("unchecked")
-        Map<String, String> lastRevMap = (Map<String, String>) map.get(UpdateOp.LAST_REV);
+        NodeDocument doc = store.find(Collection.NODES, id, asyncDelay);
+        Map<Integer, Revision> lastRevMap = doc.getLastRev();
         
         boolean hasNewRevisions = false;
         // the (old) head occurred first
         Revision headSeen = Revision.newRevision(0);
         // then we saw this new revision (from another cluster node) 
         Revision otherSeen = Revision.newRevision(0);
-        for (Entry<String, String> e : lastRevMap.entrySet()) {
-            int machineId = Integer.parseInt(e.getKey());
+        for (Entry<Integer, Revision> e : lastRevMap.entrySet()) {
+            int machineId = e.getKey();
             if (machineId == clusterId) {
                 continue;
             }
-            Revision r = Revision.fromString(e.getValue());
+            Revision r = e.getValue();
             Revision last = lastKnownRevision.get(machineId);
             if (last == null || r.compareRevisionTime(last) > 0) {
                 lastKnownRevision.put(machineId, r);
@@ -400,7 +407,7 @@ public class MongoMK implements MicroKernel {
             }
             Commit commit = new Commit(this, null, r);
             commit.touchNode(p);
-            store.createOrUpdate(DocumentStore.Collection.NODES, commit.getUpdateOperationForNode(p));
+            store.createOrUpdate(Collection.NODES, commit.getUpdateOperationForNode(p));
             unsavedLastRevisions.remove(p);
         }
     }
@@ -436,8 +443,8 @@ public class MongoMK implements MicroKernel {
      * @param rev
      * @return the node
      */
-    Node getNode(String path, Revision rev) {
-        checkRevisionAge(rev, path);
+    Node getNode(@Nonnull String path, @Nonnull Revision rev) {
+        checkRevisionAge(checkNotNull(rev), checkNotNull(path));
         String key = path + "@" + rev;
         Node node = nodeCache.getIfPresent(key);
         if (node == null) {
@@ -459,30 +466,6 @@ public class MongoMK implements MicroKernel {
         }
     }
     
-    private boolean includeRevision(Revision x, Revision requestRevision) {
-        Branch b = branches.getBranch(x);
-        if (b != null) {
-            // only include if requested revision is also a branch revision
-            // with a history including x
-            if (b.containsCommit(requestRevision)) {
-                // in same branch, include if the same revision or
-                // requestRevision is newer
-                return x.equals(requestRevision) || isRevisionNewer(requestRevision, x);
-            }
-            // not part of branch identified by requestedRevision
-            return false;
-        }
-        // assert: x is not a branch commit
-        b = branches.getBranch(requestRevision);
-        if (b != null) {
-            // reset requestRevision to branch base revision to make
-            // sure we don't include revisions committed after branch
-            // was created
-            requestRevision = b.getBase(requestRevision);
-        }
-        return revisionComparator.compare(requestRevision, x) >= 0;
-    }
-    
     /**
      * Checks that revision x is newer than another revision.
      * 
@@ -494,117 +477,8 @@ public class MongoMK implements MicroKernel {
         return revisionComparator.compare(x, previous) > 0;
     }
 
-    /**
-     * Checks if the revision is valid for the given node map. A revision is
-     * considered valid if the given node map is the root of the commit, or the
-     * commit root has the revision set. This method may read further nodes to
-     * perform this check.
-     * This method also takes pending branches into consideration.
-     * The <code>readRevision</code> identifies the read revision used by the
-     * client, which may be a branch revision logged in {@link #branches}.
-     * The revision <code>rev</code> is valid if it is part of the branch
-     * history of <code>readRevision</code>.
-     *
-     * @param rev     revision to check.
-     * @param readRevision the read revision of the client.
-     * @param nodeMap the node to check.
-     * @param validRevisions set of revisions already checked against
-     *                       <code>readRevision</code> and considered valid.
-     * @return <code>true</code> if the revision is valid; <code>false</code>
-     *         otherwise.
-     */
-    boolean isValidRevision(@Nonnull Revision rev,
-                            @Nonnull Revision readRevision,
-                            @Nonnull Map<String, Object> nodeMap,
-                            @Nonnull Set<Revision> validRevisions) {
-        if (validRevisions.contains(rev)) {
-            return true;
-        }
-        @SuppressWarnings("unchecked")
-        Map<String, String> revisions = (Map<String, String>) nodeMap.get(UpdateOp.REVISIONS);
-        if (isCommitted(rev, readRevision, revisions)) {
-            validRevisions.add(rev);
-            return true;
-        } else if (revisions != null && revisions.containsKey(rev.toString())) {
-            // rev is in revisions map of this node, but not committed
-            // no need to check _commitRoot field
-            return false;
-        }
-        // check commit root
-        @SuppressWarnings("unchecked")
-        Map<String, Integer> commitRoot = (Map<String, Integer>) nodeMap.get(UpdateOp.COMMIT_ROOT);
-        String commitRootPath = null;
-        if (commitRoot != null) {
-            Integer depth = commitRoot.get(rev.toString());
-            if (depth != null) {
-                String p = Utils.getPathFromId((String) nodeMap.get(UpdateOp.ID));
-                commitRootPath = PathUtils.getAncestorPath(p, PathUtils.getDepth(p) - depth);
-            }
-        }
-        if (commitRootPath == null) {
-            // shouldn't happen, either node is commit root for a revision
-            // or has a reference to the commit root
-            LOG.warn("Node {} does not have commit root reference for revision {}",
-                    nodeMap.get(UpdateOp.ID), rev);
-            LOG.warn(nodeMap.toString());
-            return false;
-        }
-        // get root of commit
-        nodeMap = store.find(DocumentStore.Collection.NODES, 
-                Utils.getIdFromPath(commitRootPath));
-        if (nodeMap == null) {
-            return false;
-        }
-        @SuppressWarnings("unchecked")
-        Map<String, String> rootRevisions = (Map<String, String>) nodeMap.get(UpdateOp.REVISIONS);
-        if (isCommitted(rev, readRevision, rootRevisions)) {
-            validRevisions.add(rev);
-            return true;
-        }
-        return false;
-    }
-
-    /**
-     * Returns <code>true</code> if the given revision
-     * {@link Utils#isCommitted(String)} in the revisions map and is visible
-     * from the <code>readRevision</code>.
-     *
-     * @param revision  the revision to check.
-     * @param readRevision the read revision.
-     * @param revisions the revisions map, or <code>null</code> if none is set.
-     * @return <code>true</code> if the revision is committed, otherwise
-     *         <code>false</code>.
-     */
-    private boolean isCommitted(@Nonnull Revision revision,
-                                @Nonnull Revision readRevision,
-                                @Nullable Map<String, String> revisions) {
-        if (revision.equals(readRevision)) {
-            return true;
-        }
-        if (revisions == null) {
-            return false;
-        }
-        String value = revisions.get(revision.toString());
-        if (value == null) {
-            return false;
-        }
-        if (Utils.isCommitted(value)) {
-            // resolve commit revision
-            revision = Utils.resolveCommitRevision(revision, value);
-            if (branches.getBranch(readRevision) == null) {
-                // readRevision is not from a branch
-                // compare resolved revision as is
-                return !isRevisionNewer(revision, readRevision);
-            }
-        } else {
-            // branch commit
-            if (Revision.fromString(value).getClusterId() != clusterId) {
-                // this is an unmerged branch commit from another cluster node,
-                // hence never visible to us
-                return false;
-            }
-        }
-        return includeRevision(revision, readRevision);
+    public long getSplitDocumentAgeMillis() {
+        return this.splitDocumentAgeMillis;
     }
 
     public Children getChildren(final String path, final Revision rev, final int limit)  throws MicroKernelException {
@@ -641,140 +515,47 @@ public class MongoMK implements MicroKernel {
         // as the starting point
         String from = Utils.getKeyLowerLimit(path);
         String to = Utils.getKeyUpperLimit(path);
-        List<Map<String, Object>> list = store.query(DocumentStore.Collection.NODES, 
-                from, to, limit);
+        List<NodeDocument> list;
         Children c = new Children();
-        Set<Revision> validRevisions = new HashSet<Revision>();
-        if (list.size() >= limit) {
+        int rawLimit = limit;
+        do {
+            c.children.clear();
             c.hasMore = true;
-        }
-        for (Map<String, Object> e : list) {
-            // filter out deleted children
-            if (getLiveRevision(e, rev, validRevisions) == null) {
-                continue;
+            list = store.query(Collection.NODES,
+                    from, to, rawLimit);
+            Set<Revision> validRevisions = new HashSet<Revision>();
+            for (NodeDocument doc : list) {
+                // filter out deleted children
+                if (doc.getLiveRevision(this, store, rev, validRevisions) == null) {
+                    continue;
+                }
+                String p = Utils.getPathFromId(doc.getId());
+                if (c.children.size() < limit) {
+                    // add to children until limit is reached
+                    c.children.add(p);
+                }
             }
-            // TODO put the whole node in the cache
-            String id = e.get(UpdateOp.ID).toString();
-            String p = Utils.getPathFromId(id);
-            c.children.add(p);
-        }
+            if (list.size() < rawLimit) {
+                // fewer documents returned than requested
+                // -> no more documents
+                c.hasMore = false;
+            }
+            // double rawLimit for next round
+            rawLimit = (int) Math.min(((long) rawLimit) * 2, Integer.MAX_VALUE);
+        } while (c.children.size() < limit && c.hasMore);
         return c;
     }
 
+    @CheckForNull
     private Node readNode(String path, Revision readRevision) {
         String id = Utils.getIdFromPath(path);
-        Map<String, Object> map = store.find(DocumentStore.Collection.NODES, id);
-        if (map == null) {
+        NodeDocument doc = store.find(Collection.NODES, id);
+        if (doc == null) {
             return null;
         }
-        Revision min = getLiveRevision(map, readRevision);
-        if (min == null) {
-            // deleted
-            return null;
-        }
-        Node n = new Node(path, readRevision);
-        for (String key : map.keySet()) {
-            if (!Utils.isPropertyName(key)) {
-                continue;
-            }
-            Object v = map.get(key);
-            @SuppressWarnings("unchecked")
-            Map<String, String> valueMap = (Map<String, String>) v;
-            if (valueMap != null) {
-                if (valueMap instanceof TreeMap) {
-                    // TODO instanceof should be avoided
-                    // use descending keys (newest first) if map is sorted
-                    valueMap = ((TreeMap<String, String>) valueMap).descendingMap();
-                }
-                String value = getLatestValue(valueMap, min, readRevision);
-                String propertyName = Utils.unescapePropertyName(key);
-                n.setProperty(propertyName, value);
-            }
-        }
-
-        // when was this node last modified?
-        Branch branch = branches.getBranch(readRevision);
-        Revision lastRevision = null;
-        Map<Integer, Revision> lastRevs = new HashMap<Integer, Revision>();
-        @SuppressWarnings("unchecked")
-        Map<String, String> valueMap = (Map<String, String>) map.get(UpdateOp.LAST_REV);
-        if (valueMap != null) {
-            for (String clusterId : valueMap.keySet()) {
-                lastRevs.put(Integer.parseInt(clusterId),
-                        Revision.fromString(valueMap.get(clusterId)));
-            }
-        }
-        // overlay with unsaved last modified from this instance
-        Revision lastModified = unsavedLastRevisions.get(path);
-        if (lastModified != null) {
-            lastRevs.put(clusterId, lastModified);
-        }
-        // filter out revisions newer than branch base
-        if (branch != null) {
-            Revision base = branch.getBase(readRevision);
-            for (Iterator<Revision> it = lastRevs.values().iterator(); it
-                    .hasNext();) {
-                Revision r = it.next();
-                if (isRevisionNewer(r, base)) {
-                    it.remove();
-                }
-            }
-        }
-        for (Revision r : lastRevs.values()) {
-            // ignore if newer than readRevision
-            if (isRevisionNewer(r, readRevision)) {
-                continue;
-            }
-            if (lastRevision == null || isRevisionNewer(r, lastRevision)) {
-                lastRevision = r;
-            }
-        }
-        if (branch != null) {
-            // read from a branch
-            // -> possibly overlay with unsaved last revs from branch
-            Revision r = branch.getUnsavedLastRevision(path, readRevision);
-            if (r != null) {
-                lastRevision = r;
-            }
-        }
-        if (lastRevision == null) {
-            // use readRevision if none found
-            lastRevision = readRevision;
-        }
-        n.setLastRevision(lastRevision);
-        return n;
+        return doc.getNodeAtRevision(this, store, readRevision);
     }
     
-    /**
-     * Get the latest property value that is larger or equal the min revision,
-     * and smaller or equal the max revision.
-     * 
-     * @param valueMap the revision-value map
-     * @param min the minimum revision (null meaning unlimited)
-     * @param max the maximum revision
-     * @return the value, or null if not found
-     */
-    private String getLatestValue(@Nonnull Map<String, String> valueMap,
-                                  @Nullable Revision min,
-                                  @Nonnull Revision max) {
-        String value = null;
-        Revision latestRev = null;
-        for (String r : valueMap.keySet()) {
-            Revision propRev = Revision.fromString(r);
-            if (min != null && isRevisionNewer(min, propRev)) {
-                continue;
-            }
-            if (latestRev != null && !isRevisionNewer(propRev, latestRev)) {
-                continue;
-            }
-            if (includeRevision(propRev, max)) {
-                latestRev = propRev;
-                value = valueMap.get(r);
-            }
-        }
-        return value;
-    }
-
     @Override
     public String getHeadRevision() throws MicroKernelException {
         return headRevision.toString();
@@ -898,10 +679,10 @@ public class MongoMK implements MicroKernel {
         long minValue = Commit.getModified(minTimestamp);
         String fromKey = Utils.getKeyLowerLimit(path);
         String toKey = Utils.getKeyUpperLimit(path);
-        List<Map<String, Object>> list = store.query(DocumentStore.Collection.NODES, fromKey, toKey, 
-                UpdateOp.MODIFIED, minValue, Integer.MAX_VALUE);
-        for (Map<String, Object> e : list) {
-            String id = e.get(UpdateOp.ID).toString();
+        List<NodeDocument> list = store.query(Collection.NODES, fromKey, toKey,
+                NodeDocument.MODIFIED, minValue, Integer.MAX_VALUE);
+        for (NodeDocument doc : list) {
+            String id = doc.getId();
             String p = Utils.getPathFromId(id);
             Node fromNode = getNode(p, fromRev);
             Node toNode = getNode(p, toRev);
@@ -1082,7 +863,7 @@ public class MongoMK implements MicroKernel {
                     throw new MicroKernelException("Node already exists: " + targetPath + " in revision " + baseRevId);
                 }
                 commit.moveNode(sourcePath, targetPath);
-                moveNode(sourcePath, targetPath, baseRev, commit);
+                moveNode(sourcePath, targetPath, commit);
                 break;
             }
             case '*': {
@@ -1099,7 +880,7 @@ public class MongoMK implements MicroKernel {
                     throw new MicroKernelException("Node already exists: " + targetPath + " in revision " + baseRevId);
                 }
                 commit.copyNode(sourcePath, targetPath);
-                copyNode(sourcePath, targetPath, baseRev, commit);
+                copyNode(sourcePath, targetPath, commit);
                 break;
             }
             default:
@@ -1135,18 +916,69 @@ public class MongoMK implements MicroKernel {
         return rev.toString();
     }
 
-    private void copyNode(String sourcePath, String targetPath, Revision baseRev, Commit commit) {
-        moveOrCopyNode(false, sourcePath, targetPath, baseRev, commit);
+    //------------------------< RevisionContext >-------------------------------
+
+    @Override
+    public UnmergedBranches getBranches() {
+        return branches;
+    }
+
+    @Override
+    public UnsavedModifications getPendingModifications() {
+        return unsavedLastRevisions;
+    }
+
+    @Override
+    public RevisionComparator getRevisionComparator() {
+        return revisionComparator;
+    }
+
+    @Override
+    public void publishRevision(Revision foreignRevision, Revision changeRevision) {
+        if (revisionComparator.compare(headRevision, foreignRevision) >= 0) {
+            // already visible
+            return;
+        }
+        int clusterNodeId = foreignRevision.getClusterId();
+        if (clusterNodeId == this.clusterId) {
+            return;
+        }
+        // the (old) head occurred first
+        Revision headSeen = Revision.newRevision(0);
+        // then we saw this new revision (from another cluster node)
+        Revision otherSeen = Revision.newRevision(0);
+        // and after that, the current change
+        Revision changeSeen = Revision.newRevision(0);
+        revisionComparator.add(foreignRevision, otherSeen);
+        // TODO invalidating the whole cache is not really needed,
+        // but how to ensure we invalidate the right part of the cache?
+        // possibly simply wait for the background thread to pick
+        // up the changes, but this depends on how often this method is called
+        store.invalidateCache();
+        // the latest revisions of the current cluster node
+        // happened before the latest revisions of other cluster nodes
+        revisionComparator.add(headRevision, headSeen);
+        revisionComparator.add(changeRevision, changeSeen);
+        // the head revision is after other revisions
+        headRevision = Revision.newRevision(clusterId);
+    }
+
+    @Override
+    public int getClusterId() {
+        return clusterId;
+    }
+
+    private void copyNode(String sourcePath, String targetPath, Commit commit) {
+        moveOrCopyNode(false, sourcePath, targetPath, commit);
     }
     
-    private void moveNode(String sourcePath, String targetPath, Revision baseRev, Commit commit) {
-        moveOrCopyNode(true, sourcePath, targetPath, baseRev, commit);
+    private void moveNode(String sourcePath, String targetPath, Commit commit) {
+        moveOrCopyNode(true, sourcePath, targetPath, commit);
     }
     
     private void moveOrCopyNode(boolean move,
                                 String sourcePath,
                                 String targetPath,
-                                Revision baseRev,
                                 Commit commit) {
         // TODO Optimize - Move logic would not work well with very move of very large subtrees
         // At minimum we can optimize by traversing breadth wise and collect node id
@@ -1156,7 +988,7 @@ public class MongoMK implements MicroKernel {
         // of this commit i.e. transient nodes. If its required it would need to be looked
         // into
 
-        Node n = getNode(sourcePath, baseRev);
+        Node n = getNode(sourcePath, commit.getBaseRevision());
 
         // Node might be deleted already
         if (n == null) {
@@ -1170,16 +1002,17 @@ public class MongoMK implements MicroKernel {
         if (move) {
             markAsDeleted(sourcePath, commit, false);
         }
-        Node.Children c = getChildren(sourcePath, baseRev, Integer.MAX_VALUE);
+        Node.Children c = getChildren(sourcePath, commit.getBaseRevision(), Integer.MAX_VALUE);
         for (String srcChildPath : c.children) {
             String childName = PathUtils.getName(srcChildPath);
             String destChildPath = PathUtils.concat(targetPath, childName);
-            moveOrCopyNode(move, srcChildPath, destChildPath, baseRev, commit);
+            moveOrCopyNode(move, srcChildPath, destChildPath, commit);
         }
     }
 
     private void markAsDeleted(String path, Commit commit, boolean subTreeAlso) {
-        Revision rev = commit.getRevision();
+        Revision rev = commit.getBaseRevision();
+        checkState(rev != null, "Base revision of commit must not be null");
         commit.removeNode(path);
 
         if (subTreeAlso) {
@@ -1204,183 +1037,6 @@ public class MongoMK implements MicroKernel {
         nodeCache.invalidate(path + "@" + rev);
     }
 
-    /**
-     * Get the earliest (oldest) revision where the node was alive at or before
-     * the provided revision, if the node was alive at the given revision.
-     * 
-     * @param nodeMap the node map
-     * @param maxRev the maximum revision to return
-     * @return the earliest revision, or null if the node is deleted at the
-     *         given revision
-     */
-    private Revision getLiveRevision(Map<String, Object> nodeMap,
-                                     Revision maxRev) {
-        return getLiveRevision(nodeMap, maxRev, new HashSet<Revision>());
-    }
-
-    /**
-     * Get the earliest (oldest) revision where the node was alive at or before
-     * the provided revision, if the node was alive at the given revision.
-     * 
-     * @param nodeMap the node map
-     * @param maxRev the maximum revision to return
-     * @param validRevisions the set of revisions already checked against maxRev
-     *            and considered valid.
-     * @return the earliest revision, or null if the node is deleted at the
-     *         given revision
-     */
-    private Revision getLiveRevision(Map<String, Object> nodeMap,
-            Revision maxRev, Set<Revision> validRevisions) {
-        @SuppressWarnings("unchecked")
-        Map<String, String> valueMap = (Map<String, String>) nodeMap
-                .get(UpdateOp.DELETED);
-        if (valueMap == null) {
-            return null;
-        }
-        // first, search the newest deleted revision
-        Revision deletedRev = null;
-        if (valueMap instanceof TreeMap) {
-            // TODO instanceof should be avoided
-            // use descending keys (newest first) if map is sorted
-            valueMap = ((TreeMap<String, String>) valueMap).descendingMap();
-        }
-        for (String r : valueMap.keySet()) {
-            String value = valueMap.get(r);
-            if (!"true".equals(value)) {
-                // only look at deleted revisions now
-                continue;
-            }
-            Revision propRev = Revision.fromString(r);
-            if (isRevisionNewer(propRev, maxRev)
-                    || !isValidRevision(propRev, maxRev, nodeMap, validRevisions)) {
-                continue;
-            }
-            if (deletedRev == null || isRevisionNewer(propRev, deletedRev)) {
-                deletedRev = propRev;
-            }
-        }
-        // now search the oldest non-deleted revision that is newer than the
-        // newest deleted revision
-        Revision liveRev = null;
-        for (String r : valueMap.keySet()) {
-            String value = valueMap.get(r);
-            if ("true".equals(value)) {
-                // ignore deleted revisions
-                continue;
-            }
-            Revision propRev = Revision.fromString(r);
-            if (deletedRev != null && isRevisionNewer(deletedRev, propRev)) {
-                // the node was deleted later on
-                continue;
-            }
-            if (isRevisionNewer(propRev, maxRev)
-                    || !isValidRevision(propRev, maxRev, nodeMap, validRevisions)) {
-                continue;
-            }
-            if (liveRev == null || isRevisionNewer(liveRev, propRev)) {
-                liveRev = propRev;
-            }
-        }
-        return liveRev;
-    }
-    
-    /**
-     * Get the revision of the latest change made to this node.
-     * 
-     * @param nodeMap the document
-     * @param changeRev the revision of the current change
-     * @param handler the conflict handler, which is called for concurrent changes
-     *                preceding <code>before</code>.
-     * @return the revision, or null if deleted
-     */
-    @SuppressWarnings("unchecked")
-    @Nullable Revision getNewestRevision(Map<String, Object> nodeMap,
-                                         Revision changeRev, CollisionHandler handler) {
-        if (nodeMap == null) {
-            return null;
-        }
-        SortedSet<String> revisions = new TreeSet<String>(Collections.reverseOrder());
-        if (nodeMap.containsKey(UpdateOp.REVISIONS)) {
-            revisions.addAll(((Map<String, String>) nodeMap.get(UpdateOp.REVISIONS)).keySet());
-        }
-        if (nodeMap.containsKey(UpdateOp.COMMIT_ROOT)) {
-            revisions.addAll(((Map<String, Integer>) nodeMap.get(UpdateOp.COMMIT_ROOT)).keySet());
-        }
-        Map<String, String> deletedMap = (Map<String, String>) nodeMap
-                .get(UpdateOp.DELETED);
-        if (deletedMap != null) {
-            revisions.addAll(deletedMap.keySet());
-        }
-        Revision newestRev = null;
-        for (String r : revisions) {
-            Revision propRev = Revision.fromString(r);
-            if (isRevisionNewer(propRev, changeRev)) {
-                // we have seen a previous change from another cluster node
-                // (which might be conflicting or not) - we need to make
-                // sure this change is visible from now on
-                // TODO verify this is really needed
-                publishRevision(propRev, changeRev);
-            }
-            if (newestRev == null || isRevisionNewer(propRev, newestRev)) {
-                if (!propRev.equals(changeRev)) {
-                    if (!isValidRevision(
-                            propRev, changeRev, nodeMap, new HashSet<Revision>())) {
-                        handler.concurrentModification(propRev);
-                    } else {
-                        newestRev = propRev;
-                    }
-                }
-            }
-        }
-        if (newestRev == null) {
-            return null;
-        }
-        if (deletedMap != null) {
-            String value = deletedMap.get(newestRev.toString());
-            if ("true".equals(value)) {
-                // deleted in the newest revision
-                return null;
-            }
-        }
-        return newestRev;
-    }
-    
-    /**
-     * Ensure the revision visible from now on, possibly by updating the head
-     * revision, so that the changes that occurred are visible.
-     * 
-     * @param foreignRevision the revision from another cluster node
-     * @param changeRevision the local revision that is sorted after the foreign revision
-     */
-    private void publishRevision(Revision foreignRevision, Revision changeRevision) {  
-        if (revisionComparator.compare(headRevision, foreignRevision) >= 0) {
-            // already visible
-            return;
-        }
-        int clusterNodeId = foreignRevision.getClusterId();
-        if (clusterNodeId == this.clusterId) {
-            return;
-        }
-        // the (old) head occurred first
-        Revision headSeen = Revision.newRevision(0);
-        // then we saw this new revision (from another cluster node) 
-        Revision otherSeen = Revision.newRevision(0);
-        // and after that, the current change
-        Revision changeSeen = Revision.newRevision(0);
-        revisionComparator.add(foreignRevision, otherSeen);
-        // TODO invalidating the whole cache is not really needed,
-        // but how to ensure we invalidate the right part of the cache?
-        // possibly simply wait for the background thread to pick
-        // up the changes, but this depends on how often this method is called
-        store.invalidateCache();
-        // the latest revisions of the current cluster node
-        // happened before the latest revisions of other cluster nodes
-        revisionComparator.add(headRevision, headSeen);
-        revisionComparator.add(changeRevision, changeSeen);
-        // the head revision is after other revisions
-        headRevision = Revision.newRevision(clusterId);
-    }
-    
     private static String stripBranchRevMarker(String revisionId) {
         if (revisionId.startsWith("b")) {
             return revisionId.substring(1);
@@ -1426,17 +1082,17 @@ public class MongoMK implements MicroKernel {
 
         String revisionId = stripBranchRevMarker(branchRevisionId);
         // make branch commits visible
-        UpdateOp op = new UpdateOp("/", Utils.getIdFromPath("/"), false);
+        UpdateOp op = new UpdateOp(Utils.getIdFromPath("/"), false);
         Revision revision = Revision.fromString(revisionId);
         Branch b = branches.getBranch(revision);
         Revision mergeCommit = newRevision();
-        Commit.setModified(op, mergeCommit);
+        NodeDocument.setModified(op, mergeCommit);
         if (b != null) {
             for (Revision rev : b.getCommits()) {
-                op.setMapEntry(UpdateOp.REVISIONS, rev.toString(), "c-" + mergeCommit.toString());
-                op.containsMapEntry(UpdateOp.COLLISIONS, rev.toString(), false);
+                NodeDocument.setRevision(op, rev, "c-" + mergeCommit.toString());
+                op.containsMapEntry(NodeDocument.COLLISIONS, rev.toString(), false);
             }
-            if (store.findAndUpdate(DocumentStore.Collection.NODES, op) != null) {
+            if (store.findAndUpdate(Collection.NODES, op) != null) {
                 // remove from branchCommits map after successful update
                 b.applyTo(unsavedLastRevisions, mergeCommit);
                 branches.remove(b);
@@ -1600,10 +1256,6 @@ public class MongoMK implements MicroKernel {
         stopBackground = true;
     }
     
-    RevisionComparator getRevisionComparator() {
-        return revisionComparator;
-    }
-    
     /**
      * A background thread.
      */
@@ -1671,6 +1323,7 @@ public class MongoMK implements MicroKernel {
         private long diffCacheSize;
         private long documentCacheSize;
         private boolean useSimpleRevision;
+        private long splitDocumentAgeMillis = 5 * 60 * 1000;
 
         public Builder() {
             memoryCacheSize(DEFAULT_MEMORY_CACHE_SIZE);
@@ -1813,6 +1466,15 @@ public class MongoMK implements MicroKernel {
 
         public boolean isUseSimpleRevision() {
             return useSimpleRevision;
+        }
+        
+        public Builder setSplitDocumentAgeMillis(long splitDocumentAgeMillis) {
+            this.splitDocumentAgeMillis = splitDocumentAgeMillis;
+            return this;
+        }
+        
+        public long getSplitDocumentAgeMillis() {
+            return splitDocumentAgeMillis;
         }
 
         /**

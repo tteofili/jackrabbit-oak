@@ -74,7 +74,7 @@ public class PropertyImpl extends ItemImpl<PropertyDelegate> implements Property
                 if (parent == null) {
                     throw new AccessDeniedException();
                 } else {
-                    return sessionContext.createNodeOrNull(parent);
+                    return NodeImpl.createNode(parent, sessionContext);
                 }
             }
         });
@@ -386,7 +386,7 @@ public class PropertyImpl extends ItemImpl<PropertyDelegate> implements Property
         return perform(new PropertyOperation<PropertyDefinition>(dlg) {
             @Override
             public PropertyDefinition perform() throws RepositoryException {
-                return getDefinitionProvider().getDefinition(
+                return getNodeTypeManager().getDefinition(
                         property.getParent().getTree(),
                         property.getPropertyState(), true);
             }

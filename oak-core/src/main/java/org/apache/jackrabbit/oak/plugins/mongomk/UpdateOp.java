@@ -21,61 +21,10 @@ import java.util.Map.Entry;
 import java.util.TreeMap;
 
 /**
- * A MongoDB "update" operation for one node.
+ * A MongoDB "update" operation for one document.
  */
 public class UpdateOp {
-    
-    /**
-     * The node id, which contains the depth of the path
-     * (0 for root, 1 for children of the root), and then the path.
-     */
-    static final String ID = "_id";
-    
-    /**
-     * The last revision. Key: machine id, value: revision.
-     */
-    static final String LAST_REV = "_lastRev";
-    
-    /**
-     * The list of recent revisions for this node, where this node is the
-     * root of the commit. Key: revision, value: true or the base revision of an
-     * un-merged branch commit.
-     */
-    static final String REVISIONS = "_revisions";
 
-    /**
-     * The list of revision to root commit depth mappings to find out if a
-     * revision is actually committed.
-     */
-    static final String COMMIT_ROOT = "_commitRoot";
-
-    /**
-     * The number of previous documents (documents that contain old revisions of
-     * this node). This property is only set if multiple documents per node
-     * exist. This is the case when a node is updated very often in a short
-     * time, such that the document gets very big.
-     */
-    static final String PREVIOUS = "_prev";
-    
-    /**
-     * Whether this node is deleted. Key: revision, value: true/false.
-     */
-    static final String DELETED = "_deleted";
-
-    /**
-     * Revision collision markers set by commits with modifications, which
-     * overlap with un-merged branch commits.
-     * Key: revision, value:
-     */
-    static final String COLLISIONS = "_collisions";
-
-    /**
-     * The modified time (5 second resolution).
-     */
-    static final String MODIFIED = "_modified";
-    
-    final String path;
-    
     final String key;
     
     final boolean isNew;
@@ -86,19 +35,13 @@ public class UpdateOp {
     /**
      * Create an update operation for the given document. The commit root is assumed
      * to be the path, unless this is changed later on.
-     * 
-     * @param path the node path (for nodes)
+     *
      * @param key the primary key
      * @param isNew whether this is a new document
      */
-    UpdateOp(String path, String key, boolean isNew) {
-        this.path = path;
+    UpdateOp(String key, boolean isNew) {
         this.key = key;
         this.isNew = isNew;
-    }
-    
-    String getPath() {
-        return path;
     }
     
     String getKey() {
@@ -231,7 +174,7 @@ public class UpdateOp {
     }
     
     public UpdateOp getReverseOperation() {
-        UpdateOp reverse = new UpdateOp(path, key, isNew);
+        UpdateOp reverse = new UpdateOp(key, isNew);
         for (Entry<String, Operation> e : changes.entrySet()) {
             Operation r = e.getValue().getReverse();
             if (r != null) {

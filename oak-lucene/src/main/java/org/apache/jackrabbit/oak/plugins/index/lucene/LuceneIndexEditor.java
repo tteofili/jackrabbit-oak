@@ -34,10 +34,10 @@ import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.plugins.index.IndexEditor;
-import org.apache.jackrabbit.oak.plugins.index.lucene.aggregation.AggregatedState;
 import org.apache.jackrabbit.oak.spi.commit.Editor;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
+import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.search.PrefixQuery;
@@ -71,11 +71,11 @@ public class LuceneIndexEditor implements IndexEditor {
 
     private boolean propertiesChanged = false;
 
-    LuceneIndexEditor(NodeBuilder definition) throws CommitFailedException {
+    LuceneIndexEditor(NodeBuilder definition, Analyzer analyzer) throws CommitFailedException {
         this.parent = null;
         this.name = null;
         this.path = "/";
-        this.context = new LuceneIndexEditorContext(definition);
+        this.context = new LuceneIndexEditorContext(definition, analyzer);
     }
 
     private LuceneIndexEditor(LuceneIndexEditor parent, String name) {
@@ -187,22 +187,6 @@ public class LuceneIndexEditor implements IndexEditor {
                     for (String value : property.getValue(Type.STRINGS)) {
                         document.add(newPropertyField(pname, value));
                         document.add(newFulltextField(value));
-                    }
-                }
-            }
-        }
-
-        for (AggregatedState agg : context.getAggregator().getAggregates(state)) {
-            for (PropertyState property : agg.getProperties()) {
-                String pname = property.getName();
-                if (isVisible(pname)
-                        && (context.getPropertyTypes() & (1 << property.getType().tag())) != 0) {
-                    if (Type.BINARY.tag() == property.getType().tag()) {
-                        addBinaryValue(document, property, agg.get());
-                    } else {
-                        for (String v : property.getValue(Type.STRINGS)) {
-                            document.add(newFulltextField(v));
-                        }
                     }
                 }
             }

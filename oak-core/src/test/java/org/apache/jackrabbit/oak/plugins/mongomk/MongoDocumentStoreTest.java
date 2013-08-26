@@ -16,7 +16,6 @@
  */
 package org.apache.jackrabbit.oak.plugins.mongomk;
 
-import static org.apache.jackrabbit.oak.plugins.mongomk.DocumentStore.Collection;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
@@ -78,26 +77,26 @@ public class MongoDocumentStoreTest {
     public void addGetAndRemove() throws Exception {
         DocumentStore docStore = openDocumentStore();
 
-        UpdateOp updateOp = new UpdateOp("/", "/", true);
+        UpdateOp updateOp = new UpdateOp("/", true);
         updateOp.setMapEntry("property1", "key1", "value1");
         updateOp.increment("property2", 1);
         updateOp.set("property3", "value3");
         docStore.createOrUpdate(Collection.NODES, updateOp);
-        Map<String, Object> obj = docStore.find(Collection.NODES, "/");
+        NodeDocument doc = docStore.find(Collection.NODES, "/");
 
-        Map<?, ?> property1 = (Map<?, ?>) obj.get("property1");
+        Map<?, ?> property1 = (Map<?, ?>) doc.get("property1");
         String value1 = (String) property1.get("key1");
         assertEquals("value1", value1);
 
-        Long value2 = (Long) obj.get("property2");
+        Long value2 = (Long) doc.get("property2");
         assertEquals(Long.valueOf(1), value2);
 
-        String value3 = (String) obj.get("property3");
+        String value3 = (String) doc.get("property3");
         assertEquals("value3", value3);
 
         docStore.remove(Collection.NODES, "/");
-        obj = docStore.find(Collection.NODES, "/");
-        assertTrue(obj == null);
+        doc = docStore.find(Collection.NODES, "/");
+        assertTrue(doc == null);
     }
 
     @Test
@@ -107,8 +106,8 @@ public class MongoDocumentStoreTest {
         List<UpdateOp> updateOps = new ArrayList<UpdateOp>();
         for (int i = 0; i < nUpdates; i++) {
             String path = "/node" + i;
-            UpdateOp updateOp = new UpdateOp(path, path, true);
-            updateOp.set(UpdateOp.ID, "/node" + i);
+            UpdateOp updateOp = new UpdateOp(path, true);
+            updateOp.set(Document.ID, "/node" + i);
             updateOp.setMapEntry("property1", "key1", "value1");
             updateOp.increment("property2", 1);
             updateOp.set("property3", "value3");
@@ -145,28 +144,28 @@ public class MongoDocumentStoreTest {
     @Test
     public void containsMapEntry() {
         DocumentStore docStore = openDocumentStore();
-        UpdateOp op = new UpdateOp("/node", "/node", true);
+        UpdateOp op = new UpdateOp("/node", true);
         op.setMapEntry("map", "key", "value");
         docStore.createOrUpdate(Collection.NODES, op);
 
-        op = new UpdateOp("/node", "/node", false);
+        op = new UpdateOp("/node", false);
         op.set("prop", "value");
         op.containsMapEntry("map", "unknown-key", true);
         // update if unknown-key exists -> must not succeed
         assertNull(docStore.findAndUpdate(Collection.NODES, op));
 
-        op = new UpdateOp("/node", "/node", false);
+        op = new UpdateOp("/node", false);
         op.set("prop", "value");
         op.containsMapEntry("map", "key", true);
         // update if key exists -> must succeed
-        Map<String, Object> doc = docStore.findAndUpdate(Collection.NODES, op);
+        NodeDocument doc = docStore.findAndUpdate(Collection.NODES, op);
         assertNotNull(doc);
 
         doc = docStore.find(Collection.NODES, "/node");
-        assertTrue(doc.containsKey("prop"));
+        assertNotNull(doc.get("prop"));
         assertEquals("value", doc.get("prop"));
 
-        op = new UpdateOp("/node", "/node", false);
+        op = new UpdateOp("/node", false);
         op.set("prop", "other");
         op.containsMapEntry("map", "key", false);
         // update if key does not exist -> must not succeed
@@ -174,7 +173,7 @@ public class MongoDocumentStoreTest {
 
         // value must still be the same
         doc = docStore.find(Collection.NODES, "/node");
-        assertTrue(doc.containsKey("prop"));
+        assertNotNull(doc.get("prop"));
         assertEquals("value", doc.get("prop"));
     }
 
@@ -188,7 +187,7 @@ public class MongoDocumentStoreTest {
             inserts.add(n.asOperation(true));
         }
         docStore.create(Collection.NODES, inserts);
-        List<Map<String, Object>> docs = docStore.query(Collection.NODES,
+        List<NodeDocument> docs = docStore.query(Collection.NODES,
                 Utils.getKeyLowerLimit("/"),  Utils.getKeyUpperLimit("/"),
                 MongoMK.MANY_CHILDREN_THRESHOLD);
         assertEquals(MongoMK.MANY_CHILDREN_THRESHOLD, docs.size());
@@ -267,7 +266,7 @@ public class MongoDocumentStoreTest {
         private void addNodes() {
             for (int i = 0; i < nNodes; i++) {
                 String path = "/" + nodeName + i;
-                UpdateOp updateOp = new UpdateOp(path, path, true);
+                UpdateOp updateOp = new UpdateOp(path, true);
                 updateOp.setMapEntry("property1", "key1", "value1");
                 updateOp.set("property3", "value3");
                 docStore.createOrUpdate(Collection.NODES, updateOp);
@@ -277,7 +276,7 @@ public class MongoDocumentStoreTest {
         private void updateNodes() {
             for (int i = 0; i < nNodes; i++) {
                 String path = "/" + nodeName + i;
-                UpdateOp updateOp = new UpdateOp(path, path, false);
+                UpdateOp updateOp = new UpdateOp(path, false);
                 updateOp.setMapEntry("property1", "key2", "value2");
                 updateOp.set("property4", "value4");
                 docStore.createOrUpdate(Collection.NODES, updateOp);

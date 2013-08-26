@@ -17,7 +17,6 @@
 package org.apache.jackrabbit.oak.plugins.mongomk;
 
 import java.util.List;
-import java.util.Map;
 
 import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
@@ -30,73 +29,34 @@ import org.apache.jackrabbit.mk.api.MicroKernelException;
 public interface DocumentStore {
 
     /**
-     * The list of collections.
-     */
-    enum Collection { 
-        
-        /**
-         * The 'nodes' collection. It contains all the node data, with one document
-         * per node, and the path as the primary key. Each document possibly
-         * contains multiple revisions.
-         * <p>
-         * Key: the path, value: the node data (possibly multiple revisions)
-         * <p>
-         * Old revisions are removed after some time, either by the process that
-         * removed or updated the node, lazily when reading, or in a background
-         * process.
-         */
-        NODES("nodes"), 
-        
-        /**
-         * The 'clusterNodes' collection contains the list of currently running
-         * cluster nodes. The key is the clusterNodeId (0, 1, 2,...).
-         */
-        CLUSTER_NODES("clusterNodes");
-            
-        final String name;
-        
-        Collection(String name) {
-            this.name = name;
-        }
-        
-        @Override
-        public String toString() {
-            return name;
-        }
-        
-    }
-
-    /**
      * Get a document.
      * <p>
-     * The returned map is a clone (the caller can modify it without affecting
-     * the stored version).
+     * The returned document is immutable.
      * 
      * @param collection the collection
      * @param key the key
-     * @return the map, or null if not found
+     * @return the document, or null if not found
      */
     @CheckForNull
-    Map<String, Object> find(Collection collection, String key);
+    <T extends Document> T find(Collection<T> collection, String key);
     
     /**
      * Get a document, ignoring the cache if the cached entry is older than the
      * specified time.
      * <p>
-     * The returned map is a clone (the caller can modify it without affecting
-     * the stored version).
+     * The returned document is immutable.
      * 
      * @param collection the collection
      * @param key the key
      * @param maxCacheAge the maximum age of the cached document
-     * @return the map, or null if not found
+     * @return the document, or null if not found
      */
     @CheckForNull
-    Map<String, Object> find(Collection collection, String key, int maxCacheAge);
+    <T extends Document> T find(Collection<T> collection, String key, int maxCacheAge);
 
     /**
      * Get a list of documents where the key is greater than a start value and
-     * less than an end value.
+     * less than an end value. The returned documents are immutable.
      * 
      * @param collection the collection
      * @param fromKey the start value (excluding)
@@ -105,12 +65,14 @@ public interface DocumentStore {
      * @return the list (possibly empty)
      */
     @Nonnull
-    List<Map<String, Object>> query(Collection collection, String fromKey, 
-            String toKey, int limit);
+    <T extends Document> List<T> query(Collection<T> collection,
+                                       String fromKey,
+                                       String toKey,
+                                       int limit);
     
     /**
      * Get a list of documents where the key is greater than a start value and
-     * less than an end value.
+     * less than an end value. The returned documents are immutable.
      * 
      * @param collection the collection
      * @param fromKey the start value (excluding)
@@ -121,8 +83,12 @@ public interface DocumentStore {
      * @return the list (possibly empty)
      */
     @Nonnull
-    List<Map<String, Object>> query(Collection collection, String fromKey,
-            String toKey, String indexedProperty, long startValue, int limit);
+    <T extends Document> List<T> query(Collection<T> collection,
+                                       String fromKey,
+                                       String toKey,
+                                       String indexedProperty,
+                                       long startValue,
+                                       int limit);
 
     /**
      * Remove a document.
@@ -130,7 +96,7 @@ public interface DocumentStore {
      * @param collection the collection
      * @param key the key
      */
-    void remove(Collection collection, String key);
+    <T extends Document> void remove(Collection<T> collection, String key);
 
     /**
      * Try to create a list of documents.
@@ -139,25 +105,26 @@ public interface DocumentStore {
      * @param updateOps the list of documents to add
      * @return true if this worked (if none of the documents already existed)
      */
-    boolean create(Collection collection, List<UpdateOp> updateOps);
+    <T extends Document> boolean create(Collection<T> collection, List<UpdateOp> updateOps);
     
     /**
      * Create or update a document. For MongoDb, this is using "findAndModify" with
-     * the "upsert" flag (insert or update).
+     * the "upsert" flag (insert or update). The returned document is immutable.
      *
      * @param collection the collection
      * @param update the update operation
-     * @return the old document
+     * @return the old document or <code>null</code> if it didn't exist before.
      * @throws MicroKernelException if the operation failed.
      */    
-    @Nonnull
-    Map<String, Object> createOrUpdate(Collection collection, UpdateOp update)
+    @CheckForNull
+    <T extends Document> T createOrUpdate(Collection<T> collection, UpdateOp update)
             throws MicroKernelException;
 
     /**
      * Performs a conditional update (e.g. using
      * {@link UpdateOp.Operation.Type#CONTAINS_MAP_ENTRY} and only updates the
-     * document if the condition is <code>true</code>.
+     * document if the condition is <code>true</code>. The returned document is
+     * immutable.
      *
      * @param collection the collection
      * @param update the update operation with the condition
@@ -165,7 +132,7 @@ public interface DocumentStore {
      * @throws MicroKernelException if the operation failed.
      */
     @CheckForNull
-    Map<String, Object> findAndUpdate(Collection collection, UpdateOp update)
+    <T extends Document> T findAndUpdate(Collection<T> collection, UpdateOp update)
             throws MicroKernelException;
 
     /**
@@ -179,7 +146,7 @@ public interface DocumentStore {
      * @param collection the collection
      * @param key the key
      */
-    void invalidateCache(Collection collection, String key);
+    <T extends Document> void invalidateCache(Collection<T> collection, String key);
 
     /**
      * Dispose this instance.
@@ -193,6 +160,6 @@ public interface DocumentStore {
      * @param key the key
      * @return true if yes
      */
-    boolean isCached(Collection collection, String key);
+    <T extends Document> boolean isCached(Collection<T> collection, String key);
 
 }

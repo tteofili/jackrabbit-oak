@@ -16,13 +16,14 @@
  */
 package org.apache.jackrabbit.oak.spi.security.authorization.restriction;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import javax.annotation.Nonnull;
-import javax.jcr.AccessDeniedException;
+import javax.annotation.Nullable;
 import javax.jcr.NamespaceRegistry;
 import javax.jcr.PropertyType;
 import javax.jcr.RepositoryException;
@@ -36,7 +37,7 @@ import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.plugins.memory.PropertyStates;
-import org.apache.jackrabbit.oak.spi.security.authorization.AccessControlConstants;
+import org.apache.jackrabbit.oak.spi.security.authorization.accesscontrol.AccessControlConstants;
 import org.apache.jackrabbit.oak.util.NodeUtil;
 import org.apache.jackrabbit.util.Text;
 
@@ -61,13 +62,7 @@ public abstract class AbstractRestrictionProvider implements RestrictionProvider
 
     @Override
     public Restriction createRestriction(String oakPath, String oakName, Value value) throws RepositoryException {
-        if (isUnsupportedPath(oakPath)) {
-            throw new AccessControlException("Unsupported restriction at " + oakPath);
-        }
-        RestrictionDefinition definition = supported.get(oakName);
-        if (definition == null) {
-            throw new AccessControlException("Unsupported restriction: " + oakName);
-        }
+        RestrictionDefinition definition = getDefinition(oakPath, oakName);
         Type<?> requiredType = definition.getRequiredType();
         int tag = requiredType.tag();
         if (tag != PropertyType.UNDEFINED && tag != value.getType()) {
@@ -84,13 +79,7 @@ public abstract class AbstractRestrictionProvider implements RestrictionProvider
 
     @Override
     public Restriction createRestriction(String oakPath, String oakName, Value... values) throws RepositoryException {
-        if (isUnsupportedPath(oakPath)) {
-            throw new AccessControlException("Unsupported restriction at " + oakPath);
-        }
-        RestrictionDefinition definition = supported.get(oakName);
-        if (definition == null) {
-            throw new AccessControlException("Unsupported restriction: " + oakName);
-        }
+        RestrictionDefinition definition = getDefinition(oakPath, oakName);
         Type<?> requiredType = definition.getRequiredType();
         for (Value v : values) {
             if (requiredType.tag() != PropertyType.UNDEFINED && requiredType.tag() != v.getType()) {
@@ -100,7 +89,7 @@ public abstract class AbstractRestrictionProvider implements RestrictionProvider
 
         PropertyState propertyState;
         if (requiredType.isArray()) {
-            propertyState = PropertyStates.createProperty(oakName, ImmutableList.of(values));
+            propertyState = PropertyStates.createProperty(oakName, Arrays.asList(values), requiredType.tag());
         } else {
             if (values.length != 1) {
                 throw new AccessControlException("Unsupported restriction: Expected single value.");
@@ -130,7 +119,7 @@ public abstract class AbstractRestrictionProvider implements RestrictionProvider
     }
 
     @Override
-    public void writeRestrictions(String oakPath, Tree aceTree, Set<Restriction> restrictions) throws AccessDeniedException {
+    public void writeRestrictions(String oakPath, Tree aceTree, Set<Restriction> restrictions) throws RepositoryException {
         // validation of the restrictions is delegated to the commit hook
         // see #validateRestrictions below
         if (!restrictions.isEmpty()) {
@@ -145,28 +134,45 @@ public abstract class AbstractRestrictionProvider implements RestrictionProvider
     @Override
     public void validateRestrictions(String oakPath, Tree aceTree) throws AccessControlException {
         Map<String, PropertyState> restrictionProperties = getRestrictionProperties(aceTree);
-        if (isUnsupportedPath(oakPath) && !restrictionProperties.isEmpty()) {
-            throw new AccessControlException("Restrictions not supported with 'null' path.");
-        }
-        for (Map.Entry<String, PropertyState> entry : restrictionProperties.entrySet()) {
-            String restrName = entry.getKey();
-            RestrictionDefinition def = supported.get(restrName);
-            if (def == null) {
-                throw new AccessControlException("Unsupported restriction: " + restrName);
+        if (isUnsupportedPath(oakPath)) {
+            if (!restrictionProperties.isEmpty()) {
+                throw new AccessControlException("Restrictions not supported with 'null' path.");
             }
-            Type<?> type = entry.getValue().getType();
-            if (type != def.getRequiredType()) {
-                throw new AccessControlException("Invalid restriction type '" + type + "'. Expected " + def.getRequiredType());
+        } else {
+            // supported path -> validate restrictions and test if mandatory
+            // restrictions are present.
+            for (Map.Entry<String, PropertyState> entry : restrictionProperties.entrySet()) {
+                String restrName = entry.getKey();
+                RestrictionDefinition def = supported.get(restrName);
+                if (def == null) {
+                    throw new AccessControlException("Unsupported restriction: " + restrName);
+                }
+                Type<?> type = entry.getValue().getType();
+                if (type != def.getRequiredType()) {
+                    throw new AccessControlException("Invalid restriction type '" + type + "'. Expected " + def.getRequiredType());
+                }
             }
-        }
-        for (RestrictionDefinition def : supported.values()) {
-            if (def.isMandatory() && !restrictionProperties.containsKey(def.getName())) {
-                throw new AccessControlException("Mandatory restriction " + def.getName() + " is missing.");
+            for (RestrictionDefinition def : supported.values()) {
+                if (def.isMandatory() && !restrictionProperties.containsKey(def.getName())) {
+                    throw new AccessControlException("Mandatory restriction " + def.getName() + " is missing.");
+                }
             }
         }
     }
 
     //------------------------------------------------------------< private >---
+    @Nonnull
+    private RestrictionDefinition getDefinition(@Nullable String oakPath, @Nonnull String oakName) throws AccessControlException {
+        if (isUnsupportedPath(oakPath)) {
+            throw new AccessControlException("Unsupported restriction at " + oakPath);
+        }
+        RestrictionDefinition definition = supported.get(oakName);
+        if (definition == null) {
+            throw new AccessControlException("Unsupported restriction: " + oakName);
+        }
+        return definition;
+    }
+
     @Nonnull
     private Restriction createRestriction(PropertyState propertyState, RestrictionDefinition definition) {
         return new RestrictionImpl(propertyState, definition.isMandatory());

@@ -22,6 +22,9 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.concurrent.ConcurrentNavigableMap;
 import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
@@ -39,69 +42,97 @@ public class MemoryDocumentStore implements DocumentStore {
     /**
      * The 'nodes' collection.
      */
-    private ConcurrentSkipListMap<String, Map<String, Object>> nodes =
-            new ConcurrentSkipListMap<String, Map<String, Object>>();
+    private ConcurrentSkipListMap<String, NodeDocument> nodes =
+            new ConcurrentSkipListMap<String, NodeDocument>();
     
     /**
      * The 'clusterNodes' collection.
      */
-    private ConcurrentSkipListMap<String, Map<String, Object>> clusterNodes =
-            new ConcurrentSkipListMap<String, Map<String, Object>>();
+    private ConcurrentSkipListMap<String, Document> clusterNodes =
+            new ConcurrentSkipListMap<String, Document>();
+
+    private final ReadWriteLock rwLock = new ReentrantReadWriteLock();
 
     @Override
-    public Map<String, Object> find(Collection collection, String key, int maxCacheAge) {
+    public <T extends Document> T find(Collection<T> collection, String key, int maxCacheAge) {
         return find(collection, key);
     }
     
     @Override
-    public Map<String, Object> find(Collection collection, String key) {
-        ConcurrentSkipListMap<String, Map<String, Object>> map = getMap(collection);
-        Map<String, Object> n = map.get(key);
-        if (n == null) {
-            return null;
+    public <T extends Document> T find(Collection<T> collection, String key) {
+        Lock lock = rwLock.readLock();
+        lock.lock();
+        try {
+            ConcurrentSkipListMap<String, T> map = getMap(collection);
+            return map.get(key);
+        } finally {
+            lock.unlock();
         }
-        Map<String, Object> copy = Utils.newMap();
-        synchronized (n) {
-            Utils.deepCopyMap(n, copy);
-        }
-        return copy;
     }
     
     @Override
     @Nonnull
-    public List<Map<String, Object>> query(Collection collection, String fromKey, String toKey, int limit) {
+    public <T extends Document> List<T> query(Collection<T> collection,
+                                String fromKey,
+                                String toKey,
+                                int limit) {
         return query(collection, fromKey, toKey, null, 0, limit);
     }
     
     @Override
     @Nonnull
-    public List<Map<String, Object>> query(Collection collection, String fromKey,
-            String toKey, String indexedProperty, long startValue, int limit) {
-        ConcurrentSkipListMap<String, Map<String, Object>> map = getMap(collection);
-        ConcurrentNavigableMap<String, Map<String, Object>> sub = map.subMap(fromKey, toKey);
-        ArrayList<Map<String, Object>> list = new ArrayList<Map<String, Object>>();
-        for (Map<String, Object> n : sub.values()) {
-            if (indexedProperty != null) {
-                Long value = (Long) n.get(indexedProperty);
-                if (value < startValue) {
-                    continue;
+    public <T extends Document> List<T> query(Collection<T> collection,
+                                String fromKey,
+                                String toKey,
+                                String indexedProperty,
+                                long startValue,
+                                int limit) {
+        Lock lock = rwLock.readLock();
+        lock.lock();
+        try {
+            ConcurrentSkipListMap<String, T> map = getMap(collection);
+            ConcurrentNavigableMap<String, T> sub = map.subMap(fromKey, toKey);
+            ArrayList<T> list = new ArrayList<T>();
+            for (T doc : sub.values()) {
+                if (indexedProperty != null) {
+                    Long value = (Long) doc.get(indexedProperty);
+                    if (value < startValue) {
+                        continue;
+                    }
+                }
+                list.add(doc);
+                if (list.size() >= limit) {
+                    break;
                 }
             }
-            Map<String, Object> copy = Utils.newMap();
-            synchronized (n) {
-                Utils.deepCopyMap(n, copy);
-            }
-            list.add(copy);
-            if (list.size() >= limit) {
-                break;
-            }
+            return list;
+        } finally {
+            lock.unlock();
         }
-        return list;
     }
 
     @Override
     public void remove(Collection collection, String path) {
-        getMap(collection).remove(path);
+        Lock lock = rwLock.writeLock();
+        lock.lock();
+        try {
+            getMap(collection).remove(path);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    @CheckForNull
+    @Override
+    public <T extends Document> T createOrUpdate(Collection<T> collection, UpdateOp update)
+            throws MicroKernelException {
+        return internalCreateOrUpdate(collection, update, false);
+    }
+
+    @Override
+    public <T extends Document> T findAndUpdate(Collection<T> collection, UpdateOp update)
+            throws MicroKernelException {
+        return internalCreateOrUpdate(collection, update, true);
     }
 
     /**
@@ -110,82 +141,60 @@ public class MemoryDocumentStore implements DocumentStore {
      * @param collection the collection
      * @return the map
      */
-    private ConcurrentSkipListMap<String, Map<String, Object>> getMap(Collection collection) {
-        switch (collection) {
-        case NODES:
-            return nodes;
-        case CLUSTER_NODES:
-            return clusterNodes;
-        default:
-            throw new IllegalArgumentException(collection.name());
+    @SuppressWarnings("unchecked")
+    private <T extends Document> ConcurrentSkipListMap<String, T> getMap(Collection<T> collection) {
+        if (collection == Collection.NODES) {
+            return (ConcurrentSkipListMap<String, T>) nodes;
+        } else if (collection == Collection.CLUSTER_NODES) {
+            return (ConcurrentSkipListMap<String, T>) clusterNodes;
+        } else {
+            throw new IllegalArgumentException(
+                    "Unknown collection: " + collection.toString());
         }
     }
 
     @CheckForNull
-    private Map<String, Object> internalCreateOrUpdate(Collection collection,
-                                                       UpdateOp update,
-                                                       boolean checkConditions) {
-        ConcurrentSkipListMap<String, Map<String, Object>> map = getMap(collection);
-        Map<String, Object> n;
-        Map<String, Object> oldNode;
+    private <T extends Document> T internalCreateOrUpdate(Collection<T> collection,
+                                                          UpdateOp update,
+                                                          boolean checkConditions) {
+        ConcurrentSkipListMap<String, T> map = getMap(collection);
+        T oldDoc;
 
-        // get the node if it's there
-        oldNode = n = map.get(update.key);
+        Lock lock = rwLock.writeLock();
+        lock.lock();
+        try {
+            // get the node if it's there
+            oldDoc = map.get(update.key);
 
-        if (n == null) {
-            if (!update.isNew) {
-                throw new MicroKernelException("Document does not exist: " + update.key);
+            T doc = collection.newDocument();
+            if (oldDoc == null) {
+                if (!update.isNew) {
+                    throw new MicroKernelException("Document does not exist: " + update.key);
+                }
+            } else {
+                oldDoc.deepCopy(doc);
             }
-            // for a new node, add it (without synchronization)
-            n = Utils.newMap();
-            oldNode = map.putIfAbsent(update.key, n);
-            if (oldNode != null) {
-                // somebody else added it at the same time
-                n = oldNode;
-            }
-        }
-        synchronized (n) {
-            if (checkConditions && !checkConditions(n, update)) {
+            if (checkConditions && !checkConditions(doc, update)) {
                 return null;
             }
-            if (oldNode != null) {
-                // clone the old node
-                // (document level operations are synchronized)
-                Map<String, Object> oldNode2 = Utils.newMap();
-                Utils.deepCopyMap(oldNode, oldNode2);
-                oldNode = oldNode2;
-            }
-            // to return the new document:
             // update the document
-            // (document level operations are synchronized)
-            applyChanges(n, update);
+            applyChanges(doc, update);
+            doc.seal();
+            map.put(update.key, doc);
+            return oldDoc;
+        } finally {
+            lock.unlock();
         }
-        return oldNode;
     }
 
-    @Nonnull
-    @Override
-    public Map<String, Object> createOrUpdate(Collection collection,
-                                              UpdateOp update)
-            throws MicroKernelException {
-        return internalCreateOrUpdate(collection, update, false);
-    }
-
-    @Override
-    public Map<String, Object> findAndUpdate(Collection collection,
-                                             UpdateOp update)
-            throws MicroKernelException {
-        return internalCreateOrUpdate(collection, update, true);
-    }
-
-    private static boolean checkConditions(Map<String, Object> target,
+    private static boolean checkConditions(Document doc,
                                            UpdateOp update) {
         for (Map.Entry<String, Operation> change : update.changes.entrySet()) {
             Operation op = change.getValue();
             if (op.type == Operation.Type.CONTAINS_MAP_ENTRY) {
                 String k = change.getKey();
                 String[] kv = k.split("\\.");
-                Object value = target.get(kv[0]);
+                Object value = doc.get(kv[0]);
                 if (value == null) {
                     if (Boolean.TRUE.equals(op.value)) {
                         return false;
@@ -213,44 +222,44 @@ public class MemoryDocumentStore implements DocumentStore {
 
 
     /**
-     * Apply the changes to the in-memory map.
+     * Apply the changes to the in-memory document.
      * 
-     * @param target the target map
+     * @param doc the target document.
      * @param update the changes to apply
      */
-    public static void applyChanges(Map<String, Object> target, UpdateOp update) {
+    public static void applyChanges(Document doc, UpdateOp update) {
         for (Entry<String, Operation> e : update.changes.entrySet()) {
             String k = e.getKey();
             Operation op = e.getValue();
             switch (op.type) {
             case SET: {
-                target.put(k, op.value);
+                doc.put(k, op.value);
                 break;
             }
             case INCREMENT: {
-                Object old = target.get(k);
+                Object old = doc.get(k);
                 Long x = (Long) op.value;
                 if (old == null) {
                     old = 0L;
                 }
-                target.put(k, ((Long) old) + x);
+                doc.put(k, ((Long) old) + x);
                 break;
             }
             case SET_MAP_ENTRY: {
                 String[] kv = splitInTwo(k, '.');
-                Object old = target.get(kv[0]);
+                Object old = doc.get(kv[0]);
                 @SuppressWarnings("unchecked")
                 Map<String, Object> m = (Map<String, Object>) old;
                 if (m == null) {
                     m = Utils.newMap();
-                    target.put(kv[0], m);
+                    doc.put(kv[0], m);
                 }
                 m.put(kv[1], op.value);
                 break;
             }
             case REMOVE_MAP_ENTRY: {
                 String[] kv = splitInTwo(k, '.');
-                Object old = target.get(kv[0]);
+                Object old = doc.get(kv[0]);
                 @SuppressWarnings("unchecked")
                 Map<String, Object> m = (Map<String, Object>) old;
                 if (m != null) {
@@ -260,12 +269,12 @@ public class MemoryDocumentStore implements DocumentStore {
             }
             case SET_MAP: {
                 String[] kv = splitInTwo(k, '.');
-                Object old = target.get(kv[0]);
+                Object old = doc.get(kv[0]);
                 @SuppressWarnings("unchecked")
                 Map<String, Object> m = (Map<String, Object>) old;
                 if (m == null) {
                     m = Utils.newMap();
-                    target.put(kv[0], m);
+                    doc.put(kv[0], m);
                 }
                 m.put(kv[1], op.value);
                 break;
@@ -286,17 +295,24 @@ public class MemoryDocumentStore implements DocumentStore {
     }
 
     @Override
-    public boolean create(Collection collection, List<UpdateOp> updateOps) {
-        ConcurrentSkipListMap<String, Map<String, Object>> map = getMap(collection);
-        for (UpdateOp op : updateOps) {
-            if (map.containsKey(op.key)) {
-                return false;
+    public <T extends Document> boolean create(Collection<T> collection,
+                                               List<UpdateOp> updateOps) {
+        Lock lock = rwLock.writeLock();
+        lock.lock();
+        try {
+            ConcurrentSkipListMap<String, T> map = getMap(collection);
+            for (UpdateOp op : updateOps) {
+                if (map.containsKey(op.key)) {
+                    return false;
+                }
             }
+            for (UpdateOp op : updateOps) {
+                internalCreateOrUpdate(collection, op, false);
+            }
+            return true;
+        } finally {
+            lock.unlock();
         }
-        for (UpdateOp op : updateOps) {
-            createOrUpdate(collection, op);
-        }
-        return true;
     }
 
     @Override
@@ -305,9 +321,9 @@ public class MemoryDocumentStore implements DocumentStore {
         buff.append("Nodes:\n");
         for (String p : nodes.keySet()) {
             buff.append("Path: ").append(p).append('\n');
-            Map<String, Object> e = nodes.get(p);
-            for (String prop : e.keySet()) {
-                buff.append(prop).append('=').append(e.get(prop)).append('\n');
+            NodeDocument doc = nodes.get(p);
+            for (String prop : doc.keySet()) {
+                buff.append(prop).append('=').append(doc.get(prop)).append('\n');
             }
             buff.append("\n");
         }

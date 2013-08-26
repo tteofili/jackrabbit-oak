@@ -16,6 +16,11 @@
  */
 package org.apache.jackrabbit.oak.jcr.tck;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 
 import org.apache.jackrabbit.oak.jcr.OakMongoMKRepositoryStub;
@@ -42,15 +47,12 @@ public abstract class TCKBase extends TestSuite {
 
     public TCKBase(String name) {
         super(name);
-        addTest(new Setup(OakRepositoryStub.class.getName()));
-        addTests();
+        Setup.wrap(this, OakRepositoryStub.class.getName());
         if (OakSegmentMKRepositoryStub.isAvailable()) {
-            addTest(new Setup(OakSegmentMKRepositoryStub.class.getName()));
-            addTests();
+            Setup.wrap(this, OakSegmentMKRepositoryStub.class.getName());
         }
         if (OakMongoMKRepositoryStub.isMongoDBAvailable()) {
-            addTest(new Setup(OakMongoMKRepositoryStub.class.getName()));
-            addTests();
+            Setup.wrap(this, OakMongoMKRepositoryStub.class.getName());
         }
     }
 
@@ -62,7 +64,18 @@ public abstract class TCKBase extends TestSuite {
      */
     public static class Setup extends TestCase {
 
+        private static Map<String, RepositoryHelper> HELPERS = new HashMap<String, RepositoryHelper>();
+
         private final String stubClass;
+
+        private List<RepositoryHelper> previous = new ArrayList<RepositoryHelper>();
+
+        public static void wrap(TCKBase test, String stubClass) {
+            Setup setup = new Setup(stubClass);
+            test.addTest(setup);
+            test.addTests();
+            test.addTest(setup.getTearDown());
+        }
 
         public Setup(String stubClass) {
             super("testSetup");
@@ -73,12 +86,47 @@ public abstract class TCKBase extends TestSuite {
             // replace the existing helper with our parametrized version
             RepositoryHelperPool helperPool = RepositoryHelperPoolImpl.getInstance();
             // drain helpers
-            helperPool.borrowHelpers();
+            previous.addAll(Arrays.asList(helperPool.borrowHelpers()));
             // replace with our own stub
-            Properties props = new Properties();
-            props.load(getClass().getClassLoader().getResourceAsStream(RepositoryStub.STUB_IMPL_PROPS));
-            props.put(RepositoryStub.PROP_STUB_IMPL_CLASS, stubClass);
-            helperPool.returnHelper(new RepositoryHelper(props));
+            helperPool.returnHelper(getRepositoryHelper());
+        }
+
+        private RepositoryHelper getRepositoryHelper() throws Exception {
+            RepositoryHelper helper = HELPERS.get(stubClass);
+            if (helper == null) {
+                Properties props = new Properties();
+                props.load(getClass().getClassLoader().getResourceAsStream(RepositoryStub.STUB_IMPL_PROPS));
+                props.put(RepositoryStub.PROP_STUB_IMPL_CLASS, stubClass);
+                helper = new RepositoryHelper(props);
+                HELPERS.put(stubClass, helper);
+            }
+            return helper;
+        }
+
+        TestCase getTearDown() {
+            return new TearDown(previous);
+        }
+    }
+
+    public static class TearDown extends TestCase {
+
+        /**
+         * The repository helpers to restore
+         */
+        private List<RepositoryHelper> helpers;
+
+        public TearDown(List<RepositoryHelper> helpers) {
+            super("testTearDown");
+            this.helpers = helpers;
+        }
+
+        public void testTearDown() throws Exception {
+            // restore previous helpers
+            RepositoryHelperPool helperPool = RepositoryHelperPoolImpl.getInstance();
+            helperPool.borrowHelpers();
+            for (RepositoryHelper helper : helpers) {
+                helperPool.returnHelper(helper);
+            }
         }
     }
 }

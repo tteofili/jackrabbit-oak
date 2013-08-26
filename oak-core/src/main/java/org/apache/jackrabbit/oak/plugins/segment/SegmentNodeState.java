@@ -97,7 +97,7 @@ public class SegmentNodeState extends AbstractNodeState {
     }
 
     @Override
-    public long getChildNodeCount() {
+    public long getChildNodeCount(long max) {
         return getTemplate().getChildNodeCount(store, recordId);
     }
 
@@ -156,7 +156,7 @@ public class SegmentNodeState extends AbstractNodeState {
             } else {
                 Template template = getTemplate();
                 return template.equals(that.getTemplate())
-                        && template.compare(store, recordId, that.recordId);
+                        && template.compare(store, recordId, that.store, that.recordId);
             }
         } else {
             return super.equals(object);

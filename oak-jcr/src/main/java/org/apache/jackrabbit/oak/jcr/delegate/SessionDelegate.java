@@ -19,6 +19,7 @@ package org.apache.jackrabbit.oak.jcr.delegate;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.MINUTES;
+import static java.util.concurrent.TimeUnit.SECONDS;
 
 import java.io.IOException;
 
@@ -39,6 +40,9 @@ import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.core.IdentifierManager;
 import org.apache.jackrabbit.oak.jcr.operation.SessionOperation;
 import org.apache.jackrabbit.oak.jcr.security.AccessManager;
+import org.apache.jackrabbit.oak.spi.security.SecurityProvider;
+import org.apache.jackrabbit.oak.spi.security.authorization.AuthorizationConfiguration;
+import org.apache.jackrabbit.oak.spi.security.authorization.permission.PermissionProvider;
 import org.apache.jackrabbit.oak.spi.security.authorization.permission.Permissions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -54,6 +58,8 @@ public class SessionDelegate {
     private final Root root;
     private final IdentifierManager idManager;
     private final Exception initStackTrace;
+    private final PermissionProvider permissionProvider;
+    private final SessionOperationInterceptor interceptor;
 
     private boolean isAlive = true;
     private int sessionOpCount;
@@ -63,19 +69,35 @@ public class SessionDelegate {
     private boolean warnIfIdle = true;
     private boolean refreshAtNextAccess = false;
 
+
+    public SessionDelegate(@Nonnull ContentSession contentSession, SecurityProvider securityProvider,
+                           long refreshInterval) {
+        this(contentSession, securityProvider, SessionOperationInterceptor.NOOP,refreshInterval);
+    }
+
     /**
      * Create a new session delegate for a {@code ContentSession}. The refresh behaviour of the
      * session is governed by the value of the {@code refreshInterval} argument: if the session
      * has been idle longer than that value, an implicit refresh will take place.
+     * In addition a refresh can always be scheduled from the next access by an explicit call
+     * to {@link #refreshAtNextAccess()}. This is typically done from within the observation event
+     * dispatcher in order.
+     *
      * @param contentSession  the content session
-     * @param refreshInterval  refresh interval in seconds or {@code -1} for never.
+     * @param securityProvider the security provider
+     * @param refreshInterval  refresh interval in seconds.
      */
-    public SessionDelegate(@Nonnull ContentSession contentSession, long refreshInterval) {
+    public SessionDelegate(@Nonnull ContentSession contentSession, SecurityProvider securityProvider,
+                           SessionOperationInterceptor interceptor,long refreshInterval) {
         this.contentSession = checkNotNull(contentSession);
-        this.refreshInterval = refreshInterval;
+        this.interceptor = checkNotNull(interceptor);
+        this.refreshInterval = MILLISECONDS.convert(refreshInterval, SECONDS);
         this.root = contentSession.getLatestRoot();
         this.idManager = new IdentifierManager(root);
         this.initStackTrace = new Exception("The session was created here:");
+        this.permissionProvider = securityProvider.getConfiguration(AuthorizationConfiguration.class)
+                .getPermissionProvider(root, contentSession.getAuthInfo().getPrincipals());
+
     }
 
     public synchronized void refreshAtNextAccess() {
@@ -92,11 +114,13 @@ public class SessionDelegate {
      * @param <T>  return type of {@code sessionOperation}
      * @return  the result of {@code sessionOperation.perform()}
      * @throws RepositoryException
+     * @see #getRoot()
      */
     public synchronized <T> T perform(SessionOperation<T> sessionOperation)
             throws RepositoryException {
         // Synchronize to avoid conflicting refreshes from concurrent JCR API calls
         if (sessionOpCount == 0) {
+            interceptor.before(this,sessionOperation);
             // Refresh and checks only for non re-entrant session operations
             long now = System.currentTimeMillis();
             long timeElapsed = now - lastAccessed;
@@ -128,6 +152,27 @@ public class SessionDelegate {
             if (sessionOperation.isUpdate()) {
                 updateCount++;
             }
+            interceptor.after(this,sessionOperation);
+        }
+    }
+
+    /**
+     * Same as {@link #perform(SessionOperation)} unless this method expects
+     * {@link SessionOperation#perform} <em>not</em> to throw a {@code RepositoryException}.
+     * Such exceptions will be wrapped into a {@code RuntimeException} and rethrown as they
+     * are considered an internal error.
+     *
+     * @param sessionOperation  the {@code SessionOperation} to perform
+     * @param <T>  return type of {@code sessionOperation}
+     * @return  the result of {@code sessionOperation.perform()}
+     * @see #getRoot()
+     */
+    public <T> T safePerform(SessionOperation<T> sessionOperation) {
+        try {
+            return perform(sessionOperation);
+        } catch (RepositoryException e) {
+            throw new RuntimeException("Unexpected exception thrown by operation " +
+                    sessionOperation, e);
         }
     }
 
@@ -270,6 +315,7 @@ public class SessionDelegate {
         } catch (CommitFailedException e) {
             throw newRepositoryException(e);
         }
+        permissionProvider.refresh();
     }
 
     public void refresh(boolean keepChanges) {
@@ -278,6 +324,7 @@ public class SessionDelegate {
         } else {
             root.refresh();
         }
+        permissionProvider.refresh();
     }
 
     //----------------------------------------------------------< Workspace >---
@@ -378,12 +425,30 @@ public class SessionDelegate {
         return root.getQueryEngine();
     }
 
-    //-----------------------------------------------------------< internal >---
+    @Nonnull
+    public PermissionProvider getPermissionProvider() {
+        return permissionProvider;
+    }
 
-    @Nonnull  // FIXME this should be package private. OAK-672
+    /**
+     * The current {@code Root} instance this session delegate instance operates on.
+     * To ensure the returned root reflects the correct repository revision access
+     * should only be done from within a {@link SessionOperation} closure through
+     * {@link #perform(SessionOperation)}.
+     *
+     * @return  current root
+     */
+    @Nonnull
     public Root getRoot() {
         return root;
     }
+
+    @Override
+    public String toString() {
+        return contentSession.toString();
+    }
+
+//-----------------------------------------------------------< internal >---
 
     /**
      * Wraps the given {@link CommitFailedException} instance using the
@@ -396,5 +461,4 @@ public class SessionDelegate {
     private static RepositoryException newRepositoryException(CommitFailedException exception) {
         return exception.asRepositoryException();
     }
-
 }

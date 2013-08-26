@@ -18,6 +18,14 @@
  */
 package org.apache.jackrabbit.oak.jcr;
 
+import static java.util.Arrays.asList;
+import static org.apache.jackrabbit.commons.JcrUtils.getChildNodes;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -25,8 +33,10 @@ import java.io.InputStreamReader;
 import java.io.Reader;
 import java.math.BigDecimal;
 import java.util.Calendar;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
+
 import javax.jcr.Binary;
 import javax.jcr.GuestCredentials;
 import javax.jcr.InvalidItemStateException;
@@ -52,19 +62,12 @@ import javax.jcr.nodetype.NodeTypeManager;
 import javax.jcr.nodetype.NodeTypeTemplate;
 
 import org.apache.jackrabbit.JcrConstants;
+import org.apache.jackrabbit.api.JackrabbitRepository;
 import org.apache.jackrabbit.commons.cnd.CndImporter;
 import org.apache.jackrabbit.commons.cnd.ParseException;
 import org.junit.Before;
 import org.junit.Ignore;
 import org.junit.Test;
-
-import static java.util.Arrays.asList;
-import static org.apache.jackrabbit.commons.JcrUtils.getChildNodes;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
 
 public class RepositoryTest extends AbstractRepositoryTest {
     private static final String TEST_NODE = "test_node";
@@ -101,6 +104,18 @@ public class RepositoryTest extends AbstractRepositoryTest {
     @Test
     public void login() throws RepositoryException {
         assertNotNull(getAdminSession());
+    }
+
+    @Test
+    public void loginWithAttribute() throws RepositoryException {
+        Session session = ((JackrabbitRepository) getRepository()).login(
+                new GuestCredentials(), null,
+                Collections.<String, Object>singletonMap(RepositoryImpl.REFRESH_INTERVAL, 42));
+
+        String[] attributeNames = session.getAttributeNames();
+        assertEquals(1, attributeNames.length);
+        assertEquals(RepositoryImpl.REFRESH_INTERVAL, attributeNames[0]);
+        assertEquals(42L, session.getAttribute(RepositoryImpl.REFRESH_INTERVAL));
     }
 
     @Test(expected = NoSuchWorkspaceException.class)
@@ -1419,13 +1434,15 @@ public class RepositoryTest extends AbstractRepositoryTest {
         Session session2 = createAdminSession();
         try {
             Node foo = session1.getNode("/foo");
-            foo.addNode("added");
+            Node added = foo.addNode("added");
+            assertTrue(added.isNew());
 
             session2.getNode("/foo").addNode("bar");
             session2.save();
 
             session1.refresh(true);
             assertTrue(foo.hasNode("added"));
+            assertTrue(foo.getNode("added").isNew());
             assertTrue(foo.hasNode("bar"));
         } finally {
             session1.logout();
@@ -1575,6 +1592,19 @@ public class RepositoryTest extends AbstractRepositoryTest {
 
         session.refresh(true);
         session.move(TEST_PATH + "/s", TEST_PATH + "/s/t");
+    }
+
+    @Test
+    public void oak962() throws RepositoryException {
+        Session session = getAdminSession();
+        Node root = session.getRootNode().addNode("root");
+        root.addNode("N3");
+        root.addNode("N6").addNode("N7");
+        session.save();
+        session.move("/root/N6/N7", "/root/N3/N12");
+        root.getNode("N3").getNode("N12").remove();
+        root.getNode("N6").remove();
+        session.save();
     }
 
     @Test

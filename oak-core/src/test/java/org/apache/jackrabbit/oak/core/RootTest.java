@@ -18,14 +18,17 @@
  */
 package org.apache.jackrabbit.oak.core;
 
+import static org.apache.jackrabbit.oak.api.Tree.Status.NEW;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assume.assumeTrue;
 
 import java.util.ArrayList;
 import java.util.List;
 
+import org.apache.jackrabbit.oak.NodeStoreFixture;
 import org.apache.jackrabbit.oak.OakBaseTest;
 import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.api.ContentSession;
@@ -41,6 +44,10 @@ import org.junit.Test;
 public class RootTest extends OakBaseTest {
 
     private ContentSession session;
+
+    public RootTest(NodeStoreFixture fixture) {
+        super(fixture);
+    }
 
     @Before
     public void setUp() throws CommitFailedException {
@@ -129,7 +136,7 @@ public class RootTest extends OakBaseTest {
         assertFalse(z.exists());
 
         x.addChild("z");
-        assertEquals(Status.EXISTING, z.getStatus());
+        assertEquals(Status.NEW, z.getStatus());
 
         x.getChild("z").setProperty("p", "2");
         PropertyState p = z.getProperty("p");
@@ -161,8 +168,8 @@ public class RootTest extends OakBaseTest {
 
         root.move("/parent", "/moved");
 
-        assertEquals(Status.EXISTING, parent.getStatus());
-        assertEquals(Status.EXISTING, n.getStatus());
+        assertEquals(Status.NEW, parent.getStatus());
+        assertEquals(Status.NEW, n.getStatus());
 
         assertEquals("/moved", parent.getPath());
         assertEquals("/moved/new", n.getPath());
@@ -174,7 +181,7 @@ public class RootTest extends OakBaseTest {
         root.getTree("/").addChild("s");
         root.commit();
 
-        assertFalse(root.move("/s", "/s"));
+        assertTrue(root.move("/s", "/s"));
     }
 
     @Test
@@ -314,6 +321,36 @@ public class RootTest extends OakBaseTest {
     }
 
     @Test
+    public void rebasePreservesStatus() throws CommitFailedException {
+        Root root1 = session.getLatestRoot();
+        Root root2 = session.getLatestRoot();
+
+        Tree x = root1.getTree("/x");
+        Tree added = x.addChild("added");
+        assertEquals(NEW, added.getStatus());
+
+        root2.getTree("/x").addChild("bar");
+        root2.commit();
+
+        root1.rebase();
+
+        assertTrue(x.hasChild("added"));
+        assertEquals(NEW, x.getChild("added").getStatus());
+        assertTrue(x.hasChild("bar"));
+    }
+
+    @Test
+    public void purgePreservesStatus() throws CommitFailedException {
+        Tree x = session.getLatestRoot().getTree("/x");
+        Tree added = x.addChild("added");
+
+        for (int k = 0; k < 10000; k++) {
+            assertEquals("k=" + k, NEW, x.getChild("added").getStatus());
+            x.addChild("k" + k);
+        }
+    }
+
+    @Test
     public void rebaseWithAddNode() throws CommitFailedException {
         Root root1 = session.getLatestRoot();
         Root root2 = session.getLatestRoot();
@@ -439,8 +476,22 @@ public class RootTest extends OakBaseTest {
         checkEqual(root1.getTree("/"), (root2.getTree("/")));
     }
 
+    @Test
+    public void oak962() throws CommitFailedException {
+        Root root = session.getLatestRoot();
+        Tree r = root.getTree("/").addChild("root");
+        r.addChild("N3");
+        r.addChild("N6");
+        r.getChild("N6").addChild("N7");
+        root.commit();
+        root.move("/root/N6/N7", "/root/N3/N12");
+        r.getChild("N3").getChild("N12").remove();
+        r.getChild("N6").remove();
+        root.commit();
+    }
+    
     private static void checkEqual(Tree tree1, Tree tree2) {
-        assertEquals(tree1.getChildrenCount(), tree2.getChildrenCount());
+        assertEquals(tree1.getChildrenCount(Long.MAX_VALUE), tree2.getChildrenCount(Long.MAX_VALUE));
         assertEquals(tree1.getPropertyCount(), tree2.getPropertyCount());
 
         for (PropertyState property1 : tree1.getProperties()) {

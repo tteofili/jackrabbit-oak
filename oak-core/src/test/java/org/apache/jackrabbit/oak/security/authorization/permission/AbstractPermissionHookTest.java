@@ -32,8 +32,9 @@ import org.apache.jackrabbit.oak.api.ContentSession;
 import org.apache.jackrabbit.oak.api.Root;
 import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.api.Type;
-import org.apache.jackrabbit.oak.spi.security.authorization.AbstractAccessControlTest;
-import org.apache.jackrabbit.oak.spi.security.authorization.AccessControlConstants;
+import org.apache.jackrabbit.oak.spi.security.authorization.accesscontrol.AbstractAccessControlTest;
+import org.apache.jackrabbit.oak.spi.security.authorization.accesscontrol.AccessControlConstants;
+import org.apache.jackrabbit.oak.spi.security.authorization.permission.PermissionConstants;
 import org.apache.jackrabbit.oak.spi.security.principal.EveryonePrincipal;
 import org.apache.jackrabbit.oak.spi.security.privilege.PrivilegeBitsProvider;
 import org.apache.jackrabbit.oak.spi.security.privilege.PrivilegeConstants;
@@ -128,7 +129,7 @@ public abstract class AbstractPermissionHookTest extends AbstractAccessControlTe
     }
 
     protected long cntEntries(Tree parent) {
-        long cnt = parent.getChildrenCount();
+        long cnt = parent.getChildrenCount(Long.MAX_VALUE);
         for (Tree child : parent.getChildren()) {
             cnt += cntEntries(child);
         }

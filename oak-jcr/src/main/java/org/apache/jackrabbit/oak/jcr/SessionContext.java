@@ -16,9 +16,12 @@
  */
 package org.apache.jackrabbit.oak.jcr;
 
+import static com.google.common.base.Preconditions.checkNotNull;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+
 import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
 import javax.jcr.PathNotFoundException;
@@ -28,44 +31,37 @@ import javax.jcr.Session;
 import javax.jcr.UnsupportedRepositoryOperationException;
 import javax.jcr.ValueFactory;
 import javax.jcr.Workspace;
-import javax.jcr.lock.LockManager;
-import javax.jcr.nodetype.NodeTypeManager;
 import javax.jcr.observation.ObservationManager;
 import javax.jcr.security.AccessControlManager;
-import javax.jcr.version.VersionManager;
 
-import org.apache.jackrabbit.JcrConstants;
+import org.apache.jackrabbit.api.security.JackrabbitAccessControlManager;
 import org.apache.jackrabbit.api.security.authorization.PrivilegeManager;
 import org.apache.jackrabbit.api.security.principal.PrincipalManager;
 import org.apache.jackrabbit.api.security.user.UserManager;
 import org.apache.jackrabbit.oak.api.ContentSession;
-import org.apache.jackrabbit.oak.jcr.delegate.NodeDelegate;
-import org.apache.jackrabbit.oak.jcr.delegate.PropertyDelegate;
+import org.apache.jackrabbit.oak.jcr.delegate.AccessControlManagerDelegator;
+import org.apache.jackrabbit.oak.jcr.delegate.JackrabbitAccessControlManagerDelegator;
+import org.apache.jackrabbit.oak.jcr.delegate.PrincipalManagerDelegator;
+import org.apache.jackrabbit.oak.jcr.delegate.PrivilegeManagerDelegator;
 import org.apache.jackrabbit.oak.jcr.delegate.SessionDelegate;
-import org.apache.jackrabbit.oak.jcr.delegate.VersionManagerDelegate;
+import org.apache.jackrabbit.oak.jcr.delegate.UserManagerDelegator;
 import org.apache.jackrabbit.oak.jcr.observation.ObservationManagerImpl;
 import org.apache.jackrabbit.oak.jcr.security.AccessManager;
-import org.apache.jackrabbit.oak.jcr.version.VersionHistoryImpl;
-import org.apache.jackrabbit.oak.jcr.version.VersionImpl;
 import org.apache.jackrabbit.oak.namepath.LocalNameMapper;
 import org.apache.jackrabbit.oak.namepath.NamePathMapper;
 import org.apache.jackrabbit.oak.namepath.NamePathMapperImpl;
 import org.apache.jackrabbit.oak.plugins.name.Namespaces;
-import org.apache.jackrabbit.oak.plugins.nodetype.DefinitionProvider;
-import org.apache.jackrabbit.oak.plugins.nodetype.EffectiveNodeTypeProvider;
 import org.apache.jackrabbit.oak.plugins.nodetype.ReadOnlyNodeTypeManager;
 import org.apache.jackrabbit.oak.plugins.observation.Observable;
 import org.apache.jackrabbit.oak.plugins.value.ValueFactoryImpl;
 import org.apache.jackrabbit.oak.spi.security.SecurityConfiguration;
-import org.apache.jackrabbit.oak.spi.security.authorization.AccessControlConfiguration;
-import org.apache.jackrabbit.oak.spi.security.authorization.permission.PermissionProvider;
+import org.apache.jackrabbit.oak.spi.security.SecurityProvider;
+import org.apache.jackrabbit.oak.spi.security.authorization.AuthorizationConfiguration;
 import org.apache.jackrabbit.oak.spi.security.principal.PrincipalConfiguration;
 import org.apache.jackrabbit.oak.spi.security.privilege.PrivilegeConfiguration;
 import org.apache.jackrabbit.oak.spi.security.user.UserConfiguration;
 import org.apache.jackrabbit.oak.spi.whiteboard.Whiteboard;
 import org.apache.jackrabbit.oak.spi.xml.ProtectedItemImporter;
-
-import static com.google.common.base.Preconditions.checkNotNull;
 
 /**
  * Instances of this class are passed to all JCR implementation classes
@@ -74,28 +70,33 @@ import static com.google.common.base.Preconditions.checkNotNull;
  * {@code ValueFactory}, etc.).
  */
 public class SessionContext implements NamePathMapper {
+
     private final RepositoryImpl repository;
     private final Whiteboard whiteboard;
+    private final Map<String, Object> attributes;
     private final SessionDelegate delegate;
+
     private final SessionNamespaces namespaces;
     private final NamePathMapper namePathMapper;
     private final ValueFactory valueFactory;
-    private final SessionImpl session;
-    private final WorkspaceImpl workspace;
+
+    private SessionImpl session = null;
+    private WorkspaceImpl workspace = null;
 
     private AccessControlManager accessControlManager;
-    private PermissionProvider permissionProvider;
     private PrincipalManager principalManager;
     private UserManager userManager;
     private PrivilegeManager privilegeManager;
     private ObservationManagerImpl observationManager;
 
-    SessionContext(
-            RepositoryImpl repository, Whiteboard whiteboard,
-            final SessionDelegate delegate) {
+    public SessionContext(
+            @Nonnull RepositoryImpl repository, @Nonnull Whiteboard whiteboard,
+            Map<String, Object> attributes, @Nonnull final SessionDelegate delegate) {
         this.repository = checkNotNull(repository);
         this.whiteboard = checkNotNull(whiteboard);
+        this.attributes = attributes;
         this.delegate = checkNotNull(delegate);
+
         this.namespaces = new SessionNamespaces(this);
         LocalNameMapper nameMapper = new LocalNameMapper() {
             @Override
@@ -112,66 +113,60 @@ public class SessionContext implements NamePathMapper {
                 nameMapper, delegate.getIdManager());
         this.valueFactory = new ValueFactoryImpl(
                 delegate.getRoot().getBlobFactory(), namePathMapper);
-
-        this.session = new SessionImpl(this);
-        this.workspace = new WorkspaceImpl(this);
     }
 
-    public Session getSession() {
+    public final Map<String, Object> getAttributes() {
+        return attributes;
+    }
+
+    public final synchronized SessionImpl getSession() {
+        if (session == null) {
+            session = createSession();
+        }
         return session;
     }
 
-    public Workspace getWorkspace() {
+    public final synchronized WorkspaceImpl getWorkspace() {
+        if (workspace == null) {
+            workspace = createWorkspace();
+        }
         return workspace;
     }
 
-    public LockManager getLockManager() {
-        return workspace.getLockManager();
+    /**
+     * Factory method for creating the {@link Session} instance for this
+     * context. Called by {@link #getSession()} when first accessed. Can be
+     * overridden by subclasses to customize the session implementation.
+     *
+     * @return session instance
+     */
+    protected SessionImpl createSession() {
+        return new SessionImpl(this);
     }
 
-    public NodeTypeManager getNodeTypeManager() {
-        return workspace.getNodeTypeManager();
+    /**
+     * Factory method for creating the {@link Workspace} instance for this
+     * context. Called by {@link #getWorkspace()} when first accessed. Can be
+     * overridden by subclasses to customize the workspace implementation.
+     *
+     * @return session instance
+     */
+    protected WorkspaceImpl createWorkspace() {
+        return new WorkspaceImpl(this);
     }
 
-    public VersionManager getVersionManager() throws RepositoryException {
-        return workspace.getVersionManager();
-    }
-
-    public EffectiveNodeTypeProvider getEffectiveNodeTypeProvider() {
-        return workspace.getReadWriteNodeTypeManager();
-    }
-
-    public DefinitionProvider getDefinitionProvider() {
-        return workspace.getReadWriteNodeTypeManager();
-    }
-
+    @Nonnull
     public Repository getRepository() {
         return repository;
     }
 
+    @Nonnull
     public SessionDelegate getSessionDelegate() {
         return delegate;
     }
 
     SessionNamespaces getNamespaces() {
         return namespaces;
-    }
-
-    public NodeImpl createNodeOrNull(NodeDelegate nd) throws RepositoryException {
-        if (nd == null) {
-            return null;
-        }
-        PropertyDelegate pd = nd.getPropertyOrNull(JcrConstants.JCR_PRIMARYTYPE);
-        String type = pd != null ? pd.getString() : null;
-        if (JcrConstants.NT_VERSION.equals(type)) {
-            VersionManagerDelegate delegate = VersionManagerDelegate.create(getSessionDelegate());
-            return new VersionImpl(delegate.createVersion(nd), this);
-        } else if (JcrConstants.NT_VERSIONHISTORY.equals(type)) {
-            VersionManagerDelegate delegate = VersionManagerDelegate.create(getSessionDelegate());
-            return new VersionHistoryImpl(delegate.createVersionHistory(nd), this);
-        } else {
-            return new NodeImpl<NodeDelegate>(nd, this);
-        }
     }
 
     public ValueFactory getValueFactory() {
@@ -181,7 +176,14 @@ public class SessionContext implements NamePathMapper {
     @Nonnull
     public AccessControlManager getAccessControlManager() throws RepositoryException {
         if (accessControlManager == null) {
-            accessControlManager = getConfig(AccessControlConfiguration.class).getAccessControlManager(delegate.getRoot(), namePathMapper);
+            AccessControlManager acm = getConfig(AuthorizationConfiguration.class)
+                    .getAccessControlManager(delegate.getRoot(), namePathMapper);
+            if (acm instanceof JackrabbitAccessControlManager) {
+                accessControlManager = new JackrabbitAccessControlManagerDelegator(
+                        delegate, (JackrabbitAccessControlManager) acm);
+            } else {
+                accessControlManager = new AccessControlManagerDelegator(delegate, acm);
+            }
         }
         return accessControlManager;
     }
@@ -189,8 +191,9 @@ public class SessionContext implements NamePathMapper {
     @Nonnull
     public PrincipalManager getPrincipalManager() {
         if (principalManager == null) {
-            principalManager = getConfig(PrincipalConfiguration.class)
-                    .getPrincipalManager(delegate.getRoot(), namePathMapper);
+            principalManager = new PrincipalManagerDelegator(delegate,
+                    getConfig(PrincipalConfiguration.class)
+                            .getPrincipalManager(delegate.getRoot(), namePathMapper));
         }
         return principalManager;
     }
@@ -198,7 +201,8 @@ public class SessionContext implements NamePathMapper {
     @Nonnull
     public UserManager getUserManager() {
         if (userManager == null) {
-            userManager = getConfig(UserConfiguration.class).getUserManager(delegate.getRoot(), namePathMapper);
+            userManager = new UserManagerDelegator(delegate, getConfig(UserConfiguration.class)
+                    .getUserManager(delegate.getRoot(), namePathMapper));
         }
         return userManager;
     }
@@ -206,7 +210,9 @@ public class SessionContext implements NamePathMapper {
     @Nonnull
     public PrivilegeManager getPrivilegeManager() {
         if (privilegeManager == null) {
-            privilegeManager = getConfig(PrivilegeConfiguration.class).getPrivilegeManager(delegate.getRoot(), namePathMapper);
+            privilegeManager = new PrivilegeManagerDelegator(delegate,
+                    getConfig(PrivilegeConfiguration.class)
+                            .getPrivilegeManager(delegate.getRoot(), namePathMapper));
         }
         return privilegeManager;
     }
@@ -316,18 +322,14 @@ public class SessionContext implements NamePathMapper {
         }
     }
 
-    public void refresh(boolean includeRoot) {
-        if (includeRoot) {
-            getSessionDelegate().getRoot().refresh();
-        }
-        if (permissionProvider != null) {
-            permissionProvider.refresh();
-        }
+    @Nonnull
+    public AccessManager getAccessManager() throws RepositoryException {
+        return new AccessManager(delegate);
     }
 
     @Nonnull
-    public AccessManager getAccessManager() throws RepositoryException {
-        return new AccessManager(getPermissionProvider());
+    public SecurityProvider getSecurityProvider() {
+        return repository.getSecurityProvider();
     }
 
     //-----------------------------------------------------------< internal >---
@@ -339,17 +341,9 @@ public class SessionContext implements NamePathMapper {
         namespaces.clear();
     }
 
-    //------------------------------------------------------------< private >---
-    @Nonnull
-    private PermissionProvider getPermissionProvider() {
-        if (permissionProvider == null) {
-            permissionProvider = getConfig(AccessControlConfiguration.class).getPermissionProvider(delegate.getRoot(), delegate.getAuthInfo().getPrincipals());
-        }
-        return permissionProvider;
-    }
-
     @Nonnull
     private <T> T getConfig(Class<T> clss) {
         return repository.getSecurityProvider().getConfiguration(clss);
     }
+
 }

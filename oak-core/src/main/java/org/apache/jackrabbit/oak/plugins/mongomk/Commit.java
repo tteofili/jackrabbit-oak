@@ -21,13 +21,15 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.concurrent.atomic.AtomicReference;
+
+import javax.annotation.CheckForNull;
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
 import org.apache.jackrabbit.mk.api.MicroKernelException;
 import org.apache.jackrabbit.mk.json.JsopStream;
 import org.apache.jackrabbit.mk.json.JsopWriter;
-import org.apache.jackrabbit.oak.plugins.mongomk.DocumentStore.Collection;
 import org.apache.jackrabbit.oak.plugins.mongomk.util.Utils;
 import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.slf4j.Logger;
@@ -38,29 +40,24 @@ import org.slf4j.LoggerFactory;
  */
 public class Commit {
 
-    private static final Logger LOG = LoggerFactory.getLogger(Commit.class);
-
-    /**
-     * The maximum size of a document. If it is larger, it is split.
-     */
-    // TODO check which value is the best one
-    //private static final int MAX_DOCUMENT_SIZE = 16 * 1024;
-    // TODO set to 512 KB currently, should be changed later on
-    private static final int MAX_DOCUMENT_SIZE = 512 * 1024;
-
     /**
      * Whether to purge old revisions if a node gets too large. If false, old
      * revisions are stored in a separate document. If true, old revisions are
      * removed (purged).
+     * TODO: enable once document split and garbage collection implementation is complete.
      */
-    private static final boolean PURGE_OLD_REVISIONS = true;
+    static final boolean PURGE_OLD_REVISIONS = false;
     
+    private static final Logger LOG = LoggerFactory.getLogger(Commit.class);
+
     /**
-     * Revisions that are newer than this (in minutes) are kept in the newest
-     * document.
+     * The maximum size of a document. If it is larger, it is split.
+     * TODO: check which value is the best one
+     *       Document splitting is currently disabled until the implementation
+     *       is complete.
      */
-    private static final int SPLIT_MINUTES = 5;
-    
+    private static final int MAX_DOCUMENT_SIZE = Integer.MAX_VALUE;
+   
     private final MongoMK mk;
     private final Revision baseRevision;
     private final Revision revision;
@@ -86,24 +83,40 @@ public class Commit {
         UpdateOp op = operations.get(path);
         if (op == null) {
             String id = Utils.getIdFromPath(path);
-            op = new UpdateOp(path, id, false);
-            setModified(op, revision);
+            op = new UpdateOp(id, false);
+            NodeDocument.setModified(op, revision);
             operations.put(path, op);
         }
         return op;
     }
-    
-    static void setModified(UpdateOp op, Revision revision) {
-        op.set(UpdateOp.MODIFIED, getModified(revision.getTimestamp()));
-    }
-    
+
     public static long getModified(long timestamp) {
         // 5 second resolution
         return timestamp / 1000 / 5;
     }
 
-    public Revision getRevision() {
+    /**
+     * The revision for this new commit. That is, the changes within this commit
+     * will be visible with this revision.
+     *
+     * @return the revision for this new commit.
+     */
+    @Nonnull
+    Revision getRevision() {
         return revision;
+    }
+
+    /**
+     * Returns the base revision for this commit. That is, the revision passed
+     * to {@link MongoMK#commit(String, String, String, String)}. The base
+     * revision may be <code>null</code>, e.g. for the initial commit of the
+     * root node, when there is no base revision.
+     *
+     * @return the base revision of this commit or <code>null</code>.
+     */
+    @CheckForNull
+    Revision getBaseRevision() {
+        return baseRevision;
     }
     
     void addNodeDiff(Node n) {
@@ -116,7 +129,7 @@ public class Commit {
     
     public void touchNode(String path) {
         UpdateOp op = getUpdateOperationForNode(path);
-        op.setMapEntry(UpdateOp.LAST_REV, "" + revision.getClusterId(), revision.toString());        
+        NodeDocument.setLastRev(op, revision);
     }
     
     void updateProperty(String path, String propertyName, String value) {
@@ -205,15 +218,15 @@ public class Commit {
             if (baseBranchRevision == null) {
                 // only apply _lastRev for trunk commits, _lastRev for
                 // branch commits only become visible on merge
-                op.setMapEntry(UpdateOp.LAST_REV, "" + revision.getClusterId(), revision.toString());
+                NodeDocument.setLastRev(op, revision);
             }
             if (op.isNew) {
-                op.setMapEntry(UpdateOp.DELETED, revision.toString(), "false");
+                op.setMapEntry(NodeDocument.DELETED, revision.toString(), "false");
             }
             if (op == commitRoot) {
                 // apply at the end
             } else {
-                op.setMapEntry(UpdateOp.COMMIT_ROOT, revision.toString(), commitRootDepth);
+                NodeDocument.setCommitRoot(op, revision, commitRootDepth);
                 if (op.isNew()) {
                     newNodes.add(op);
                 } else {
@@ -225,7 +238,7 @@ public class Commit {
             // no updates and root of commit is also new. that is,
             // it is the root of a subtree added in a commit.
             // so we try to add the root like all other nodes
-            commitRoot.setMapEntry(UpdateOp.REVISIONS, revision.toString(), commitValue);
+            NodeDocument.setRevision(commitRoot, revision, commitValue);
             newNodes.add(commitRoot);
         }
         try {
@@ -238,7 +251,7 @@ public class Commit {
                         if (op == commitRoot) {
                             // don't write the commit root just yet
                             // (because there might be a conflict)
-                            commitRoot.unsetMapEntry(UpdateOp.REVISIONS, revision.toString());
+                            NodeDocument.unsetRevision(commitRoot, revision);
                         }
                         changedNodes.add(op);
                     }
@@ -247,7 +260,7 @@ public class Commit {
             }
             for (UpdateOp op : changedNodes) {
                 // set commit root on changed nodes
-                op.setMapEntry(UpdateOp.COMMIT_ROOT, revision.toString(), commitRootDepth);
+                NodeDocument.setCommitRoot(op, revision, commitRootDepth);
                 opLog.add(op);
                 createOrUpdateNode(store, op);
             }
@@ -256,7 +269,7 @@ public class Commit {
             // first to check if there was a conflict, and only then to commit
             // the revision, with the revision property set)
             if (changedNodes.size() > 0 || !commitRoot.isNew) {
-                commitRoot.setMapEntry(UpdateOp.REVISIONS, revision.toString(), commitValue);
+                NodeDocument.setRevision(commitRoot, revision, commitValue);
                 opLog.add(commitRoot);
                 createOrUpdateNode(store, commitRoot);
                 operations.put(commitRootPath, commitRoot);
@@ -288,58 +301,60 @@ public class Commit {
      * @param op the operation
      */
     public void createOrUpdateNode(DocumentStore store, UpdateOp op) {
-        Map<String, Object> map = store.createOrUpdate(Collection.NODES, op);
+        NodeDocument doc = store.createOrUpdate(Collection.NODES, op);
         if (baseRevision != null) {
             final AtomicReference<List<Revision>> collisions = new AtomicReference<List<Revision>>();
-            Revision newestRev = mk.getNewestRevision(map, revision,
-                    new CollisionHandler() {
-                @Override
-                void concurrentModification(Revision other) {
-                    if (collisions.get() == null) {
-                        collisions.set(new ArrayList<Revision>());
-                    }
-                    collisions.get().add(other);
-                }
-            });
+            Revision newestRev = null;
+            if (doc != null) {
+                newestRev = doc.getNewestRevision(mk, store, revision,
+                        new CollisionHandler() {
+                            @Override
+                            void concurrentModification(Revision other) {
+                                if (collisions.get() == null) {
+                                    collisions.set(new ArrayList<Revision>());
+                                }
+                                collisions.get().add(other);
+                            }
+                        });
+            }
             String conflictMessage = null;
             if (newestRev == null) {
                 if (op.isDelete || !op.isNew) {
                     conflictMessage = "The node " + 
-                            op.path + " does not exist or is already deleted";
+                            op.getKey() + " does not exist or is already deleted";
                 }
             } else {
                 if (op.isNew) {
                     conflictMessage = "The node " + 
-                            op.path + " was already added in revision\n" + 
+                            op.getKey() + " was already added in revision\n" +
                             newestRev;
                 } else if (mk.isRevisionNewer(newestRev, baseRevision)
-                        && (op.isDelete || isConflicting(map, op))) {
+                        && (op.isDelete || isConflicting(doc, op))) {
                     conflictMessage = "The node " + 
-                            op.path + " was changed in revision\n" + newestRev +
+                            op.getKey() + " was changed in revision\n" + newestRev +
                             ", which was applied after the base revision\n" + 
                             baseRevision;
                 }
             }
             if (conflictMessage != null) {
                 conflictMessage += ", before\n" + revision + 
-                        "; document:\n" + Utils.formatDocument(map) + 
+                        "; document:\n" + doc.format() +
                         ",\nrevision order:\n" + mk.getRevisionComparator();
                 throw new MicroKernelException(conflictMessage);
             }
             // if we get here the modification was successful
             // -> check for collisions and conflict (concurrent updates
             // on a node are possible if property updates do not overlap)
-            if (collisions.get() != null && isConflicting(map, op)) {
+            if (collisions.get() != null && isConflicting(doc, op)) {
                 for (Revision r : collisions.get()) {
                     // mark collisions on commit root
-                    new Collision(map, r, op, revision).mark(store);
+                    new Collision(doc, r, op, revision).mark(store);
                 }
             }
         }
 
-        int size = Utils.estimateMemoryUsage(map);
-        if (size > MAX_DOCUMENT_SIZE) {
-            UpdateOp[] split = splitDocument(map);
+        if (doc != null && doc.getMemory() > MAX_DOCUMENT_SIZE) {
+            UpdateOp[] split = doc.splitDocument(mk, revision, mk.getSplitDocumentAgeMillis());
             
             // TODO check if the new main document is actually smaller;
             // otherwise, splitting doesn't make sense
@@ -360,25 +375,26 @@ public class Commit {
 
     /**
      * Checks whether the given <code>UpdateOp</code> conflicts with the
-     * existing content in <code>nodeMap</code>. The check is done based on the
+     * existing content in <code>doc</code>. The check is done based on the
      * {@link #baseRevision} of this commit. An <code>UpdateOp</code> conflicts
      * when there were changes after {@link #baseRevision} on properties also
      * contained in <code>UpdateOp</code>.
      *
-     * @param nodeMap the contents of the nodes before the update.
+     * @param doc the contents of the nodes before the update.
      * @param op the update to perform.
      * @return <code>true</code> if the update conflicts; <code>false</code>
      *         otherwise.
      */
-    private boolean isConflicting(Map<String, Object> nodeMap,
-                                  UpdateOp op) {
-        if (baseRevision == null) {
+    private boolean isConflicting(@Nullable NodeDocument doc,
+                                  @Nonnull UpdateOp op) {
+        if (baseRevision == null || doc == null) {
             // no conflict is possible when there is no baseRevision
+            // or document did not exist before
             return false;
         }
         // did existence of node change after baseRevision?
         @SuppressWarnings("unchecked")
-        Map<String, String> deleted = (Map<String, String>) nodeMap.get(UpdateOp.DELETED);
+        Map<String, String> deleted = (Map<String, String>) doc.get(NodeDocument.DELETED);
         if (deleted != null) {
             for (Map.Entry<String, String> entry : deleted.entrySet()) {
                 if (mk.isRevisionNewer(Revision.fromString(entry.getKey()), baseRevision)) {
@@ -393,7 +409,7 @@ public class Commit {
             }
             int idx = entry.getKey().indexOf('.');
             String name = entry.getKey().substring(0, idx);
-            if (UpdateOp.DELETED.equals(name)) {
+            if (NodeDocument.DELETED.equals(name)) {
                 // existence of node changed, this always conflicts with
                 // any other concurrent change
                 return true;
@@ -403,7 +419,7 @@ public class Commit {
             }
             // was this property touched after baseRevision?
             @SuppressWarnings("unchecked")
-            Map<String, Object> changes = (Map<String, Object>) nodeMap.get(name);
+            Map<String, Object> changes = (Map<String, Object>) doc.get(name);
             if (changes == null) {
                 continue;
             }
@@ -414,67 +430,6 @@ public class Commit {
             }
         }
         return false;
-    }
-
-    private UpdateOp[] splitDocument(Map<String, Object> map) {
-        String id = (String) map.get(UpdateOp.ID);
-        String path = Utils.getPathFromId(id);
-        Long previous = (Long) map.get(UpdateOp.PREVIOUS);
-        if (previous == null) {
-            previous = 0L;
-        } else {
-            previous++;
-        }
-        UpdateOp old = new UpdateOp(path, id + "/" + previous, true);
-        setModified(old, revision);
-        UpdateOp main = new UpdateOp(path, id, false);
-        setModified(main, revision);
-        main.set(UpdateOp.PREVIOUS, previous);
-        for (Entry<String, Object> e : map.entrySet()) {
-            String key = e.getKey();
-            if (key.equals(UpdateOp.ID)) {
-                // ok
-            } else if (key.equals(UpdateOp.MODIFIED)) {
-                // ok
-            } else if (key.equals(UpdateOp.PREVIOUS)) {
-                // ok
-            } else if (key.equals(UpdateOp.LAST_REV)) {
-                // only maintain the lastRev in the main document
-                main.setMap(UpdateOp.LAST_REV, "" + revision.getClusterId(), revision.toString());        
-            } else {
-                // UpdateOp.DELETED,
-                // UpdateOp.REVISIONS,
-                // and regular properties
-                @SuppressWarnings("unchecked")
-                Map<String, Object> valueMap = (Map<String, Object>) e.getValue();
-                Revision latestRev = null;
-                for (String r : valueMap.keySet()) {
-                    Revision propRev = Revision.fromString(r);
-                    if (latestRev == null || mk.isRevisionNewer(propRev, latestRev)) {
-                        latestRev = propRev;
-                    }
-                }
-                for (String r : valueMap.keySet()) {
-                    Revision propRev = Revision.fromString(r);
-                    Object v = valueMap.get(r);
-                    if (propRev.equals(latestRev)) {
-                        main.setMap(key, propRev.toString(), v);
-                    } else {
-                        long ageMillis = Revision.getCurrentTimestamp() - propRev.getTimestamp();
-                        long ageMinutes = ageMillis / 1000 / 60;
-                        if (ageMinutes > SPLIT_MINUTES) {
-                            old.setMapEntry(key, propRev.toString(), v);
-                        } else {
-                            main.setMap(key, propRev.toString(), v);
-                        }
-                    }
-                }
-            }
-        }
-        if (PURGE_OLD_REVISIONS) {
-            old = null;
-        }
-        return new UpdateOp[]{old, main};
     }
 
     /**
@@ -552,7 +507,7 @@ public class Commit {
         removedNodes.add(path);
         UpdateOp op = getUpdateOperationForNode(path);
         op.setDelete(true);
-        op.setMapEntry(UpdateOp.DELETED, revision.toString(), "true");
+        op.setMapEntry(NodeDocument.DELETED, revision.toString(), "true");
     }
 
 }

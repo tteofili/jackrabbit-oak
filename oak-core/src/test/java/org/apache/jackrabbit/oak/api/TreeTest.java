@@ -26,10 +26,12 @@ import static org.junit.Assert.assertTrue;
 import java.util.Set;
 
 import com.google.common.collect.Sets;
+import org.apache.jackrabbit.oak.NodeStoreFixture;
 import org.apache.jackrabbit.oak.Oak;
+import org.apache.jackrabbit.oak.OakBaseTest;
 import org.apache.jackrabbit.oak.plugins.commit.AnnotatingConflictHandler;
 import org.apache.jackrabbit.oak.plugins.commit.ChildOrderConflictHandler;
-import org.apache.jackrabbit.oak.plugins.commit.ConflictValidator;
+import org.apache.jackrabbit.oak.plugins.commit.ConflictValidatorProvider;
 import org.apache.jackrabbit.oak.spi.security.OpenSecurityProvider;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
@@ -40,13 +42,17 @@ import org.junit.Test;
 /**
  * Contains tests related to {@link Tree}
  */
-public class TreeTest {
+public class TreeTest extends OakBaseTest {
 
     private ContentRepository repository;
 
+    public TreeTest(NodeStoreFixture fixture) {
+        super(fixture);
+    }
+
     @Before
     public void setUp() {
-        repository = new Oak()
+        repository = new Oak(store)
             .with(new OpenSecurityProvider())
             .with(new ChildOrderConflictHandler(new AnnotatingConflictHandler()) {
 
@@ -56,12 +62,12 @@ public class TreeTest {
                  */
                 @Override
                 public Resolution deleteChangedNode(NodeBuilder parent,
-                                                    String name,
-                                                    NodeState theirs) {
+                        String name,
+                        NodeState theirs) {
                     return Resolution.OURS;
                 }
             })
-            .with(new ConflictValidator())
+            .with(new ConflictValidatorProvider())
             .createContentRepository();
     }
 

@@ -43,7 +43,7 @@ import org.apache.jackrabbit.oak.api.PropertyState;
  * <p>
  * This class also implements trivial (and potentially very slow) versions of
  * the {@link #getProperty(String)} and {@link #getPropertyCount()} methods
- * based on {@link #getProperties()}. The {@link #getChildNodeCount()} method
+ * based on {@link #getProperties()}. The {@link #getChildNodeCount(long)} method
  * is similarly implemented based on {@link #getChildNodeEntries()}.
  * Subclasses should normally override these method with a more efficient
  * alternatives.
@@ -124,8 +124,17 @@ public abstract class AbstractNodeState implements NodeState {
     }
 
     @Override
-    public long getChildNodeCount() {
-        return count(getChildNodeEntries());
+    public long getChildNodeCount(long max) {
+        long n = 0;
+        Iterator<?> iterator = getChildNodeEntries().iterator();
+        while (iterator.hasNext()) {
+            iterator.next();
+            n++;
+            if (n >= max) {
+                return Long.MAX_VALUE;
+            }
+        }
+        return n;
     }
 
     @Override
@@ -231,9 +240,24 @@ public abstract class AbstractNodeState implements NodeState {
             return false;
         }
 
-        if (getPropertyCount() != other.getPropertyCount()
-                || getChildNodeCount() != other.getChildNodeCount()) {
+        if (getPropertyCount() != other.getPropertyCount()) {
             return false;
+        }
+        // if one of the objects has few entries,
+        // then compare the number of entries with the other one
+        long max = 20;
+        long c1 = getChildNodeCount(max);
+        long c2 = other.getChildNodeCount(max);
+        if (c1 <= max || c2 <= max) {
+            // one has less than max entries
+            if (c1 != c2) {
+                return false;
+            }
+        } else if (c1 != Long.MAX_VALUE && c2 != Long.MAX_VALUE) {
+            // we know the exact number for both
+            if (c1 != c2) {
+                return false;
+            }
         }
 
         for (PropertyState property : getProperties()) {
@@ -243,6 +267,17 @@ public abstract class AbstractNodeState implements NodeState {
         }
 
         // TODO inefficient unless there are very few child nodes
+
+        // compare the exact child node count
+        // (before, we only compared up to 20 entries)
+        c1 = getChildNodeCount(Long.MAX_VALUE);
+        c2 = other.getChildNodeCount(Long.MAX_VALUE);
+        if (c1 != c2) {
+            return false;
+        }
+        
+        // compare all child nodes recursively (this is potentially very slow,
+        // as it recursively calls equals)
         for (ChildNodeEntry entry : getChildNodeEntries()) {
             if (!entry.getNodeState().equals(
                     other.getChildNode(entry.getName()))) {

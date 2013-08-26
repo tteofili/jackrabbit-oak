@@ -26,6 +26,8 @@ import static com.google.common.collect.Sets.newHashSet;
 import static com.google.common.collect.Sets.newLinkedHashSet;
 import static java.util.Collections.singletonList;
 import static org.apache.jackrabbit.JcrConstants.JCR_ISMIXIN;
+import static org.apache.jackrabbit.JcrConstants.JCR_LOCKISDEEP;
+import static org.apache.jackrabbit.JcrConstants.JCR_LOCKOWNER;
 import static org.apache.jackrabbit.JcrConstants.JCR_MIXINTYPES;
 import static org.apache.jackrabbit.JcrConstants.JCR_MULTIPLE;
 import static org.apache.jackrabbit.JcrConstants.JCR_NODETYPENAME;
@@ -35,6 +37,7 @@ import static org.apache.jackrabbit.JcrConstants.JCR_REQUIREDTYPE;
 import static org.apache.jackrabbit.JcrConstants.JCR_SAMENAMESIBLINGS;
 import static org.apache.jackrabbit.JcrConstants.JCR_UUID;
 import static org.apache.jackrabbit.JcrConstants.NT_BASE;
+import static org.apache.jackrabbit.oak.api.Type.BOOLEAN;
 import static org.apache.jackrabbit.oak.api.Type.NAMES;
 import static org.apache.jackrabbit.oak.api.Type.UNDEFINED;
 import static org.apache.jackrabbit.oak.api.Type.UNDEFINEDS;
@@ -305,12 +308,18 @@ public class NodeDelegate extends ItemDelegate {
 
     /**
      * Get the number of child nodes
-     *
+     * <p>
+     * If an implementation does know the exact value, it returns it (even if
+     * the value is higher than max). If the implementation does not know the
+     * exact value, and the child node count is higher than max, it may return
+     * Long.MAX_VALUE. The cost of the operation is at most O(max).
+     * 
+     * @param max the maximum value
      * @return number of child nodes of the node
      */
-    public long getChildCount() throws InvalidItemStateException {
+    public long getChildCount(long max) throws InvalidItemStateException {
         // TODO: Exclude "invisible" internal child nodes (OAK-182)
-        return getTree().getChildrenCount();
+        return getTree().getChildrenCount(max);
     }
 
     /**
@@ -656,6 +665,56 @@ public class NodeDelegate extends ItemDelegate {
             throws InvalidItemStateException {
         getTree().setOrderableChildren(enable);
     }
+
+    /**
+     * Checks whether this node is locked, either directly or through
+     * a deep lock on an ancestor.
+     *
+     * @return whether this node is locked
+     */
+    // FIXME: access to locking status should not depend on access rights
+    public boolean isLocked() {
+        return getLock() != null;
+    }
+
+    public NodeDelegate getLock() {
+        return getLock(false);
+    }
+
+    private NodeDelegate getLock(boolean deep) {
+        if (holdsLock(deep)) {
+            return this;
+        } else if (tree.isRoot()) {
+            return null;
+        } else {
+            return getParent().getLock(true);
+        }
+    }
+
+    /**
+     * Checks whether this node holds a lock.
+     *
+     * @param deep if {@code true}, only check for deep locks
+     * @return whether this node holds a lock
+     */
+    // FIXME: access to locking status should not depend on access rights
+    public boolean holdsLock(boolean deep) {
+        PropertyState property = tree.getProperty(JCR_LOCKISDEEP);
+        return property != null
+                && property.getType() == Type.BOOLEAN
+                && (!deep || property.getValue(BOOLEAN));
+    }
+
+    public String getLockOwner() {
+        PropertyState property = tree.getProperty(JCR_LOCKOWNER);
+        if (property != null && property.getType() == Type.STRING) {
+            return property.getValue(Type.STRING);
+        } else {
+            return null;
+        }
+    }
+
+
 
     @Override
     public String toString() {

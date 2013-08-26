@@ -36,8 +36,9 @@ import org.apache.jackrabbit.oak.core.TreeTypeProviderImpl;
 import org.apache.jackrabbit.oak.plugins.version.VersionConstants;
 import org.apache.jackrabbit.oak.spi.security.SecurityConfiguration;
 import org.apache.jackrabbit.oak.spi.security.SecurityProvider;
-import org.apache.jackrabbit.oak.spi.security.authorization.AccessControlConfiguration;
-import org.apache.jackrabbit.oak.spi.security.authorization.AccessControlConstants;
+import org.apache.jackrabbit.oak.spi.security.authorization.AuthorizationConfiguration;
+import org.apache.jackrabbit.oak.spi.security.authorization.accesscontrol.AccessControlConstants;
+import org.apache.jackrabbit.oak.spi.security.authorization.permission.PermissionConstants;
 import org.apache.jackrabbit.oak.spi.security.authorization.permission.PermissionProvider;
 import org.apache.jackrabbit.oak.spi.security.authorization.permission.Permissions;
 import org.apache.jackrabbit.oak.spi.security.authorization.permission.ReadStatus;
@@ -66,7 +67,7 @@ public class PermissionProviderImpl implements PermissionProvider, AccessControl
 
     private final String workspaceName;
 
-    private final AccessControlConfiguration acConfig;
+    private final AuthorizationConfiguration acConfig;
 
     private final CompiledPermissions compiledPermissions;
 
@@ -77,7 +78,7 @@ public class PermissionProviderImpl implements PermissionProvider, AccessControl
         this.root = root;
         this.workspaceName = root.getContentSession().getWorkspaceName();
 
-        acConfig = securityProvider.getConfiguration(AccessControlConfiguration.class);
+        acConfig = securityProvider.getConfiguration(AuthorizationConfiguration.class);
         immutableRoot = getImmutableRoot(root, acConfig);
 
         if (principals.contains(SystemPrincipal.INSTANCE) || isAdmin(principals)) {
@@ -183,7 +184,7 @@ public class PermissionProviderImpl implements PermissionProvider, AccessControl
     //--------------------------------------------------------------------------
 
     private boolean isAdmin(Set<Principal> principals) {
-        Set<String> adminNames = ImmutableSet.copyOf(acConfig.getParameters().getConfigValue(PARAM_ADMINISTRATOR_PRINCIPALS, new String[0]));
+        Set<String> adminNames = ImmutableSet.copyOf(acConfig.getParameters().getConfigValue(PARAM_ADMINISTRATIVE_PRINCIPALS, new String[0]));
         for (Principal principal : principals) {
             if (principal instanceof AdminPrincipal || adminNames.contains(principal.getName())) {
                 return true;

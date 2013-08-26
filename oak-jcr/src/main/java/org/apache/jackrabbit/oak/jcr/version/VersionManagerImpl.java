@@ -31,7 +31,6 @@ import javax.jcr.Property;
 import javax.jcr.RepositoryException;
 import javax.jcr.UnsupportedRepositoryOperationException;
 import javax.jcr.lock.LockException;
-import javax.jcr.lock.LockManager;
 import javax.jcr.nodetype.NodeType;
 import javax.jcr.util.TraversingItemVisitor;
 import javax.jcr.version.Version;
@@ -125,7 +124,7 @@ public class VersionManagerImpl implements VersionManager {
                     sessionDelegate.getRoot().commit();
                     success = true;
                 } catch (CommitFailedException e) {
-                    throw new RepositoryException(e);
+                    throw e.asRepositoryException();
                 } finally {
                     if (!success) {
                         // refresh if one of the modifying operations fail
@@ -324,11 +323,6 @@ public class VersionManagerImpl implements VersionManager {
         return v;
     }
 
-    @Nonnull
-    private LockManager getLockManager() {
-        return sessionContext.getLockManager();
-    }
-
     @Override
     public void checkout(final String absPath) throws RepositoryException {
         final SessionDelegate sessionDelegate = sessionContext.getSessionDelegate();
@@ -381,7 +375,8 @@ public class VersionManagerImpl implements VersionManager {
     }
 
     private void checkNotLocked(String absPath) throws RepositoryException {
-        if (getLockManager().isLocked(absPath)) {
+        // TODO: avoid nested calls
+        if (sessionContext.getWorkspace().getLockManager().isLocked(absPath)) {
             throw new LockException("Node at " + absPath + " is locked");
         }
     }
@@ -430,7 +425,10 @@ public class VersionManagerImpl implements VersionManager {
                 if (node.isNodeType(NodeType.NT_FROZEN_NODE)) {
                     uuids.add(node.getProperty(Property.JCR_FROZEN_UUID).getString());
                 } else if (node.isNodeType(NodeType.NT_VERSIONED_CHILD)) {
-                    // TODO: handle?
+                    Node history = node.getProperty(
+                            Property.JCR_CHILD_VERSION_HISTORY).getNode();
+                    uuids.add(history.getProperty(Property.JCR_VERSIONABLE_UUID).getString());
+                    // TODO: further traverse versioned children with some selector (date?)
                 }
             }
         });

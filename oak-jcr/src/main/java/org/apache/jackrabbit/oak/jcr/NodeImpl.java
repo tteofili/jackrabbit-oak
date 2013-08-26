@@ -40,8 +40,8 @@ import javax.jcr.PropertyType;
 import javax.jcr.RepositoryException;
 import javax.jcr.UnsupportedRepositoryOperationException;
 import javax.jcr.Value;
-import javax.jcr.Workspace;
 import javax.jcr.lock.Lock;
+import javax.jcr.lock.LockException;
 import javax.jcr.nodetype.ConstraintViolationException;
 import javax.jcr.nodetype.NodeDefinition;
 import javax.jcr.nodetype.NodeType;
@@ -55,6 +55,8 @@ import com.google.common.base.Predicate;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
+
+import org.apache.jackrabbit.JcrConstants;
 import org.apache.jackrabbit.api.JackrabbitNode;
 import org.apache.jackrabbit.commons.ItemNameMatcher;
 import org.apache.jackrabbit.commons.iterator.NodeIteratorAdapter;
@@ -70,22 +72,29 @@ import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.core.IdentifierManager;
 import org.apache.jackrabbit.oak.jcr.delegate.NodeDelegate;
 import org.apache.jackrabbit.oak.jcr.delegate.PropertyDelegate;
+import org.apache.jackrabbit.oak.jcr.delegate.VersionManagerDelegate;
+import org.apache.jackrabbit.oak.jcr.lock.LockImpl;
 import org.apache.jackrabbit.oak.jcr.operation.NodeOperation;
+import org.apache.jackrabbit.oak.jcr.operation.SessionOperation;
+import org.apache.jackrabbit.oak.jcr.version.VersionHistoryImpl;
+import org.apache.jackrabbit.oak.jcr.version.VersionImpl;
 import org.apache.jackrabbit.oak.plugins.memory.PropertyStates;
 import org.apache.jackrabbit.oak.plugins.nodetype.EffectiveNodeType;
 import org.apache.jackrabbit.oak.spi.security.authorization.permission.Permissions;
-import org.apache.jackrabbit.oak.util.TODO;
 import org.apache.jackrabbit.value.ValueHelper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import static com.google.common.base.Preconditions.checkNotNull;
+import static java.util.Arrays.asList;
 import static java.util.Collections.singleton;
 import static javax.jcr.Property.JCR_LOCK_IS_DEEP;
 import static javax.jcr.Property.JCR_LOCK_OWNER;
+import static org.apache.jackrabbit.JcrConstants.JCR_LOCKISDEEP;
+import static org.apache.jackrabbit.JcrConstants.JCR_LOCKOWNER;
 import static org.apache.jackrabbit.JcrConstants.JCR_MIXINTYPES;
 import static org.apache.jackrabbit.JcrConstants.JCR_PRIMARYTYPE;
-import static org.apache.jackrabbit.oak.api.Type.BOOLEAN;
+import static org.apache.jackrabbit.JcrConstants.MIX_LOCKABLE;
 import static org.apache.jackrabbit.oak.api.Type.NAME;
 import static org.apache.jackrabbit.oak.api.Type.NAMES;
 
@@ -97,9 +106,43 @@ import static org.apache.jackrabbit.oak.api.Type.NAMES;
 public class NodeImpl<T extends NodeDelegate> extends ItemImpl<T> implements Node, JackrabbitNode {
 
     /**
+     * The maximum returned value for {@link NodeIterator#getSize()}. If there
+     * are more nodes, the method returns -1.
+     */
+    private static final long NODE_ITERATOR_MAX_SIZE = Long.MAX_VALUE;
+
+    /**
      * logger instance
      */
     private static final Logger log = LoggerFactory.getLogger(NodeImpl.class);
+
+    public static NodeImpl<? extends NodeDelegate> createNodeOrNull(
+            NodeDelegate delegate, SessionContext context)
+            throws RepositoryException {
+        if (delegate != null) {
+            return createNode(delegate, context);
+        } else {
+            return null;
+        }
+    }
+
+    public static NodeImpl<? extends NodeDelegate> createNode(
+                NodeDelegate delegate, SessionContext context)
+                throws RepositoryException {
+        PropertyDelegate pd = delegate.getPropertyOrNull(JCR_PRIMARYTYPE);
+        String type = pd != null ? pd.getString() : null;
+        if (JcrConstants.NT_VERSION.equals(type)) {
+            VersionManagerDelegate vmd =
+                    VersionManagerDelegate.create(context.getSessionDelegate());
+            return new VersionImpl(vmd.createVersion(delegate), context);
+        } else if (JcrConstants.NT_VERSIONHISTORY.equals(type)) {
+            VersionManagerDelegate vmd =
+                    VersionManagerDelegate.create(context.getSessionDelegate());
+            return new VersionHistoryImpl(vmd.createVersionHistory(delegate), context);
+        } else {
+            return new NodeImpl<NodeDelegate>(delegate, context);
+        }
+    }
 
     public NodeImpl(T dlg, SessionContext sessionContext) {
         super(dlg, sessionContext);
@@ -131,7 +174,7 @@ public class NodeImpl<T extends NodeDelegate> extends ItemImpl<T> implements Nod
                     if (parent == null) {
                         throw new AccessDeniedException();
                     }
-                    return sessionContext.createNodeOrNull(parent);
+                    return NodeImpl.createNode(parent, sessionContext);
                 }
             }
         });
@@ -246,7 +289,7 @@ public class NodeImpl<T extends NodeDelegate> extends ItemImpl<T> implements Nod
                 if (added == null) {
                     throw new ItemExistsException();
                 }
-                return sessionContext.createNodeOrNull(added);
+                return NodeImpl.createNode(added, sessionContext);
             }
         });
     }
@@ -483,7 +526,7 @@ public class NodeImpl<T extends NodeDelegate> extends ItemImpl<T> implements Nod
                 if (nd == null) {
                     throw new PathNotFoundException(oakPath);
                 } else {
-                    return sessionContext.createNodeOrNull(nd);
+                    return NodeImpl.createNode(nd, sessionContext);
                 }
             }
         });
@@ -497,12 +540,15 @@ public class NodeImpl<T extends NodeDelegate> extends ItemImpl<T> implements Nod
             public NodeIterator perform() throws RepositoryException {
                 Iterator<NodeDelegate> children = node.getChildren();
                 return new NodeIteratorAdapter(nodeIterator(children)) {
-                    private long size = -1;
+                    private long size = -2;
                     @Override
                     public long getSize() {
-                        if (size == -1) {
+                        if (size == -2) {
                             try {
-                                size = node.getChildCount(); // TODO: perform()
+                                size = node.getChildCount(NODE_ITERATOR_MAX_SIZE); // TODO: perform()
+                                if (size == Long.MAX_VALUE) {
+                                    size = -1;
+                                }
                             } catch (InvalidItemStateException e) {
                                 throw new IllegalStateException(
                                         "This iterator is no longer valid", e);
@@ -832,8 +878,7 @@ public class NodeImpl<T extends NodeDelegate> extends ItemImpl<T> implements Nod
         return perform(new NodeOperation<Boolean>(dlg) {
             @Override
             public Boolean perform() throws RepositoryException {
-                return getEffectiveNodeTypeProvider().isNodeType(
-                        node.getTree(), oakName);
+                return getNodeTypeManager().isNodeType(node.getTree(), oakName);
             }
         });
     }
@@ -907,7 +952,7 @@ public class NodeImpl<T extends NodeDelegate> extends ItemImpl<T> implements Nod
                 return sessionContext.getAccessManager().hasPermissions(
                     node.getTree(), prop, Permissions.NODE_TYPE_MANAGEMENT)
                         && !node.isProtected()
-                        && sessionContext.getVersionManager().isCheckedOut(toJcrPath(dlg.getPath())) // TODO: avoid nested calls
+                        && getVersionManager().isCheckedOut(toJcrPath(dlg.getPath())) // TODO: avoid nested calls
                         && node.canAddMixin(oakTypeName);
             }
         });
@@ -921,9 +966,9 @@ public class NodeImpl<T extends NodeDelegate> extends ItemImpl<T> implements Nod
             public NodeDefinition perform() throws RepositoryException {
                 NodeDelegate parent = node.getParent();
                 if (parent == null) {
-                    return getDefinitionProvider().getRootDefinition();
+                    return getNodeTypeManager().getRootDefinition();
                 } else {
-                    return getDefinitionProvider().getDefinition(
+                    return getNodeTypeManager().getDefinition(
                             parent.getTree(), node.getTree());
                 }
             }
@@ -1079,144 +1124,76 @@ public class NodeImpl<T extends NodeDelegate> extends ItemImpl<T> implements Nod
         return getVersionManager().getBaseVersion(getPath());
     }
 
-    /**
-     * Checks whether this node is locked by looking for the
-     * {@code jcr:lockOwner} property either on this node or
-     * on any ancestor that also has the {@code jcr:lockIsDeep}
-     * property set to {@code true}.
-     */
     @Override
     public boolean isLocked() throws RepositoryException {
-        final String lockOwner = getOakPathOrThrow(JCR_LOCK_OWNER);
-        final String lockIsDeep = getOakPathOrThrow(JCR_LOCK_IS_DEEP);
         return perform(new NodeOperation<Boolean>(dlg) {
             @Override
             public Boolean perform() throws RepositoryException {
-                if (node.getPropertyOrNull(lockOwner) != null) {
-                    return true;
-                }
-
-                NodeDelegate parent = node.getParent();
-                while (parent != null) {
-                    if (parent.getPropertyOrNull(lockOwner) != null) {
-                        PropertyDelegate isDeep =
-                                parent.getPropertyOrNull(lockIsDeep);
-                        if (isDeep != null) {
-                            PropertyState state = isDeep.getPropertyState();
-                            if (!state.isArray() && state.getValue(BOOLEAN)) {
-                                return true;
-                            }
-                        }
-                    }
-                    parent = parent.getParent();
-                }
-
-                return false;
+                return node.isLocked();
             }
         });
     }
 
     /**
      * Checks whether this node holds a lock by looking for the
-     * {@code jcr:lockOwner} property.
+     * {@code jcr:lockIsDeep} property.
      */
     @Override
     public boolean holdsLock() throws RepositoryException {
-        final String lockOwner = getOakPathOrThrow(JCR_LOCK_OWNER);
         return perform(new NodeOperation<Boolean>(dlg) {
             @Override
             public Boolean perform() throws RepositoryException {
-                return node.getPropertyOrNull(lockOwner) != null;
+                return node.getTree().hasProperty(JCR_LOCKISDEEP);
             }
         });
     }
 
-    /**
-     * @see javax.jcr.Node#getLock()
-     */
-    @Override
-    @Nonnull
+    @Override @Nonnull
     public Lock getLock() throws RepositoryException {
-        throw new UnsupportedRepositoryOperationException();
+        NodeDelegate lock = perform(new NodeOperation<NodeDelegate>(dlg) {
+            @Override
+            public NodeDelegate perform() {
+                return node.getLock();
+            }
+        });
+        if (lock != null) {
+            return new LockImpl(sessionContext, lock);
+        } else {
+            throw new LockException("Node " + getPath() + " is not locked");
+        }
     }
 
     /**
      * @see javax.jcr.Node#lock(boolean, boolean)
      */
-    @Override
-    @Nonnull
+    @Override @Nonnull
     public Lock lock(final boolean isDeep, boolean isSessionScoped)
             throws RepositoryException {
-        // TODO: use perform()
-        ContentSession session = sessionDelegate.getContentSession();
-        final String userID = session.getAuthInfo().getUserID();
+        checkLockable(); // TODO: use perform()
+        perform(new SessionOperation<Void>(true) {
+            @Override
+            public Void perform() throws RepositoryException {
+                ContentSession session = sessionDelegate.getContentSession();
+                String path = dlg.getPath();
+                String userID = session.getAuthInfo().getUserID();
 
-        String lockOwner = getOakPathOrThrow(JCR_LOCK_OWNER);
-        String lockIsDeep = getOakPathOrThrow(JCR_LOCK_IS_DEEP);
-        try {
-            Root root = session.getLatestRoot();
-            Tree tree = root.getTree(dlg.getPath());
-            if (!tree.exists()) {
-                throw new ItemNotFoundException();
+                try {
+                    Root root = session.getLatestRoot();
+                    Tree tree = root.getTree(path);
+                    if (!tree.exists()) {
+                        throw new ItemNotFoundException();
+                    }
+                    tree.setProperty(JCR_LOCKOWNER, userID);
+                    tree.setProperty(JCR_LOCKISDEEP, isDeep);
+                    root.commit(); // TODO: fail instead?
+                } catch (CommitFailedException e) {
+                    throw new RepositoryException("Unable to lock " + path, e);
+                }
+                return null;
             }
-            tree.setProperty(lockOwner, userID);
-            tree.setProperty(lockIsDeep, isDeep);
-            root.commit(); // TODO: fail instead?
-        } catch (CommitFailedException e) {
-            throw new RepositoryException("Unable to lock " + this, e);
-        }
-
+        });
         getSession().refresh(true);
-
-        if (isSessionScoped) {
-            return TODO.dummyImplementation().returnValue(new Lock() {
-                @Override
-                public String getLockOwner() {
-                    return userID;
-                }
-
-                @Override
-                public boolean isDeep() {
-                    return isDeep;
-                }
-
-                @Override
-                public Node getNode() {
-                    return NodeImpl.this;
-                }
-
-                @Override
-                public String getLockToken() {
-                    return null;
-                }
-
-                @Override
-                public long getSecondsRemaining() {
-                    return Long.MAX_VALUE;
-                }
-
-                @Override
-                public boolean isLive() {
-                    return true;
-                }
-
-                @Override
-                public boolean isSessionScoped() {
-                    return true;
-                }
-
-                @Override
-                public boolean isLockOwningSession() {
-                    return true;
-                }
-
-                @Override
-                public void refresh() {
-                }
-            });
-        }
-
-        return getLock();
+        return new LockImpl(sessionContext, dlg);
     }
 
     /**
@@ -1224,6 +1201,7 @@ public class NodeImpl<T extends NodeDelegate> extends ItemImpl<T> implements Nod
      */
     @Override
     public void unlock() throws RepositoryException {
+        checkLockable();
         // TODO: use perform
         String lockOwner = getOakPathOrThrow(JCR_LOCK_OWNER);
         String lockIsDeep = getOakPathOrThrow(JCR_LOCK_IS_DEEP);
@@ -1288,8 +1266,26 @@ public class NodeImpl<T extends NodeDelegate> extends ItemImpl<T> implements Nod
 
     //------------------------------------------------------------< internal >---
 
+    /**
+     * Checks if this node is lockable; otherwise throws a LockException.
+     * @throws LockException if the node is not lockable.
+     */
+    private void checkLockable() throws RepositoryException {
+        perform(new NodeOperation<Void>(dlg) {
+            @Override
+            public Void perform() throws RepositoryException {
+                if (!getNodeTypeManager().isNodeType(node.getTree(), MIX_LOCKABLE)) {
+                    String msg = "Unable to perform a locking operation on a non-lockable node: " + getPath();
+                    log.debug(msg);
+                    throw new LockException(msg);
+                }
+                return null;
+            }
+        });
+    }
+
     private EffectiveNodeType getEffectiveNodeType() throws RepositoryException {
-        return getEffectiveNodeTypeProvider().getEffectiveNodeType(dlg.getTree());
+        return getNodeTypeManager().getEffectiveNodeType(dlg.getTree());
     }
 
     private Iterator<Node> nodeIterator(Iterator<NodeDelegate> childNodes) {
@@ -1314,14 +1310,14 @@ public class NodeImpl<T extends NodeDelegate> extends ItemImpl<T> implements Nod
                 });
     }
 
-    private void checkValidWorkspace(String workspaceName) throws RepositoryException {
-        Workspace workspace = sessionContext.getWorkspace();
-        for (String wn : workspace.getAccessibleWorkspaceNames()) {
-            if (wn.equals(workspaceName)) {
-                return;
-            }
+    private void checkValidWorkspace(String workspaceName)
+            throws RepositoryException {
+        String[] workspaceNames =
+                getSession().getWorkspace().getAccessibleWorkspaceNames();
+        if (!asList(workspaceNames).contains(workspaceName)) {
+            throw new NoSuchWorkspaceException(
+                    "Workspace " + workspaceName + " does not exist");
         }
-        throw new NoSuchWorkspaceException(workspaceName + " does not exist.");
     }
 
     private void internalSetPrimaryType(final String nodeTypeName) throws RepositoryException {

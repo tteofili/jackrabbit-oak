@@ -22,13 +22,14 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Enumeration;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 import org.apache.jackrabbit.mk.api.MicroKernelException;
 import org.apache.jackrabbit.mk.util.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import static org.apache.jackrabbit.oak.plugins.mongomk.Document.ID;
 
 /**
  * Information about a cluster node.
@@ -41,11 +42,6 @@ public class ClusterNodeInfo {
      * The prefix for random (non-reusable) keys.
      */
     private static final String RANDOM_PREFIX = "random:";
-    
-    /**
-     * The cluster node id.
-     */
-    private static final String ID_KEY = "_id";
     
     /**
      * The machine id.
@@ -164,13 +160,13 @@ public class ClusterNodeInfo {
         }
         for (int i = 0; i < 10; i++) {
             ClusterNodeInfo clusterNode = createInstance(store, machineId, instanceId);
-            UpdateOp update = new UpdateOp(null, "" + clusterNode.id, true);
-            update.set(ID_KEY, "" + clusterNode.id);
+            UpdateOp update = new UpdateOp("" + clusterNode.id, true);
+            update.set(ID, String.valueOf(clusterNode.id));
             update.set(MACHINE_ID_KEY, clusterNode.machineId);
             update.set(INSTANCE_ID_KEY, clusterNode.instanceId);
             update.set(LEASE_END_KEY, System.currentTimeMillis() + clusterNode.leaseTime);
             update.set(INFO_KEY, clusterNode.toString());
-            boolean success = store.create(DocumentStore.Collection.CLUSTER_NODES, Collections.singletonList(update));
+            boolean success = store.create(Collection.CLUSTER_NODES, Collections.singletonList(update));
             if (success) {
                 return clusterNode;
             }
@@ -181,12 +177,12 @@ public class ClusterNodeInfo {
     private static ClusterNodeInfo createInstance(DocumentStore store, String machineId, String instanceId) {
         long now = System.currentTimeMillis();
         // keys between "0" and "a" includes all possible numbers
-        List<Map<String, Object>> list = store.query(DocumentStore.Collection.CLUSTER_NODES,
+        List<ClusterNodeInfoDocument> list = store.query(Collection.CLUSTER_NODES,
                 "0", "a", Integer.MAX_VALUE);
         int clusterNodeId = 0;
         int maxId = 0;
-        for (Map<String, Object> doc : list) {
-            String key = "" + doc.get(ID_KEY);
+        for (Document doc : list) {
+            String key = doc.getId();
             int id;
             try {
                 id = Integer.parseInt(key);
@@ -203,7 +199,7 @@ public class ClusterNodeInfo {
             String iId = "" + doc.get(INSTANCE_ID_KEY);
             if (machineId.startsWith(RANDOM_PREFIX)) {
                 // remove expired entries with random keys
-                store.remove(DocumentStore.Collection.CLUSTER_NODES, key);
+                store.remove(Collection.CLUSTER_NODES, key);
                 continue;
             }
             if (!mId.equals(machineId) || 
@@ -212,7 +208,7 @@ public class ClusterNodeInfo {
                 continue;
             }
             // remove expired matching entries
-            store.remove(DocumentStore.Collection.CLUSTER_NODES, key);
+            store.remove(Collection.CLUSTER_NODES, key);
             if (clusterNodeId == 0 || id < clusterNodeId) {
                 // if there are multiple, use the smallest value
                 clusterNodeId = id;
@@ -235,10 +231,10 @@ public class ClusterNodeInfo {
         if (now + nextCheckMillis + nextCheckMillis < leaseEndTime) {
             return;
         }
-        UpdateOp update = new UpdateOp(null, "" + id, true);
+        UpdateOp update = new UpdateOp("" + id, true);
         leaseEndTime = now + leaseTime;
         update.set(LEASE_END_KEY, leaseEndTime);
-        store.createOrUpdate(DocumentStore.Collection.CLUSTER_NODES, update);
+        store.createOrUpdate(Collection.CLUSTER_NODES, update);
     }
     
     public void setLeaseTime(long leaseTime) {
@@ -250,9 +246,9 @@ public class ClusterNodeInfo {
     }
     
     public void dispose() {
-        UpdateOp update = new UpdateOp(null, "" + id, true);
+        UpdateOp update = new UpdateOp("" + id, true);
         update.set(LEASE_END_KEY, null);
-        store.createOrUpdate(DocumentStore.Collection.CLUSTER_NODES, update);
+        store.createOrUpdate(Collection.CLUSTER_NODES, update);
     }
     
     @Override

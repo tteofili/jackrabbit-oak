@@ -18,8 +18,10 @@ package org.apache.jackrabbit.oak.jcr;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 
-import java.util.concurrent.TimeUnit;
+import java.util.Collections;
+import java.util.Map;
 
+import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import javax.jcr.Credentials;
@@ -30,6 +32,7 @@ import javax.jcr.SimpleCredentials;
 import javax.jcr.Value;
 import javax.security.auth.login.LoginException;
 
+import org.apache.jackrabbit.api.JackrabbitRepository;
 import org.apache.jackrabbit.api.security.authentication.token.TokenCredentials;
 import org.apache.jackrabbit.commons.SimpleValueFactory;
 import org.apache.jackrabbit.oak.api.ContentRepository;
@@ -43,7 +46,7 @@ import org.slf4j.LoggerFactory;
 /**
  * TODO document
  */
-public class RepositoryImpl implements Repository {
+public class RepositoryImpl implements JackrabbitRepository {
 
     /**
      * logger instance
@@ -54,18 +57,18 @@ public class RepositoryImpl implements Repository {
      * Name of the session attribute value determining the session refresh
      * behaviour.
      *
-     * @see SessionDelegate#SessionDelegate(ContentSession, long)
+     * @see SessionDelegate#SessionDelegate(ContentSession, SecurityProvider, long)
      */
-    public static final String REFRESH_INTERVAL = "refresh-interval";
+    public static final String REFRESH_INTERVAL = "oak.refresh-interval";
 
     /**
      * Default value for {@link #REFRESH_INTERVAL}.
      */
-    private static final long DEFAULT_REFRESH_INTERVAL = TimeUnit.SECONDS.toMillis(1);
+    private static final long DEFAULT_REFRESH_INTERVAL = Long.getLong("default-refresh-interval", 1);
 
     private final Descriptors descriptors = new Descriptors(new SimpleValueFactory());
     private final ContentRepository contentRepository;
-    private final Whiteboard whiteboard;
+    protected final Whiteboard whiteboard;
     private final SecurityProvider securityProvider;
 
     public RepositoryImpl(@Nonnull ContentRepository contentRepository,
@@ -133,58 +136,13 @@ public class RepositoryImpl implements Repository {
         return descriptors.isSingleValueDescriptor(key);
     }
 
-    private Session login(
-            @Nullable Credentials credentials, @Nullable String workspaceName,
-            long refreshInterval) throws RepositoryException {
-        try {
-            ContentSession contentSession = contentRepository.login(credentials, workspaceName);
-            SessionContext context = new SessionContext(this, whiteboard,
-                    new SessionDelegate(contentSession, refreshInterval));
-            return context.getSession();
-        } catch (LoginException e) {
-            throw new javax.jcr.LoginException(e.getMessage(), e);
-        }
-    }
-
-    private static long getRefreshInterval(Credentials credentials) {
-        if (credentials instanceof SimpleCredentials) {
-            Object refreshAttribute = ((SimpleCredentials) credentials)
-                    .getAttribute(REFRESH_INTERVAL);
-            if (refreshAttribute instanceof Long) {
-                return (Long) refreshAttribute;
-            } else if (refreshAttribute instanceof Integer) {
-                return (Integer) refreshAttribute;
-            } else if (refreshAttribute instanceof String) {
-                return toLong((String) refreshAttribute);
-            }
-        } else if (credentials instanceof TokenCredentials) {
-            String refreshAttribute = ((TokenCredentials) credentials)
-                    .getAttribute(REFRESH_INTERVAL);
-            if (refreshAttribute != null) {
-                return toLong(refreshAttribute);
-            }
-        }
-        return DEFAULT_REFRESH_INTERVAL;
-    }
-
-    private static long toLong(String longValue) {
-        try {
-            return Long.parseLong(longValue);
-        } catch (NumberFormatException e) {
-            log.warn("Invalid value '" + longValue + "' for " + REFRESH_INTERVAL +
-                    ". Expected long. Defaulting to '" + DEFAULT_REFRESH_INTERVAL +
-                    "' seconds .", e);
-            return DEFAULT_REFRESH_INTERVAL;
-        }
-    }
-
     /**
      * @see javax.jcr.Repository#login(javax.jcr.Credentials, String)
      */
     @Override
     public Session login(@Nullable Credentials credentials, @Nullable String workspaceName)
             throws RepositoryException {
-        return login(credentials, workspaceName, getRefreshInterval(credentials));
+        return login(credentials, workspaceName, null);
     }
 
     /**
@@ -196,7 +154,7 @@ public class RepositoryImpl implements Repository {
      */
     @Override
     public Session login() throws RepositoryException {
-        return login(null, null);
+        return login(null, null, null);
     }
 
     /**
@@ -209,7 +167,7 @@ public class RepositoryImpl implements Repository {
      */
     @Override
     public Session login(Credentials credentials) throws RepositoryException {
-        return login(credentials, null);
+        return login(credentials, null, null);
     }
 
     /**
@@ -222,10 +180,70 @@ public class RepositoryImpl implements Repository {
      */
     @Override
     public Session login(String workspace) throws RepositoryException {
-        return login(null, workspace);
+        return login(null, workspace, null);
+    }
+
+    //------------------------------------------------------------< JackrabbitRepository >---
+
+    @Override
+    public Session login(@CheckForNull Credentials credentials, @CheckForNull String workspaceName,
+            @CheckForNull Map<String, Object> attributes) throws RepositoryException {
+        try {
+            if (attributes == null) {
+                attributes = Collections.emptyMap();
+            }
+            Long refreshInterval = getRefreshInterval(credentials);
+            if (refreshInterval == null) {
+                refreshInterval = getRefreshInterval(attributes);
+            } else if (attributes.containsKey(REFRESH_INTERVAL)) {
+                throw new RepositoryException("Duplicate attribute '" + REFRESH_INTERVAL + "'.");
+            }
+            if (refreshInterval == null) {
+                refreshInterval = DEFAULT_REFRESH_INTERVAL;
+            }
+
+            ContentSession contentSession = contentRepository.login(credentials, workspaceName);
+            SessionContext context = createSessionContext(
+                    Collections.<String, Object>singletonMap(REFRESH_INTERVAL, refreshInterval),
+                    createSessionDelegate(contentSession, securityProvider, refreshInterval));
+            return context.getSession();
+        } catch (LoginException e) {
+            throw new javax.jcr.LoginException(e.getMessage(), e);
+        }
+    }
+
+
+
+    @Override
+    public void shutdown() {
+        // empty
     }
 
     //------------------------------------------------------------< internal >---
+
+    /**
+     * Factory method for creating a {@link SessionContext} instance for
+     * a new session. Called by {@link #login()}. Can be overridden by
+     * subclasses to customize the session implementation.
+     *
+     * @return session context
+     */
+    protected SessionContext createSessionContext(
+            Map<String, Object> attributes, SessionDelegate delegate) {
+        return new SessionContext(this, whiteboard, attributes, delegate);
+    }
+
+    /**
+     * Factory method for creating a {@link SessionDelegate} instance for
+     * a new session. Called by {@link #login()}. Can be overridden by
+     * subclasses to customize the SessionDelegate implementation.
+     *
+     * @return session context
+     */
+    protected SessionDelegate createSessionDelegate(ContentSession contentSession, SecurityProvider securityProvider,
+                                                  Long refreshInterval) {
+        return new SessionDelegate(contentSession,securityProvider,refreshInterval);
+    }
 
     SecurityProvider getSecurityProvider() {
         return securityProvider;
@@ -233,6 +251,56 @@ public class RepositoryImpl implements Repository {
 
     ContentRepository getContentRepository() {
         return contentRepository;
+    }
+
+    //------------------------------------------------------------< private >---
+
+    private static Long getRefreshInterval(Credentials credentials) {
+        if (credentials instanceof SimpleCredentials) {
+            Object value = ((SimpleCredentials) credentials).getAttribute(REFRESH_INTERVAL);
+            return toLong(value);
+        } else if (credentials instanceof TokenCredentials) {
+            String value = ((TokenCredentials) credentials).getAttribute(REFRESH_INTERVAL);
+            if (value != null) {
+                return toLong(value);
+            }
+        }
+        return null;
+    }
+
+    private static Long getRefreshInterval(Map<String, Object> attributes) {
+        return toLong(attributes.get(REFRESH_INTERVAL));
+    }
+
+    private static String getString(Map<String, Object> attributes, String name) {
+        Object value = attributes.get(name);
+        if (value instanceof String) {
+            return (String) value;
+        } else {
+            return null;
+        }
+    }
+
+    private static Long toLong(Object value) {
+        if (value instanceof Long) {
+            return (Long) value;
+        } else if (value instanceof Integer) {
+            return ((Integer) value).longValue();
+        } else if (value instanceof String) {
+            return toLong((String) value);
+        } else {
+            return null;
+        }
+    }
+
+    private static Long toLong(String longValue) {
+        try {
+            return Long.valueOf(longValue);
+        } catch (NumberFormatException e) {
+            log.warn("Invalid value '" + longValue + "' for " + REFRESH_INTERVAL +
+                    ". Expected long. ", e);
+            return null;
+        }
     }
 
 }

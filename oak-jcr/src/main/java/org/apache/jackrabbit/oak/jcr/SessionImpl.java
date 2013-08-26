@@ -16,10 +16,16 @@
  */
 package org.apache.jackrabbit.oak.jcr;
 
+import static com.google.common.collect.Sets.newTreeSet;
+import static org.apache.jackrabbit.oak.commons.PathUtils.getParentPath;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.security.AccessControlException;
+import java.util.Collections;
+import java.util.Set;
+
 import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
 import javax.jcr.AccessDeniedException;
@@ -36,7 +42,6 @@ import javax.jcr.Session;
 import javax.jcr.UnsupportedRepositoryOperationException;
 import javax.jcr.ValueFactory;
 import javax.jcr.Workspace;
-import javax.jcr.lock.LockManager;
 import javax.jcr.nodetype.ConstraintViolationException;
 import javax.jcr.retention.RetentionManager;
 import javax.jcr.security.AccessControlManager;
@@ -65,8 +70,6 @@ import org.slf4j.LoggerFactory;
 import org.xml.sax.ContentHandler;
 import org.xml.sax.SAXException;
 
-import static org.apache.jackrabbit.oak.commons.PathUtils.getParentPath;
-
 /**
  * TODO document
  */
@@ -76,7 +79,7 @@ public class SessionImpl implements JackrabbitSession {
     private final SessionContext sessionContext;
     private final SessionDelegate sd;
 
-    SessionImpl(SessionContext sessionContext) {
+    public SessionImpl(SessionContext sessionContext) {
         this.sessionContext = sessionContext;
         this.sd = sessionContext.getSessionDelegate();
     }
@@ -133,7 +136,7 @@ public class SessionImpl implements JackrabbitSession {
             throws RepositoryException {
         ItemDelegate item = sd.getItem(oakPath);
         if (item instanceof NodeDelegate) {
-            return sessionContext.createNodeOrNull((NodeDelegate) item);
+            return NodeImpl.createNodeOrNull((NodeDelegate) item, sessionContext);
         } else if (item instanceof PropertyDelegate) {
             return new PropertyImpl((PropertyDelegate) item, sessionContext);
         } else {
@@ -154,7 +157,7 @@ public class SessionImpl implements JackrabbitSession {
         return perform(new ReadOperation<Node>() {
             @Override
             public Node perform() throws RepositoryException {
-                return sessionContext.createNodeOrNull(sd.getNode(getOakPathOrThrow(absPath)));
+                return NodeImpl.createNodeOrNull(sd.getNode(getOakPathOrThrow(absPath)), sessionContext);
             }
         });
     }
@@ -221,16 +224,21 @@ public class SessionImpl implements JackrabbitSession {
 
     @Override
     public String[] getAttributeNames() {
-        return sd.getAuthInfo().getAttributeNames();
+        Set<String> names = newTreeSet(sessionContext.getAttributes().keySet());
+        Collections.addAll(names, sd.getAuthInfo().getAttributeNames());
+        return names.toArray(new String[names.size()]);
     }
 
     @Override
     public Object getAttribute(String name) {
-        return sd.getAuthInfo().getAttribute(name);
+        Object attribute = sd.getAuthInfo().getAttribute(name);
+        if (attribute == null) {
+            attribute = sessionContext.getAttributes().get(name);
+        }
+        return attribute;
     }
 
-    @Override
-    @Nonnull
+    @Override @Nonnull
     public Workspace getWorkspace() {
         return sessionContext.getWorkspace();
     }
@@ -261,7 +269,7 @@ public class SessionImpl implements JackrabbitSession {
                 if (nd == null) {
                     throw new AccessDeniedException("Root node is not accessible.");
                 }
-                return sessionContext.createNodeOrNull(nd);
+                return NodeImpl.createNodeOrNull(nd, sessionContext);
             }
         });
     }
@@ -289,7 +297,7 @@ public class SessionImpl implements JackrabbitSession {
                 if (nd == null) {
                     throw new ItemNotFoundException("Node with id " + id + " does not exist.");
                 }
-                return sessionContext.createNodeOrNull(nd);
+                return NodeImpl.createNodeOrNull(nd, sessionContext);
             }
         });
     }
@@ -384,7 +392,6 @@ public class SessionImpl implements JackrabbitSession {
             @Override
             public Void perform() throws RepositoryException {
                 sd.save();
-                sessionContext.refresh(false);
                 return null;
             }
         });
@@ -394,9 +401,8 @@ public class SessionImpl implements JackrabbitSession {
     public void refresh(final boolean keepChanges) throws RepositoryException {
         perform(new WriteOperation<Void>() {
             @Override
-            public Void perform() throws RepositoryException {
+            public Void perform() {
                 sd.refresh(keepChanges);
-                sessionContext.refresh(false);
                 return null;
             }
 
@@ -526,46 +532,31 @@ public class SessionImpl implements JackrabbitSession {
         }
     }
 
-    @Nonnull
-    private LockManager getLockManager() {
-        return sessionContext.getLockManager();
-    }
-
-    /**
-     * @see javax.jcr.Session#addLockToken(String)
-     */
     @Override
     public void addLockToken(String lt) {
         try {
-            getLockManager().addLockToken(lt);
+            getWorkspace().getLockManager().addLockToken(lt);
         } catch (RepositoryException e) {
-            log.warn("Unable to add lock token '{}' to this session: {}", lt, e.getMessage());
+            log.warn("Unable to add lock token " + lt + " to session", e);
         }
     }
 
-    /**
-     * @see javax.jcr.Session#getLockTokens()
-     */
-    @Override
-    @Nonnull
+    @Override @Nonnull
     public String[] getLockTokens() {
         try {
-            return getLockManager().getLockTokens();
+            return getWorkspace().getLockManager().getLockTokens();
         } catch (RepositoryException e) {
-            log.warn("Unable to retrieve lock tokens for this session: {}", e.getMessage());
+            log.warn("Unable to retrieve lock tokens from session", e);
             return new String[0];
         }
     }
 
-    /**
-     * @see javax.jcr.Session#removeLockToken(String)
-     */
     @Override
     public void removeLockToken(String lt) {
         try {
-            getLockManager().addLockToken(lt);
+            getWorkspace().getLockManager().removeLockToken(lt);
         } catch (RepositoryException e) {
-            log.warn("Unable to add lock token '{}' to this session: {}", lt, e.getMessage());
+            log.warn("Unable to remove lock token " + lt + " from session", e);
         }
     }
 
@@ -697,4 +688,8 @@ public class SessionImpl implements JackrabbitSession {
         return sessionContext.getUserManager();
     }
 
+    @Override
+    public String toString() {
+        return sd.getContentSession().toString();
+    }
 }

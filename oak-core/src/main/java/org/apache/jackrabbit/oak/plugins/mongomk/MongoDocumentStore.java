@@ -19,7 +19,6 @@ package org.apache.jackrabbit.oak.plugins.mongomk;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Map;
 import java.util.Map.Entry;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
@@ -29,9 +28,7 @@ import javax.annotation.Nonnull;
 
 import org.apache.jackrabbit.mk.api.MicroKernelException;
 import org.apache.jackrabbit.oak.plugins.mongomk.UpdateOp.Operation;
-import org.apache.jackrabbit.oak.plugins.mongomk.util.Utils;
 import org.apache.jackrabbit.oak.cache.CacheStats;
-import org.apache.jackrabbit.oak.cache.CacheValue;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -63,7 +60,7 @@ public class MongoDocumentStore implements DocumentStore {
      */
     private long timeSum;
     
-    private final Cache<String, CachedDocument> nodesCache;
+    private final Cache<String, NodeDocument> nodesCache;
     private final CacheStats cacheStats;
 
     public MongoDocumentStore(DB db, MongoMK.Builder builder) {
@@ -76,7 +73,7 @@ public class MongoDocumentStore implements DocumentStore {
         // the _id field is the primary key, so we don't need to define it
         DBObject index = new BasicDBObject();
         // modification time (descending)
-        index.put(UpdateOp.MODIFIED, -1L);
+        index.put(NodeDocument.MODIFIED, -1L);
         DBObject options = new BasicDBObject();
         options.put("unique", Boolean.FALSE);
         nodes.ensureIndex(index, options);
@@ -122,52 +119,65 @@ public class MongoDocumentStore implements DocumentStore {
     }
 
     @Override
-    public Map<String, Object> find(Collection collection, String key) {
+    public <T extends Document> T find(Collection<T> collection, String key) {
         return find(collection, key, Integer.MAX_VALUE);
     }
     
     @Override
-    public Map<String, Object> find(final Collection collection, final String key, int maxCacheAge) {
+    public <T extends Document> T find(final Collection<T> collection,
+                                       final String key,
+                                       int maxCacheAge) {
         if (collection != Collection.NODES) {
             return findUncached(collection, key);
         }
         try {
-            CachedDocument doc;
+            NodeDocument doc;
             if (maxCacheAge == 0) {
                 nodesCache.invalidate(key);
             }
             while (true) {
-                doc = nodesCache.get(key, new Callable<CachedDocument>() {
+                doc = nodesCache.get(key, new Callable<NodeDocument>() {
                     @Override
-                    public CachedDocument call() throws Exception {
-                        Map<String, Object> map = findUncached(collection, key);
-                        return new CachedDocument(map);
+                    public NodeDocument call() throws Exception {
+                        NodeDocument doc = (NodeDocument) findUncached(collection, key);
+                        if (doc == null) {
+                            doc = NodeDocument.NULL;
+                        }
+                        return doc;
                     }
                 });
                 if (maxCacheAge == 0 || maxCacheAge == Integer.MAX_VALUE) {
                     break;
                 }
-                if (System.currentTimeMillis() - doc.time < maxCacheAge) {
+                if (System.currentTimeMillis() - doc.getCreated() < maxCacheAge) {
                     break;
                 }
                 // too old: invalidate, try again
                 nodesCache.invalidate(key);
             }
-            return doc.value;
+            if (doc == NodeDocument.NULL) {
+                return null;
+            } else {
+                //noinspection unchecked
+                return (T) doc;
+            }
         } catch (ExecutionException e) {
             throw new IllegalStateException("Failed to load document with " + key, e);
         }
     }
     
-    Map<String, Object> findUncached(Collection collection, String key) {
+    @CheckForNull
+    <T extends Document> T findUncached(Collection<T> collection, String key) {
         DBCollection dbCollection = getDBCollection(collection);
         long start = start();
         try {
-            DBObject doc = dbCollection.findOne(getByKeyQuery(key).get());
-            if (doc == null) {
+            DBObject obj = dbCollection.findOne(getByKeyQuery(key).get());
+            if (obj == null) {
                 return null;
             }
-            return convertFromDBObject(doc);
+            T doc = convertFromDBObject(collection, obj);
+            doc.seal();
+            return doc;
         } finally {
             end("findUncached", start);
         }
@@ -175,17 +185,24 @@ public class MongoDocumentStore implements DocumentStore {
     
     @Nonnull
     @Override
-    public List<Map<String, Object>> query(Collection collection,
-            String fromKey, String toKey, int limit) {
+    public <T extends Document> List<T> query(Collection<T> collection,
+                                String fromKey,
+                                String toKey,
+                                int limit) {
         return query(collection, fromKey, toKey, null, 0, limit);
     }
-    
+
+    @Nonnull
     @Override
-    public List<Map<String, Object>> query(Collection collection,
-            String fromKey, String toKey, String indexedProperty, long startValue, int limit) {
+    public <T extends Document> List<T> query(Collection<T> collection,
+                                              String fromKey,
+                                              String toKey,
+                                              String indexedProperty,
+                                              long startValue,
+                                              int limit) {
         log("query", fromKey, toKey, limit);
         DBCollection dbCollection = getDBCollection(collection);
-        QueryBuilder queryBuilder = QueryBuilder.start(UpdateOp.ID);
+        QueryBuilder queryBuilder = QueryBuilder.start(Document.ID);
         queryBuilder.greaterThanEquals(fromKey);
         queryBuilder.lessThan(toKey);
         if (indexedProperty != null) {
@@ -196,15 +213,15 @@ public class MongoDocumentStore implements DocumentStore {
         long start = start();
         try {
             DBCursor cursor = dbCollection.find(query);
-            List<Map<String, Object>> list = new ArrayList<Map<String, Object>>();
+            List<T> list = new ArrayList<T>();
             for (int i = 0; i < limit && cursor.hasNext(); i++) {
                 DBObject o = cursor.next();
-                Map<String, Object> map = convertFromDBObject(o);
+                T doc = convertFromDBObject(collection, o);
+                doc.seal();
                 if (collection == Collection.NODES) {
-                    String key = (String) map.get(UpdateOp.ID);
-                    nodesCache.put(key, new CachedDocument(map));
+                    nodesCache.put(doc.getId(), (NodeDocument) doc);
                 }
-                list.add(map);
+                list.add(doc);
             }
             return list;
         } finally {
@@ -231,10 +248,10 @@ public class MongoDocumentStore implements DocumentStore {
     }
 
     @CheckForNull
-    private Map<String, Object> findAndModify(Collection collection,
-                                               UpdateOp updateOp,
-                                               boolean upsert,
-                                               boolean checkConditions) {
+    private <T extends Document> T findAndModify(Collection<T> collection,
+                                                 UpdateOp updateOp,
+                                                 boolean upsert,
+                                                 boolean checkConditions) {
         DBCollection dbCollection = getDBCollection(collection);
         QueryBuilder query = getByKeyQuery(updateOp.key);
 
@@ -244,7 +261,7 @@ public class MongoDocumentStore implements DocumentStore {
 
         for (Entry<String, Operation> entry : updateOp.changes.entrySet()) {
             String k = entry.getKey();
-            if (k.equals(UpdateOp.ID)) {
+            if (k.equals(Document.ID)) {
                 // avoid exception "Mod on _id not allowed"
                 continue;
             }
@@ -305,18 +322,19 @@ public class MongoDocumentStore implements DocumentStore {
             if (checkConditions && oldNode == null) {
                 return null;
             }
-            Map<String, Object> map = convertFromDBObject(oldNode);
+            T doc = convertFromDBObject(collection, oldNode);
             
             // cache the new document
             if (collection == Collection.NODES) {
-                Map<String, Object> newMap = Utils.newMap();
-                Utils.deepCopyMap(map, newMap);
+                T newDoc = collection.newDocument();
+                doc.deepCopy(newDoc);
                 String key = updateOp.getKey();
-                MemoryDocumentStore.applyChanges(newMap, updateOp);
-                nodesCache.put(key, new CachedDocument(newMap));
+                MemoryDocumentStore.applyChanges(newDoc, updateOp);
+                newDoc.seal();
+                nodesCache.put(key, (NodeDocument) newDoc);
             }
-            
-            return map;
+            doc.seal();
+            return doc;
         } catch (Exception e) {
             throw new MicroKernelException(e);
         } finally {
@@ -324,39 +342,37 @@ public class MongoDocumentStore implements DocumentStore {
         }
     }
 
-    @Nonnull
+    @CheckForNull
     @Override
-    public Map<String, Object> createOrUpdate(Collection collection,
-                                              UpdateOp update)
+    public <T extends Document> T createOrUpdate(Collection<T> collection, UpdateOp update)
             throws MicroKernelException {
         log("createOrUpdate", update);
-        Map<String, Object> map = findAndModify(collection, update, true, false);
-        log("createOrUpdate returns ", map);
-        return map;
+        T doc = findAndModify(collection, update, true, false);
+        log("createOrUpdate returns ", doc);
+        return doc;
     }
 
     @Override
-    public Map<String, Object> findAndUpdate(Collection collection,
-                                             UpdateOp update)
+    public <T extends Document> T findAndUpdate(Collection<T> collection, UpdateOp update)
             throws MicroKernelException {
         log("findAndUpdate", update);
-        Map<String, Object> map = findAndModify(collection, update, false, true);
-        log("findAndUpdate returns ", map);
-        return map;
+        T doc = findAndModify(collection, update, false, true);
+        log("findAndUpdate returns ", doc);
+        return doc;
     }
 
     @Override
-    public boolean create(Collection collection, List<UpdateOp> updateOps) {
+    public <T extends Document> boolean create(Collection<T> collection, List<UpdateOp> updateOps) {
         log("create", updateOps);       
-        ArrayList<Map<String, Object>> maps = new ArrayList<Map<String, Object>>();
+        List<T> docs = new ArrayList<T>();
         DBObject[] inserts = new DBObject[updateOps.size()];
 
         for (int i = 0; i < updateOps.size(); i++) {
             inserts[i] = new BasicDBObject();
             UpdateOp update = updateOps.get(i);
-            Map<String, Object> target = Utils.newMap();
+            T target = collection.newDocument();
             MemoryDocumentStore.applyChanges(target, update);
-            maps.add(target);
+            docs.add(target);
             for (Entry<String, Operation> entry : update.changes.entrySet()) {
                 String k = entry.getKey();
                 Operation op = entry.getValue();
@@ -392,9 +408,9 @@ public class MongoDocumentStore implements DocumentStore {
                     return false;
                 }
                 if (collection == Collection.NODES) {
-                    for (Map<String, Object> map : maps) {
-                        String id = (String) map.get(UpdateOp.ID);
-                        nodesCache.put(id, new CachedDocument(map));
+                    for (T doc : docs) {
+                        doc.seal();
+                        nodesCache.put(doc.getId(), (NodeDocument) doc);
                     }
                 }
                 return true;
@@ -406,8 +422,9 @@ public class MongoDocumentStore implements DocumentStore {
         }        
     }
 
-    private static Map<String, Object> convertFromDBObject(DBObject n) {
-        Map<String, Object> copy = Utils.newMap();
+    private static <T extends Document> T convertFromDBObject(Collection<T> collection,
+                                                              DBObject n) {
+        T copy = collection.newDocument();
         if (n != null) {
             for (String key : n.keySet()) {
                 Object o = n.get(key);
@@ -424,18 +441,18 @@ public class MongoDocumentStore implements DocumentStore {
     }
 
     private DBCollection getDBCollection(Collection collection) {
-        switch (collection) {
-            case NODES:
-                return nodes;
-            case CLUSTER_NODES:
-                return clusterNodes;
-            default:
-                throw new IllegalArgumentException(collection.name());
+        if (collection == Collection.NODES) {
+            return nodes;
+        } else if (collection == Collection.CLUSTER_NODES) {
+            return clusterNodes;
+        } else {
+            throw new IllegalArgumentException(
+                    "Unknown collection: " + collection.toString());
         }
     }
 
     private static QueryBuilder getByKeyQuery(String key) {
-        return QueryBuilder.start(UpdateOp.ID).is(key);
+        return QueryBuilder.start(Document.ID).is(key);
     }
     
     @Override
@@ -460,25 +477,6 @@ public class MongoDocumentStore implements DocumentStore {
         }
     }
     
-    /**
-     * A cache entry.
-     */
-    static class CachedDocument implements CacheValue {
-        
-        final long time = System.currentTimeMillis();
-        final Map<String, Object> value;
-        
-        CachedDocument(Map<String, Object> value) {
-            this.value = value;
-        }
-        
-        @Override
-        public int getMemory() {
-            return Utils.estimateMemoryUsage(value);
-        }
-        
-    }
-
     @Override
     public boolean isCached(Collection collection, String key) {
         if (collection != Collection.NODES) {

@@ -23,6 +23,7 @@ import static org.apache.jackrabbit.oak.api.Type.LONG;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assume.assumeTrue;
 import static org.junit.runners.Parameterized.Parameters;
 
 import java.util.ArrayList;
@@ -44,7 +45,6 @@ import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.apache.jackrabbit.oak.spi.state.NodeStore;
 import org.apache.jackrabbit.oak.spi.state.NodeStoreBranch;
 import org.junit.After;
-import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -157,7 +157,7 @@ public class NodeStoreTest {
     @Test
     public void afterCommitHook() throws CommitFailedException {
         // this test only works with a KernelNodeStore
-        Assume.assumeTrue(store instanceof KernelNodeStore);
+        assumeTrue(store instanceof KernelNodeStore);
         final NodeState[] states = new NodeState[2]; // { before, after }
         ((KernelNodeStore) store).setObserver(new Observer() {
             @Override
@@ -319,6 +319,35 @@ public class NodeStoreTest {
         assertEquals(1, diff.removed.size());
         assertEquals(0, diff.added.size());
         assertEquals("child-moved", diff.removed.get(0));
+    }
+
+    @Test
+    public void moveToSelf() throws CommitFailedException {
+        NodeStoreBranch branch = store.branch();
+        assertTrue(branch.move("/x", "/x"));
+    }
+
+    @Test
+    public void oak965() throws CommitFailedException {
+        NodeStore store1 = init(fixture.createNodeStore());
+        NodeStore store2 = init(fixture.createNodeStore());
+        try {
+            NodeState tree1 = store1.getRoot();
+            NodeState tree2 = store2.getRoot();
+            tree1.equals(tree2);
+        } finally {
+            fixture.dispose(store1);
+            fixture.dispose(store2);
+        }
+    }
+
+    private static NodeStore init(NodeStore store) throws CommitFailedException {
+        NodeStoreBranch branch = store.branch();
+        NodeBuilder builder = branch.getHead().builder();
+        builder.setChildNode("root");
+        branch.setRoot(builder.getNodeState());
+        branch.merge(EmptyHook.INSTANCE, PostCommitHook.EMPTY);
+        return store;
     }
 
     @Test

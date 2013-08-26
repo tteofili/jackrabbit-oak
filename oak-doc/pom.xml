@@ -36,16 +36,78 @@
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-site-plugin</artifactId>
-        <version>3.3</version>
-        <dependencies>
-          <dependency>
-            <groupId>org.apache.maven.doxia</groupId>
-            <artifactId>doxia-module-markdown</artifactId>
-            <version>1.4</version>
-          </dependency>
-        </dependencies>
+        <configuration>
+          <generateReports>true</generateReports>
+          <skip>false</skip>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-scm-publish-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>scm-publish</id>
+            <phase>site-deploy</phase>
+            <goals>
+              <goal>publish-scm</goal>
+            </goals>
+          </execution>
+        </executions>
+        <configuration>
+          <content>target/site</content>
+          <checkinComment>OAK-936: Site checkin for project ${project.name}-${project.version}</checkinComment>
+          <ignorePathsToDelete>
+            <ignorePathToDelete>apidocs</ignorePathToDelete>
+          </ignorePathsToDelete>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-resources-plugin</artifactId>
+        <executions>
+          <execution>
+            <phase>pre-site</phase>
+            <goals>
+              <goal>resources</goal>
+            </goals>
+          </execution>
+        </executions>
+        <configuration>
+          <outputDirectory>${project.build.directory}/site</outputDirectory>
+        </configuration>
       </plugin>
     </plugins>
+
+    <resources>
+      <resource>
+        <directory>src/site/markdown</directory>
+        <includes>
+          <include>*.png</include>
+          <include>*.jpg</include>
+          <include>*.jpeg</include>
+          <include>*.gif</include>
+        </includes>
+      </resource>
+    </resources>
   </build>
+
+  <reporting>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-project-info-reports-plugin</artifactId>
+        <reportSets>
+          <reportSet/>
+        </reportSets>
+      </plugin>
+    </plugins>
+  </reporting>
+
+  <distributionManagement>
+    <site>
+      <id>jackrabbit.oak.site-deploy</id>
+      <url>scm:svn:https://svn.apache.org/repos/asf/jackrabbit/site/live/oak/docs/${project.version}</url>
+    </site>
+  </distributionManagement>
 
 </project>

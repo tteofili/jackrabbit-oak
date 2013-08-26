@@ -16,13 +16,10 @@
  */
 package org.apache.jackrabbit.oak.plugins.mongomk;
 
-import java.util.Map;
-
 import javax.annotation.Nonnull;
 
 import org.apache.jackrabbit.mk.api.MicroKernelException;
 import org.apache.jackrabbit.oak.plugins.mongomk.util.Utils;
-import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -46,12 +43,12 @@ class Collision {
 
     private static final Logger LOG = LoggerFactory.getLogger(Collision.class);
 
-    private final Map<String, Object> document;
+    private final NodeDocument document;
     private final String theirRev;
     private final UpdateOp ourOp;
     private final String ourRev;
 
-    Collision(@Nonnull Map<String, Object> document,
+    Collision(@Nonnull NodeDocument document,
               @Nonnull Revision theirRev,
               @Nonnull UpdateOp ourOp,
               @Nonnull Revision ourRev) {
@@ -75,13 +72,13 @@ class Collision {
             return;
         }
         // their commit wins, we have to mark ourRev
-        Map<String, Object> newDoc = Utils.newMap();
-        Utils.deepCopyMap(document, newDoc);
+        NodeDocument newDoc = Collection.NODES.newDocument();
+        document.deepCopy(newDoc);
         MemoryDocumentStore.applyChanges(newDoc, ourOp);
         if (!markCommitRoot(newDoc, ourRev, store)) {
             throw new MicroKernelException("Unable to annotate our revision "
                     + "with collision marker. Our revision: " + ourRev
-                    + ", document:\n" + Utils.formatDocument(newDoc));
+                    + ", document:\n" + newDoc.format());
         }
     }
 
@@ -96,17 +93,14 @@ class Collision {
      * @return <code>true</code> if the commit for the given revision was marked
      *         successfully; <code>false</code> otherwise.
      */
-    private static boolean markCommitRoot(@Nonnull Map<String, Object> document,
+    private static boolean markCommitRoot(@Nonnull NodeDocument document,
                                           @Nonnull String revision,
                                           @Nonnull DocumentStore store) {
-        String p = Utils.getPathFromId((String) document.get(UpdateOp.ID));
+        String p = Utils.getPathFromId(document.getId());
         String commitRootPath = null;
         // first check if we can mark the commit with the given revision
-        @SuppressWarnings("unchecked")
-        Map<String, String> revisions = (Map<String, String>) document.get(UpdateOp.REVISIONS);
-        if (revisions != null && revisions.containsKey(revision)) {
-            String value = revisions.get(revision);
-            if (Utils.isCommitted(value)) {
+        if (document.containsRevision(revision)) {
+            if (document.isCommitted(revision)) {
                 // already committed
                 return false;
             }
@@ -115,31 +109,22 @@ class Collision {
             commitRootPath = p;
         } else {
             // next look at commit root
-            @SuppressWarnings("unchecked")
-            Map<String, Integer> commitRoots = (Map<String, Integer>) document.get(UpdateOp.COMMIT_ROOT);
-            if (commitRoots != null) {
-                Integer depth = commitRoots.get(revision);
-                if (depth != null) {
-                    commitRootPath = PathUtils.getAncestorPath(p, PathUtils.getDepth(p) - depth);
-                } else {
-                    throwNoCommitRootException(revision, document);
-                }
-            } else {
+            commitRootPath = document.getCommitRootPath(revision);
+            if (commitRootPath == null) {
                 throwNoCommitRootException(revision, document);
             }
         }
         // at this point we have a commitRootPath
-        UpdateOp op = new UpdateOp(commitRootPath,
-                Utils.getIdFromPath(commitRootPath), false);
-        document = store.find(DocumentStore.Collection.NODES, op.getKey());
+        UpdateOp op = new UpdateOp(Utils.getIdFromPath(commitRootPath), false);
+        document = store.find(Collection.NODES, op.getKey());
         // check commit status of revision
-        if (isCommitted(revision, document)) {
+        if (document.isCommitted(revision)) {
             return false;
         }
-        op.setMapEntry(UpdateOp.COLLISIONS, revision, true);
-        document = store.createOrUpdate(DocumentStore.Collection.NODES, op);
+        op.setMapEntry(NodeDocument.COLLISIONS, revision, true);
+        document = store.createOrUpdate(Collection.NODES, op);
         // check again on old document right before our update was applied
-        if (isCommitted(revision, document)) {
+        if (document.isCommitted(revision)) {
             return false;
         }
         // otherwise collision marker was set successfully
@@ -149,23 +134,9 @@ class Collision {
     }
     
     private static void throwNoCommitRootException(@Nonnull String revision,
-                                                   @Nonnull Map<String, Object> document)
+                                                   @Nonnull Document document)
                                                            throws MicroKernelException {
         throw new MicroKernelException("No commit root for revision: "
-                + revision + ", document: " + Utils.formatDocument(document));
-    }
-    
-    /**
-     * Returns <code>true</code> if the given <code>revision</code> is marked
-     * committed on the given <code>document</code>.
-     * 
-     * @param revision the revision.
-     * @param document a MongoDB document.
-     * @return <code>true</code> if committed; <code>false</code> otherwise.
-     */
-    private static boolean isCommitted(String revision, Map<String, Object> document) {
-        @SuppressWarnings("unchecked")
-        Map<String, String> revisions = (Map<String, String>) document.get(UpdateOp.REVISIONS);
-        return revisions != null && Utils.isCommitted(revisions.get(revision));
+                + revision + ", document: " + document.format());
     }
 }

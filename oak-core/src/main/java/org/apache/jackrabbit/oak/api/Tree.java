@@ -18,6 +18,8 @@
  */
 package org.apache.jackrabbit.oak.api;
 
+import com.google.common.base.Function;
+
 import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -75,7 +77,7 @@ import javax.annotation.Nullable;
  * <p>
  * The <em>iterability</em> of a tree is a related to existence. A node
  * state is <em>iterable</em> if it is included in the return values of the
- * {@link #getChildrenCount()} and {@link #getChildren()} methods. An iterable
+ * {@link #getChildrenCount(long)} and {@link #getChildren()} methods. An iterable
  * node is guaranteed to exist, though not all existing nodes are necessarily
  * iterable.
  * <p>
@@ -211,14 +213,20 @@ public interface Tree {
      *         exists and is accessible for the current content session.
      */
     boolean hasChild(@Nonnull String name);
-
+    
     /**
      * Determine the number of children of this {@code Tree} instance taking
      * access restrictions into account.
-     *
-     * @return The number of accessible children.
-     */
-    long getChildrenCount();
+     * <p>
+     * If an implementation does know the exact value, it returns it (even if
+     * the value is higher than max). If the implementation does not know the
+     * exact value, and the child node count is higher than max, it may return
+     * Long.MAX_VALUE. The cost of the operation is at most O(max).
+     * 
+     * @param max the maximum value
+     * @return the number of accessible children.
+     */    
+    long getChildrenCount(long max);
 
     /**
      * All accessible children of this {@code Tree} instance. The returned
@@ -323,5 +331,20 @@ public interface Tree {
      * @param name The name of the property
      */
     void removeProperty(@Nonnull String name);
+
+    /**
+     * Mapping from a Tree instance to its name.
+     */
+    Function<Tree, String> GET_NAME =
+            new Function<Tree, String>() {
+                @Override @Nullable
+                public String apply(@Nullable Tree input) {
+                    if (input != null) {
+                        return input.getName();
+                    } else {
+                        return null;
+                    }
+                }
+            };
 
 }
