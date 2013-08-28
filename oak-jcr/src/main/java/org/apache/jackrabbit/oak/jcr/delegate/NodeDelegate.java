@@ -36,6 +36,7 @@ import static org.apache.jackrabbit.JcrConstants.JCR_PROTECTED;
 import static org.apache.jackrabbit.JcrConstants.JCR_REQUIREDTYPE;
 import static org.apache.jackrabbit.JcrConstants.JCR_SAMENAMESIBLINGS;
 import static org.apache.jackrabbit.JcrConstants.JCR_UUID;
+import static org.apache.jackrabbit.JcrConstants.MIX_LOCKABLE;
 import static org.apache.jackrabbit.JcrConstants.NT_BASE;
 import static org.apache.jackrabbit.oak.api.Type.BOOLEAN;
 import static org.apache.jackrabbit.oak.api.Type.NAMES;
@@ -66,9 +67,12 @@ import javax.jcr.InvalidItemStateException;
 import javax.jcr.ItemNotFoundException;
 import javax.jcr.RepositoryException;
 import javax.jcr.ValueFormatException;
+import javax.jcr.lock.LockException;
 import javax.jcr.nodetype.ConstraintViolationException;
 import javax.jcr.nodetype.NoSuchNodeTypeException;
+import javax.jcr.security.AccessControlException;
 
+import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Root;
 import org.apache.jackrabbit.oak.api.Tree;
@@ -388,6 +392,8 @@ public class NodeDelegate extends ItemDelegate {
     }
 
     public void removeMixin(String typeName) throws RepositoryException {
+        boolean wasLockable = isNodeType(MIX_LOCKABLE);
+
         Tree tree = getTree();
         Set<String> mixins = newLinkedHashSet(getNames(tree, JCR_MIXINTYPES));
         if (!mixins.remove(typeName)) {
@@ -395,6 +401,13 @@ public class NodeDelegate extends ItemDelegate {
                     "Mixin " + typeName +" not contained in " + getPath());
         }
         tree.setProperty(JCR_MIXINTYPES, mixins, NAMES);
+
+        boolean isLockable = isNodeType(MIX_LOCKABLE);
+        if (wasLockable && !isLockable && holdsLock(false)) {
+            // TODO: This should probably be done in a commit hook
+            unlock();
+            sessionDelegate.refresh(true);
+        }
 
         // We need to remove all protected properties and child nodes
         // associated with the removed mixin type, as there's no way for
@@ -518,6 +531,37 @@ public class NodeDelegate extends ItemDelegate {
         }
 
         return types;
+    }
+
+    private boolean isNodeType(String typeName) {
+        return isNodeType(tree, typeName, sessionDelegate.getRoot());
+    }
+
+    private boolean isNodeType(Tree tree, String typeName, Root root) {
+        Tree typeRoot = root.getTree(NODE_TYPES_PATH);
+
+        String primaryName = TreeUtil.getName(tree, JCR_PRIMARYTYPE);
+        if (typeName.equals(primaryName)) {
+            return true;
+        } else if (primaryName != null) {
+            Tree type = typeRoot.getChild(primaryName);
+            if (contains(getNames(type, OAK_SUPERTYPES), typeName)) {
+                return true;
+            }
+        }
+
+        for (String mixinName : getNames(tree, JCR_MIXINTYPES)) {
+            if (typeName.equals(mixinName)) {
+                return true;
+            } else {
+                Tree type = typeRoot.getChild(mixinName);
+                if (contains(getNames(type, OAK_SUPERTYPES), typeName)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private Tree findMatchingPropertyDefinition(
@@ -702,7 +746,8 @@ public class NodeDelegate extends ItemDelegate {
         PropertyState property = tree.getProperty(JCR_LOCKISDEEP);
         return property != null
                 && property.getType() == Type.BOOLEAN
-                && (!deep || property.getValue(BOOLEAN));
+                && (!deep || property.getValue(BOOLEAN))
+                && isNodeType(MIX_LOCKABLE);
     }
 
     public String getLockOwner() {
@@ -714,7 +759,65 @@ public class NodeDelegate extends ItemDelegate {
         }
     }
 
+    public void lock(boolean isDeep) throws RepositoryException {
+        String path = getPath();
 
+        Root root = sessionDelegate.getContentSession().getLatestRoot();
+        Tree tree = root.getTree(path);
+        if (!tree.exists()) {
+            throw new ItemNotFoundException("Node " + path + " does not exist");
+        } else if (!isNodeType(tree, MIX_LOCKABLE, root)) {
+            throw new LockException("Node " + path + " is not lockable");
+        } else if (tree.hasProperty(JCR_LOCKISDEEP)) {
+            throw new LockException("Node " + path + " is already locked");
+        }
+
+        try {
+            String owner = sessionDelegate.getAuthInfo().getUserID();
+            if (owner == null) {
+                owner = "";
+            }
+            tree.setProperty(JCR_LOCKISDEEP, isDeep);
+            tree.setProperty(JCR_LOCKOWNER, owner);
+            root.commit();
+        } catch (CommitFailedException e) {
+            if (e.isAccessViolation()) {
+                throw new AccessControlException(
+                        "Access denied to lock node " + path, e);
+            } else {
+                throw new RepositoryException(
+                        "Unable to lock node " + path, e);
+            }
+        }
+    }
+
+    public void unlock() throws RepositoryException {
+        String path = getPath();
+
+        Root root = sessionDelegate.getContentSession().getLatestRoot();
+        Tree tree = root.getTree(path);
+        if (!tree.exists()) {
+            throw new ItemNotFoundException("Node " + path + " does not exist");
+        } else if (!isNodeType(tree, MIX_LOCKABLE, root)) {
+            throw new LockException("Node " + path + " is not lockable");
+        } else if (!tree.hasProperty(JCR_LOCKISDEEP)) {
+            throw new LockException("Node " + path + " is not locked");
+        }
+
+        try {
+            tree.removeProperty(JCR_LOCKISDEEP);
+            tree.removeProperty(JCR_LOCKOWNER);
+            root.commit();
+        } catch (CommitFailedException e) {
+            if (e.isAccessViolation()) {
+                throw new AccessControlException(
+                        "Access denied to unlock node " + path, e);
+            } else {
+                throw new RepositoryException(
+                        "Unable to unlock node " + path, e);
+            }
+        }
+    }
 
     @Override
     public String toString() {
@@ -750,4 +853,5 @@ public class NodeDelegate extends ItemDelegate {
     private String getUserID() {
         return sessionDelegate.getAuthInfo().getUserID();
     }
+
 }

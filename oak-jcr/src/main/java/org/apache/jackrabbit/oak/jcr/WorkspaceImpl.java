@@ -61,7 +61,6 @@ public class WorkspaceImpl implements JackrabbitWorkspace {
     private final SessionContext sessionContext;
     private final SessionDelegate sessionDelegate;
     private final QueryManagerImpl queryManager;
-    private final LockManager lockManager;
     private final VersionManagerImpl versionManager;
     private final ReadWriteNodeTypeManager nodeTypeManager;
 
@@ -69,7 +68,6 @@ public class WorkspaceImpl implements JackrabbitWorkspace {
         this.sessionContext = sessionContext;
         this.sessionDelegate = sessionContext.getSessionDelegate();
         this.queryManager = new QueryManagerImpl(sessionContext);
-        this.lockManager = new LockManagerImpl(sessionContext);
         this.versionManager = new VersionManagerImpl(sessionContext);
         this.nodeTypeManager = new ReadWriteNodeTypeManager() {
             @Override
@@ -183,7 +181,7 @@ public class WorkspaceImpl implements JackrabbitWorkspace {
 
     @Override
     public LockManager getLockManager() {
-        return lockManager;
+        return new LockManagerImpl(sessionContext);
     }
 
     @Override
