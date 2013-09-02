@@ -19,6 +19,7 @@ package org.apache.jackrabbit.mk.model.tree;
 import org.apache.jackrabbit.mk.json.JsopBuilder;
 import org.apache.jackrabbit.oak.commons.PathUtils;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -47,7 +48,7 @@ public class DiffBuilder {
     public String build() throws Exception {
         final JsopBuilder buff = new JsopBuilder();
 
-        // maps (key: the target node, value: the path to the target)
+        // maps (key: the target node, value: list of paths to the target)
         // for tracking added/removed nodes; this allows us
         // to detect 'move' operations
 
@@ -55,8 +56,8 @@ public class DiffBuilder {
         // which is not recommended because the hashCode and equals methods
         // of those classes are slow
 
-        final HashMap<NodeState, String> addedNodes = new HashMap<NodeState, String>();
-        final HashMap<NodeState, String> removedNodes = new HashMap<NodeState, String>();
+        final HashMap<NodeState, ArrayList<String>> addedNodes = new HashMap<NodeState, ArrayList<String>>();
+        final HashMap<NodeState, ArrayList<String>> removedNodes = new HashMap<NodeState, ArrayList<String>>();
 
         if (!PathUtils.isAncestor(path, pathFilter)
                 && !path.startsWith(pathFilter)) {
@@ -120,22 +121,56 @@ public class DiffBuilder {
             public void childNodeAdded(String name, NodeState after) {
                 String p = PathUtils.concat(getCurrentPath(), name);
                 if (p.startsWith(pathFilter)) {
-                    addedNodes.put(after, p);
-                    buff.tag('+').
-                            key(p).object();
-                    toJson(buff, after, depth);
-                    buff.endObject().newline();
+                    ArrayList<String> removedPaths = removedNodes.get(after);
+                    if (removedPaths != null) {
+                        // move detected
+                        String removedPath = removedPaths.remove(0);
+                        if (removedPaths.isEmpty()) {
+                            removedNodes.remove(after);
+                        }
+                        buff.tag('>').
+                                // path/to/deleted/node
+                                key(removedPath).
+                                // path/to/added/node
+                                value(p).
+                                newline();
+                    } else {
+                        ArrayList<String> addedPaths = addedNodes.get(after);
+                        if (addedPaths == null) {
+                            addedPaths = new ArrayList<String>();
+                            addedNodes.put(after, addedPaths);
+                        }
+                        addedPaths.add(p);
+                    }
                 }
+
             }
 
             @Override
             public void childNodeDeleted(String name, NodeState before) {
                 String p = PathUtils.concat(getCurrentPath(), name);
                 if (p.startsWith(pathFilter)) {
-                    removedNodes.put(before, p);
-                    buff.tag('-');
-                    buff.value(p);
-                    buff.newline();
+                    ArrayList<String> addedPaths = addedNodes.get(before);
+                    if (addedPaths != null) {
+                        // move detected
+                        String addedPath = addedPaths.remove(0);
+                        if (addedPaths.isEmpty()) {
+                            addedNodes.remove(before);
+                        }
+                        buff.tag('>').
+                                // path/to/deleted/node
+                                key(p).
+                                // path/to/added/node
+                                value(addedPath).
+                                newline();
+                    } else {
+                        ArrayList<String> removedPaths = removedNodes.get(before);
+                        if (removedPaths == null) {
+                            removedPaths = new ArrayList<String>();
+                            removedNodes.put(before, removedPaths);
+                        }
+                        removedPaths.add(p);
+                    }
                 }
             }
 
@@ -160,115 +195,21 @@ public class DiffBuilder {
         };
         diffHandler.start(before, after, path);
 
-        // check if this commit includes 'move' operations
-        // by building intersection of added and removed nodes
-        addedNodes.keySet().retainAll(removedNodes.keySet());
-        if (!addedNodes.isEmpty()) {
-            // this commit includes 'move' operations
-            removedNodes.keySet().retainAll(addedNodes.keySet());
-            // addedNodes & removedNodes now only contain information about moved nodes
-
-            // re-build the diff in a 2nd pass, this time representing moves correctly
-            buff.resetWriter();
-
-            // TODO refactor code, avoid duplication
-
-            diffHandler = new TraversingNodeDiffHandler(store) {
-                int levels = depth < 0 ? Integer.MAX_VALUE : depth;
-                @Override
-                public void propertyAdded(PropertyState after) {
-                    String p = PathUtils.concat(getCurrentPath(), after.getName());
-                    if (p.startsWith(pathFilter)) {
-                        buff.tag('^').
-                                key(p).
-                                encodedValue(after.getEncodedValue()).
-                                newline();
-                    }
-                }
-
-                @Override
-                public void propertyChanged(PropertyState before, PropertyState after) {
-                    String p = PathUtils.concat(getCurrentPath(), after.getName());
-                    if (p.startsWith(pathFilter)) {
-                        buff.tag('^').
-                                key(p).
-                                encodedValue(after.getEncodedValue()).
-                                newline();
-                    }
-                }
-
-                @Override
-                public void propertyDeleted(PropertyState before) {
-                    String p = PathUtils.concat(getCurrentPath(), before.getName());
-                    if (p.startsWith(pathFilter)) {
-                        // since property and node deletions can't be distinguished
-                        // using the "- <path>" notation we're representing
-                        // property deletions as "^ <path>:null"
-                        buff.tag('^').
-                                key(p).
-                                value(null).
-                                newline();
-                    }
-                }
-
-                @Override
-                public void childNodeAdded(String name, NodeState after) {
-                    if (addedNodes.containsKey(after)) {
-                        // moved node, will be processed separately
-                        return;
-                    }
-                    String p = PathUtils.concat(getCurrentPath(), name);
-                    if (p.startsWith(pathFilter)) {
-                        buff.tag('+').
-                                key(p).object();
-                        toJson(buff, after, depth);
-                        buff.endObject().newline();
-                    }
-                }
-
-                @Override
-                public void childNodeDeleted(String name, NodeState before) {
-                    if (addedNodes.containsKey(before)) {
-                        // moved node, will be processed separately
-                        return;
-                    }
-                    String p = PathUtils.concat(getCurrentPath(), name);
-                    if (p.startsWith(pathFilter)) {
-                        buff.tag('-');
-                        buff.value(p);
-                        buff.newline();
-                    }
-                }
-
-                @Override
-                public void childNodeChanged(String name, NodeState before, NodeState after) {
-                    String p = PathUtils.concat(getCurrentPath(), name);
-                    if (PathUtils.isAncestor(p, pathFilter)
-                            || p.startsWith(pathFilter)) {
-                        --levels;
-                        if (levels >= 0) {
-                            // recurse
-                            super.childNodeChanged(name, before, after);
-                        } else {
-                            buff.tag('^');
-                            buff.key(p);
-                            buff.object().endObject();
-                            buff.newline();
-                        }
-                        ++levels;
-                    }
-                }
-            };
-            diffHandler.start(before, after, path);
-
-            // finally process moved nodes
-            for (Map.Entry<NodeState, String> entry : addedNodes.entrySet()) {
-                buff.tag('>').
-                        // path/to/deleted/node
-                        key(removedNodes.get(entry.getKey())).
-                        // path/to/added/node
-                        value(entry.getValue()).
-                        newline();
+        // finally process remaining added nodes ...
+        for (Map.Entry<NodeState, ArrayList<String>> entry : addedNodes.entrySet()) {
+            for (String p : entry.getValue()) {
+                buff.tag('+').
+                        key(p).object();
+                toJson(buff, entry.getKey(), depth);
+                buff.endObject().newline();
+            }
+        }
+        //  ... and removed nodes
+        for (Map.Entry<NodeState, ArrayList<String>> entry : removedNodes.entrySet()) {
+            for (String p : entry.getValue()) {
+                buff.tag('-');
+                buff.value(p);
+                buff.newline();
             }
         }
         return buff.toString();

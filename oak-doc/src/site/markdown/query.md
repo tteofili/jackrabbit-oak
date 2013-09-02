@@ -1,0 +1,141 @@
+<!--
+   Licensed to the Apache Software Foundation (ASF) under one or more
+   contributor license agreements.  See the NOTICE file distributed with
+   this work for additional information regarding copyright ownership.
+   The ASF licenses this file to You under the Apache License, Version 2.0
+   (the "License"); you may not use this file except in compliance with
+   the License.  You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+  -->
+
+## The query engine
+
+Oak does not index content by default as does Jackrabbit 2. You need to create custom indexes when
+necessary, much like in traditional RDBMSs. If there is no index for a specific query then the
+repository will be traversed. That is, the query will still work but probably be very slow.
+
+Query Indices are defined under the `oak:index` node.
+
+### Xpath to SQL2 transformation
+
+In an effort to support the `XPath` language, there is a mechanism that handles the automatic conversion to `SQL2`. 
+
+Every conversion is logged as `debug` under the `org.apache.jackrabbit.oak.query.QueryEngineImpl` logger:
+
+    org.apache.jackrabbit.oak.query.QueryEngineImpl Parsing xpath statement: //element(*)[@sling:resourceType = 'slingevent:Lock')]
+    org.apache.jackrabbit.oak.query.QueryEngineImpl XPath > SQL2: select [jcr:path], [jcr:score], * from [nt:base] as a where [sling:resourceType] = 'slingevent:Lock' /* xpath: //element(*)[@sling:resourceType = 'slingevent:Lock' and @lock.created < xs:dateTime('2013-09-02T15:44:05.920+02:00')] */
+
+_Note that each transformed `SQL2` query contains the original `XPath` query as a comment._
+
+### Cost calculation
+
+Each query index is expected to estimate the worst-case cost to query with the given filter. 
+The returned value is between 1 (very fast; lookup of a unique node) and the estimated number of entries to traverse, if the cursor would be fully read, and if there could in theory be one network round-trip or disk read operation per node (this method may return a lower number if the data is known to be fully in memory).
+
+The returned value is supposed to be an estimate and doesn't have to be very accurate. Please note this method is called on each index whenever a query is run, so the method should be reasonably fast (not read any data itself, or at least not read too much data).
+
+If an index implementation can not query the data, it has to return `Double.POSITIVE_INFINITY`.
+
+TODO Traversal warnings
+
+### The property index
+
+Is useful whenever there is a query with a property constraint that is not full-text:
+
+    SELECT * FROM [nt:base] WHERE [jcr:uuid] = $id
+
+
+To define a property index on a subtree you have to add an index definition node that:
+
+* must be of type `oak:queryIndexDefinition`
+* must have the `type` property set to __`property`__
+* contains the `propertyNames` property that indicates what properties will be stored in the index.
+
+    `propertyNames` can be a list of properties, and it is optional.in case it is missing, the node name will be used as a property name reference value
+
+_Optionally_ you can specify
+
+* a uniqueness constraint on a property index by setting the `unique` flag to `true`
+* that the property index only applies to a certain node type by setting the `declaringNodeTypes` property
+* the `reindex` flag which when set to `true`, triggers a full content re-index.
+
+Example:
+
+    {
+      NodeBuilder index = root.child("oak:index");
+      index.child("uuid")
+        .setProperty("jcr:primaryType", "oak:queryIndexDefinition", Type.NAME)
+        .setProperty("type", "property")
+        .setProperty("propertyNames", "jcr:uuid")
+        .setProperty("declaringNodeTypes", "mix:referenceable")
+        .setProperty("unique", true)
+        .setProperty("reindex", true);
+    }
+
+or to simplify you can use one of the existing `IndexUtils#createIndexDefinition` helper methods:
+
+    {
+      NodeBuilder index = IndexUtils.getOrCreateOakIndex(root);
+      IndexUtils.createIndexDefinition(index, "myProp", true, false, ImmutableList.of("myProp"), null);
+    }
+
+
+### The node type index
+
+The `NodeTypeIndex` implements a `QueryIndex` using `PropertyIndexLookup`s on `jcr:primaryType` `jcr:mixinTypes` to evaluate a node type restriction on the filter.
+The cost for this index is the sum of the costs of the `PropertyIndexLookup` for queries on `jcr:primaryType` and `jcr:mixinTypes`.
+
+
+### The Lucene full-text index
+
+The full-text index handles only the 'contains' type of queries.
+
+    //*[jcr:contains(., 'text')]
+
+Not having a full-text index means that the full-text queries will not be able to work properly. Currently the query engine has a basic verification in place for full-text conditions, but that is brittle and can miss hits.
+
+The full-text index update is asynchronous via a background thread, see `Oak#withAsyncIndexing`.
+This means that some full-text searches will not work for a small window of time: the background thread runs every 5 seconds, plus the time is takes to run the diff and to run the text-extraction process. 
+
+The async update status is now reflected on the `oak:index` node with the help of a few properties, see [OAK-980](https://issues.apache.org/jira/browse/OAK-980)
+
+TODO Node aggregation [OAK-828](https://issues.apache.org/jira/browse/OAK-828)
+
+The index definition node for a lucene-based full-text index:
+
+* must be of type `oak:queryIndexDefinition`
+* must have the `type` property set to __`lucene`__
+* must contain the `async` property set to the value `async`, this is what sends the index update process to a background thread
+
+_Optionally_ you can add
+
+ * what subset of property types to be included in the index via the `includePropertyTypes` property
+ * a blacklist of property names: what property to be excluded from the index via the `excludePropertyNames` property
+ * the `reindex` flag which when set to `true`, triggers a full content re-index.
+
+Example:
+
+    {
+      NodeBuilder index = root.child("oak:index");
+      index.child("lucene")
+        .setProperty("jcr:primaryType", "oak:queryIndexDefinition", Type.NAME)
+        .setProperty("type", "lucene")
+        .setProperty("async", "async")
+        .setProperty(PropertyStates.createProperty("includePropertyTypes", ImmutableSet.of(
+            PropertyType.TYPENAME_STRING, PropertyType.TYPENAME_BINARY), Type.STRINGS))
+        .setProperty(PropertyStates.createProperty("excludePropertyNames", ImmutableSet.of( 
+            "jcr:createdBy", "jcr:lastModifiedBy"), Type.STRINGS))
+        .setProperty("reindex", true);
+    }
+
+
+### The Solr full-text index
+
+`TODO`

@@ -47,6 +47,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
+import org.apache.jackrabbit.JcrConstants;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.plugins.index.aggregate.NodeAggregator;
@@ -99,16 +100,19 @@ import org.slf4j.LoggerFactory;
  * Under it follows the index definition node that:
  * <ul>
  * <li>must be of type <code>oak:queryIndexDefinition</code></li>
- * <li>must have the <code>type</code> property set to <b><code>lucene</code>
+ * <li>must have the <code>type</code> property set to <b><code>lucene</code></b></li>
+ * <li>must have the <code>async</code> property set to <b><code>async</code></b></li>
  * </b></li>
  * </ul>
  * </p>
- * 
  * <p>
- * Note: <code>reindex<code> is a property that when set to <code>true</code>,
- * triggers a full content reindex.
+ * Optionally you can add
+ * <ul>
+ * <li>what subset of property types to be included in the index via the <code>includePropertyTypes<code> property</li>
+ * <li>a blacklist of property names: what property to be excluded from the index via the <code>excludePropertyNames<code> property</li>
+ * <li>the <code>reindex<code> flag which when set to <code>true<code>, triggers a full content re-index.</li>
+ * </ul>
  * </p>
- * 
  * <pre>
  * <code>
  * {
@@ -116,6 +120,7 @@ import org.slf4j.LoggerFactory;
  *     index.child("lucene")
  *         .setProperty("jcr:primaryType", "oak:queryIndexDefinition", Type.NAME)
  *         .setProperty("type", "lucene")
+ *         .setProperty("async", "async")
  *         .setProperty("reindex", "true");
  * }
  * </code>
@@ -468,6 +473,10 @@ public class LuceneIndex implements FulltextQueryIndex {
                 continue;
             }
             if ("rep:excerpt".equals(name)) {
+                continue;
+            }
+            // TODO OAK-985
+            if (JcrConstants.JCR_PRIMARYTYPE.equals(name)) {
                 continue;
             }
 

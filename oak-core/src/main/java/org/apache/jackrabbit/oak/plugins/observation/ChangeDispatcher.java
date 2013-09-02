@@ -109,8 +109,11 @@ public class ChangeDispatcher {
         previousRoot = root;
     }
 
-    private synchronized void externalChange() {
-        externalChange(store.getRoot());
+    private void externalChange() {
+        NodeState root = store.getRoot();
+        synchronized (this) {
+            externalChange(root);
+        }
     }
 
     private void register(Listener listener) {
