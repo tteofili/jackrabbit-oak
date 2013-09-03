@@ -122,6 +122,10 @@ public class RemoteSolrConfigurationProvider implements OakSolrConfigurationProv
                             fieldName = pathParentFieldName;
                             break;
                         }
+                        case NO_RESTRICTION:
+                            break;
+                        default:
+                            break;
 
                     }
                     return fieldName;

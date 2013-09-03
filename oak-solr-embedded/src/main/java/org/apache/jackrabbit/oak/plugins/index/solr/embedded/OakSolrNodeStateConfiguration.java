@@ -67,6 +67,10 @@ public abstract class OakSolrNodeStateConfiguration extends EmbeddedSolrConfigur
                 fieldName = getStringValueFor(Properties.PARENT_FIELD, SolrServerConfigurationDefaults.ANC_FIELD_NAME);
                 break;
             }
+            case NO_RESTRICTION:
+                break;
+            default:
+                break;
 
         }
         return fieldName;

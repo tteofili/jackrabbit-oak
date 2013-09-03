@@ -126,7 +126,7 @@ public class SolrQueryIndex implements QueryIndex {
                     queryBuilder.append(configuration.getPathField());
                     queryBuilder.append(':');
                     queryBuilder.append(first);
-                    if (!first.equals("\\/")) {
+                    if (first!= null && !"\\/".equals(first)) {
                         queryBuilder.append("\\/");
                     }
                 } else {

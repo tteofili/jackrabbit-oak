@@ -60,6 +60,10 @@ public class EmbeddedSolrConfiguration implements OakSolrConfiguration {
                 fieldName = SolrServerConfigurationDefaults.ANC_FIELD_NAME;
                 break;
             }
+            case NO_RESTRICTION:
+                break;
+            default:
+                break;
 
         }
         return fieldName;
