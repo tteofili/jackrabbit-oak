@@ -70,7 +70,6 @@
       </plugin>
       <plugin>
         <artifactId>maven-failsafe-plugin</artifactId>
-        <version>2.12</version>
         <executions>
           <execution>
             <goals>
@@ -301,6 +300,7 @@
       <scope>runtime</scope>
     </dependency>
 
+    <!-- Tests -->
     <dependency>
       <groupId>junit</groupId>
       <artifactId>junit</artifactId>
