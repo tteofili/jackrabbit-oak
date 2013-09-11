@@ -14,17 +14,22 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.jackrabbit.oak.jcr.operation;
+package org.apache.jackrabbit.oak.plugins.mongomk.util;
 
-import org.apache.jackrabbit.oak.jcr.delegate.PropertyDelegate;
+import org.apache.jackrabbit.oak.plugins.mongomk.Revision;
+import org.junit.Test;
 
-public abstract class PropertyOperation<U> extends ItemOperation<U> {
+import static org.junit.Assert.assertEquals;
 
-    protected final PropertyDelegate property;
+/**
+ * Tests for {@link Utils}.
+ */
+public class UtilsTest {
 
-    protected PropertyOperation(PropertyDelegate property) {
-        super(property);
-        this.property = property;
+    @Test
+    public void getPreviousIdFor() {
+        Revision r = new Revision(System.currentTimeMillis(), 0, 0);
+        assertEquals("1:p/" + r.toString(), Utils.getPreviousIdFor("0:/", r));
+        assertEquals("2:p/test/" + r.toString(), Utils.getPreviousIdFor("1:/test", r));
     }
-
 }

@@ -14,10 +14,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.jackrabbit.oak.jcr;
+package org.apache.jackrabbit.oak.jcr.session;
+
+import static org.apache.jackrabbit.oak.commons.PathUtils.getParentPath;
+import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.NODE_TYPES_PATH;
 
 import java.io.IOException;
 import java.io.InputStream;
+
 import javax.annotation.Nonnull;
 import javax.jcr.InvalidSerializedDataException;
 import javax.jcr.NamespaceRegistry;
@@ -39,8 +43,10 @@ import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.api.Root;
 import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.jcr.delegate.SessionDelegate;
+import org.apache.jackrabbit.oak.jcr.delegate.WorkspaceDelegate;
 import org.apache.jackrabbit.oak.jcr.lock.LockManagerImpl;
 import org.apache.jackrabbit.oak.jcr.query.QueryManagerImpl;
+import org.apache.jackrabbit.oak.jcr.session.operation.SessionOperation;
 import org.apache.jackrabbit.oak.jcr.version.VersionManagerImpl;
 import org.apache.jackrabbit.oak.jcr.xml.ImportHandler;
 import org.apache.jackrabbit.oak.namepath.NamePathMapper;
@@ -50,9 +56,6 @@ import org.xml.sax.ContentHandler;
 import org.xml.sax.InputSource;
 import org.xml.sax.SAXException;
 
-import static org.apache.jackrabbit.oak.commons.PathUtils.getParentPath;
-import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.NODE_TYPES_PATH;
-
 /**
  * TODO document
  */
@@ -60,6 +63,7 @@ public class WorkspaceImpl implements JackrabbitWorkspace {
 
     private final SessionContext sessionContext;
     private final SessionDelegate sessionDelegate;
+    private final WorkspaceDelegate workspaceDelegate;
     private final QueryManagerImpl queryManager;
     private final VersionManagerImpl versionManager;
     private final ReadWriteNodeTypeManager nodeTypeManager;
@@ -67,6 +71,7 @@ public class WorkspaceImpl implements JackrabbitWorkspace {
     public WorkspaceImpl(final SessionContext sessionContext) {
         this.sessionContext = sessionContext;
         this.sessionDelegate = sessionContext.getSessionDelegate();
+        this.workspaceDelegate = new WorkspaceDelegate(sessionContext);
         this.queryManager = new QueryManagerImpl(sessionContext);
         this.versionManager = new VersionManagerImpl(sessionContext);
         this.nodeTypeManager = new ReadWriteNodeTypeManager() {
@@ -122,24 +127,35 @@ public class WorkspaceImpl implements JackrabbitWorkspace {
     }
 
     @Override
-    public void copy(String srcWorkspace, String srcAbsPath, String destAbsPath) throws RepositoryException {
+    public void copy(String srcWorkspace,
+                     String srcAbsPath,
+                     final String destAbsPath) throws RepositoryException {
         final String srcOakPath = getOakPathOrThrowNotFound(srcAbsPath);
         final String destOakPath = getOakPathOrThrowNotFound(destAbsPath);
-
-        // TODO: use perform()
-        ensureIsAlive();
 
         if (!getName().equals(srcWorkspace)) {
             throw new UnsupportedRepositoryOperationException("Not implemented.");
         }
 
-        sessionDelegate.checkProtectedNode(getParentPath(srcOakPath));
-        sessionDelegate.checkProtectedNode(getParentPath(destOakPath));
+        sessionDelegate.perform(new SessionOperation<Object>(true) {
+            @Override
+            public void checkPreconditions() throws RepositoryException {
+                super.checkPreconditions();
+                ensureIsAlive();
+            }
 
-        SessionImpl.checkIndexOnName(sessionContext, destAbsPath);
+            @Override
+            public Object perform() throws RepositoryException {
+                sessionDelegate.checkProtectedNode(getParentPath(srcOakPath));
+                sessionDelegate.checkProtectedNode(getParentPath(destOakPath));
 
-        sessionDelegate.copy(
-                srcOakPath, destOakPath, sessionContext.getAccessManager());
+                SessionImpl.checkIndexOnName(sessionContext, destAbsPath);
+
+                workspaceDelegate.copy(srcOakPath, destOakPath);
+                return null;
+            }
+        });
+
     }
 
     @Override

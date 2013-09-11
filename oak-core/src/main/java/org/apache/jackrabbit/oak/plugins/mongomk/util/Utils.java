@@ -16,10 +16,12 @@
  */
 package org.apache.jackrabbit.oak.plugins.mongomk.util;
 
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
+import java.util.SortedMap;
 import java.util.TreeMap;
 
 import javax.annotation.Nonnull;
@@ -60,14 +62,14 @@ public class Utils {
     }
 
     @SuppressWarnings("unchecked")
-    public static int estimateMemoryUsage(Map<String, Object> map) {
+    public static int estimateMemoryUsage(Map<?, Object> map) {
         if (map == null) {
             return 0;
         }
         int size = 0;
 
-        for (Entry<String, Object> e : map.entrySet()) {
-            size += e.getKey().length() * 2;
+        for (Entry<?, Object> e : map.entrySet()) {
+            size += e.getKey().toString().length() * 2;
             Object o = e.getValue();
             if (o instanceof String) {
                 size += ((String) o).length() * 2;
@@ -180,6 +182,10 @@ public class Utils {
         return id.substring(index + 1);
     }
 
+    public static String getPreviousIdFor(String id, Revision r) {
+        return getIdFromPath("p" + PathUtils.concat(getPathFromId(id), r.toString()));
+    }
+
     /**
      * Deep copy of a map that may contain map values.
      * 
@@ -190,10 +196,16 @@ public class Utils {
     public static <K> void deepCopyMap(Map<K, Object> source, Map<K, Object> target) {
         for (Entry<K, Object> e : source.entrySet()) {
             Object value = e.getValue();
+            Comparator<? super K> comparator = null;
+            if (value instanceof SortedMap) {
+                @SuppressWarnings("unchecked")
+                SortedMap<K, Object> map = (SortedMap<K, Object>) value;
+                comparator = map.comparator();
+            }
             if (value instanceof Map<?, ?>) {
                 @SuppressWarnings("unchecked")
-                Map<Object, Object> old = (Map<Object, Object>) value;
-                Map<Object, Object> c = newMap();
+                Map<K, Object> old = (Map<K, Object>) value;
+                Map<K, Object> c = new TreeMap<K, Object>(comparator);
                 deepCopyMap(old, c);
                 value = c;
             }

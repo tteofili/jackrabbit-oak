@@ -14,7 +14,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.jackrabbit.oak.jcr;
+package org.apache.jackrabbit.oak.jcr.session;
 
 import static com.google.common.collect.Lists.newArrayListWithCapacity;
 
@@ -42,7 +42,7 @@ import org.apache.jackrabbit.oak.api.Tree.Status;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.jcr.delegate.NodeDelegate;
 import org.apache.jackrabbit.oak.jcr.delegate.PropertyDelegate;
-import org.apache.jackrabbit.oak.jcr.operation.PropertyOperation;
+import org.apache.jackrabbit.oak.jcr.session.operation.PropertyOperation;
 import org.apache.jackrabbit.oak.plugins.value.ValueFactoryImpl;
 import org.apache.jackrabbit.value.ValueHelper;
 
@@ -107,6 +107,11 @@ public class PropertyImpl extends ItemImpl<PropertyDelegate> implements Property
             public Void perform() throws RepositoryException {
                 dlg.remove();
                 return null;
+            }
+
+            @Override
+            public String description() throws RepositoryException {
+                return String.format("Removing property [%s/%s] ",dlg.getPath(),dlg.getName());
             }
         });
     }
@@ -446,6 +451,11 @@ public class PropertyImpl extends ItemImpl<PropertyDelegate> implements Property
                 dlg.setState(createSingleState(dlg.getName(), converted, type));
                 return null;
             }
+
+            @Override
+            public String description() throws RepositoryException {
+                return String.format("Setting property [%s/%s]",dlg.getPath(),dlg.getName());
+            }
         });
     }
 
@@ -470,6 +480,11 @@ public class PropertyImpl extends ItemImpl<PropertyDelegate> implements Property
                 }
                 dlg.setState(createMultiState(dlg.getName(), converted, type));
                 return null;
+            }
+
+            @Override
+            public String description() throws RepositoryException {
+                return String.format("Setting property [%s/%s]",dlg.getPath(),dlg.getName());
             }
         });
     }

@@ -41,13 +41,13 @@ import javax.jcr.version.VersionManager;
 import org.apache.jackrabbit.commons.iterator.NodeIteratorAdapter;
 import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.commons.PathUtils;
-import org.apache.jackrabbit.oak.jcr.SessionContext;
+import org.apache.jackrabbit.oak.jcr.session.SessionContext;
 import org.apache.jackrabbit.oak.jcr.delegate.NodeDelegate;
 import org.apache.jackrabbit.oak.jcr.delegate.SessionDelegate;
 import org.apache.jackrabbit.oak.jcr.delegate.VersionDelegate;
 import org.apache.jackrabbit.oak.jcr.delegate.VersionHistoryDelegate;
 import org.apache.jackrabbit.oak.jcr.delegate.VersionManagerDelegate;
-import org.apache.jackrabbit.oak.jcr.operation.SessionOperation;
+import org.apache.jackrabbit.oak.jcr.session.operation.SessionOperation;
 import org.apache.jackrabbit.oak.util.TODO;
 
 import static com.google.common.base.Preconditions.checkNotNull;
@@ -422,7 +422,10 @@ public class VersionManagerImpl implements VersionManager {
             protected void entering(Node node, int level)
                     throws RepositoryException {
                 if (node.isNodeType(NodeType.NT_FROZEN_NODE)) {
-                    uuids.add(node.getProperty(Property.JCR_FROZEN_UUID).getString());
+                    String id = node.getProperty(Property.JCR_FROZEN_UUID).getString();
+                    if (id.length() > 0) {
+                        uuids.add(id);
+                    }
                 } else if (node.isNodeType(NodeType.NT_VERSIONED_CHILD)) {
                     Node history = node.getProperty(
                             Property.JCR_CHILD_VERSION_HISTORY).getNode();

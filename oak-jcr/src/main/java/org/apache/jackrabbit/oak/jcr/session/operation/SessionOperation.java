@@ -16,7 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package org.apache.jackrabbit.oak.jcr.operation;
+package org.apache.jackrabbit.oak.jcr.session.operation;
 
 import javax.jcr.RepositoryException;
 
@@ -60,5 +60,15 @@ public abstract class SessionOperation<T> {
     }
 
     public abstract T perform() throws RepositoryException;
+
+    /**
+     * Provide details about the operation being performed
+     *
+     * @return operation description. Would return <code>null</code>
+     * if no description provided
+     */
+    public String description() throws RepositoryException{
+        return null;
+    }
 
 }

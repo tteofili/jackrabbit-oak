@@ -14,34 +14,23 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.jackrabbit.oak.plugins.mongomk;
+package org.apache.jackrabbit.oak.jcr.session.operation;
 
-import org.apache.jackrabbit.mk.api.MicroKernel;
-import org.junit.After;
-import org.junit.Before;
+import javax.jcr.RepositoryException;
 
-/**
- * <code>BaseMongoMKTest</code>...
- */
-public class BaseMongoMKTest extends MongoMKTestBase {
+import org.apache.jackrabbit.oak.jcr.delegate.ItemDelegate;
 
-    protected MongoMK mk;
+public abstract class ItemOperation<U> extends SessionOperation<U> {
 
-    @Before
-    public void initMongoMK() {
-        mk = new MongoMK.Builder().open();
+    protected final ItemDelegate item;
+
+    protected ItemOperation(ItemDelegate item) {
+        this.item = item;
     }
 
     @Override
-    protected MicroKernel getMicroKernel() {
-        return mk;
+    public void checkPreconditions() throws RepositoryException {
+        item.checkAlive();
     }
 
-    @After
-    public void disposeMongoMK() {
-        if (mk != null) {
-            mk.dispose();
-            mk = null;
-        }
-    }
 }
