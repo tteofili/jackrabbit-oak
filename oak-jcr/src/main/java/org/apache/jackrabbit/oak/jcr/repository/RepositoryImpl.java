@@ -67,7 +67,7 @@ public class RepositoryImpl implements JackrabbitRepository {
      */
     public static final String REFRESH_INTERVAL = "oak.refresh-interval";
 
-    private final Descriptors descriptors = new Descriptors(new SimpleValueFactory());
+    private final Descriptors descriptors;
     private final ContentRepository contentRepository;
     protected final Whiteboard whiteboard;
     private final SecurityProvider securityProvider;
@@ -80,6 +80,7 @@ public class RepositoryImpl implements JackrabbitRepository {
         this.whiteboard = checkNotNull(whiteboard);
         this.securityProvider = checkNotNull(securityProvider);
         this.threadSaveCount = new ThreadLocal<Long>();
+        this.descriptors = determineDescriptors();
     }
 
     //---------------------------------------------------------< Repository >---
@@ -204,8 +205,7 @@ public class RepositoryImpl implements JackrabbitRepository {
 
             RefreshStrategy refreshStrategy = createRefreshStrategy(refreshInterval);
             ContentSession contentSession = contentRepository.login(credentials, workspaceName);
-            SessionDelegate sessionDelegate = new SessionDelegate(
-                    contentSession, refreshStrategy, securityProvider);
+            SessionDelegate sessionDelegate = new SessionDelegate(contentSession, refreshStrategy);
             SessionContext context = createSessionContext(
                     securityProvider, createAttributes(refreshInterval), sessionDelegate);
             return context.getSession();
@@ -234,7 +234,24 @@ public class RepositoryImpl implements JackrabbitRepository {
         return new SessionContext(this, securityProvider, whiteboard, attributes, delegate);
     }
 
-    //------------------------------------------------------------< private >---
+    /**
+     * Provides descriptors for current repository implementations. Can be overridden
+     * by the subclasses to add more values to the descriptor
+     * @return  repository descriptor
+     */
+    protected Descriptors determineDescriptors() {
+        return new Descriptors(new SimpleValueFactory());
+    }
+
+    /**
+     * Returns the descriptors associated with the repository
+     * @return repository descriptor
+     */
+    protected Descriptors getDescriptors() {
+        return descriptors;
+    }
+
+//------------------------------------------------------------< private >---
 
     private static Long getRefreshInterval(Credentials credentials) {
         if (credentials instanceof SimpleCredentials) {

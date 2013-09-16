@@ -20,7 +20,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 import javax.annotation.CheckForNull;
@@ -245,8 +244,11 @@ public class Commit {
                 }
             }
             for (UpdateOp op : changedNodes) {
-                // set commit root on changed nodes
-                NodeDocument.setCommitRoot(op, revision, commitRootDepth);
+                // set commit root on changed nodes unless it's the
+                // commit root itself
+                if (op != commitRoot) {
+                    NodeDocument.setCommitRoot(op, revision, commitRootDepth);
+                }
                 opLog.add(op);
                 createOrUpdateNode(store, op);
             }

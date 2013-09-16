@@ -14,34 +14,42 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.jackrabbit.mongomk.perf;
+package org.apache.jackrabbit.oak.plugins.segment.file;
+
+import static com.google.common.base.Preconditions.checkState;
 
 import java.io.File;
-import java.io.InputStream;
-import org.apache.jackrabbit.mk.blobs.BlobStore;
+import java.io.IOException;
+import java.io.RandomAccessFile;
+import java.nio.ByteBuffer;
 
+class RandomAccessTarFile extends TarFile {
 
-public class BlobStoreFS implements  BlobStore{
+    private final RandomAccessFile file;
 
-    public BlobStoreFS(String rootPath) {
-        File rootDir = new File(rootPath);
-        if (!rootDir.isDirectory()) {
-            rootDir.mkdirs();
-        }
+    RandomAccessTarFile(File file) throws IOException {
+        this.file = new RandomAccessFile(file, "rw");
     }
 
     @Override
-    public long getBlobLength(String blobId) throws Exception {
-        return 0;
+    protected synchronized ByteBuffer read(int position, int length)
+            throws IOException {
+        ByteBuffer entry = ByteBuffer.allocate(length);
+        file.seek(position);
+        file.readFully(entry.array());
+        return entry;
     }
 
     @Override
-    public int readBlob(String blobId, long blobOffset, byte[] buffer, int bufferOffset, int length) throws Exception {
-        return 0;
+    protected int length() throws IOException {
+        long length = file.length();
+        checkState(length < Integer.MAX_VALUE);
+        return (int) length;
     }
 
     @Override
-    public String writeBlob(InputStream is) throws Exception {
-        return null;
+    void close() throws IOException {
+        file.close();
     }
+
 }

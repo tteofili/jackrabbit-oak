@@ -32,7 +32,6 @@ import javax.jcr.query.RowIterator;
 
 import org.apache.jackrabbit.oak.jcr.AbstractRepositoryTest;
 import org.apache.jackrabbit.oak.jcr.NodeStoreFixture;
-import org.apache.jackrabbit.oak.query.ast.FullTextSearchImpl;
 import org.junit.Test;
 
 /**
@@ -62,7 +61,7 @@ public class QueryFulltextTest extends AbstractRepositoryTest {
         Row row;
         String s;
         
-        String xpath = "//*[jcr:contains(., 'hello')]/rep:excerpt(.)";
+        String xpath = "//*[jcr:contains(., 'hello')]/rep:excerpt(.) order by jcr:path descending";
         
         q = qm.createQuery(xpath, "xpath");
         it = q.execute().getRows();
@@ -76,7 +75,7 @@ public class QueryFulltextTest extends AbstractRepositoryTest {
         assertTrue(s, s.indexOf("Hello World") >= 0);
         assertTrue(s, s.indexOf("Description") >= 0);
         
-        xpath = "//*[jcr:contains(., 'hello')]/rep:excerpt(.)";
+        xpath = "//*[jcr:contains(., 'hello')]/rep:excerpt(.) order by jcr:path descending";
 
         q = qm.createQuery(xpath, "xpath");
         it = q.execute().getRows();
@@ -110,15 +109,10 @@ public class QueryFulltextTest extends AbstractRepositoryTest {
         Query q;
         
         q = qm.createQuery("explain " + sql2, Query.JCR_SQL2);
-        if (FullTextSearchImpl.OAK_890_ADVANCED_FT_SEARCH) {
-            assertEquals("[nt:base] as [nt:base] /* traverse \"*\" " + 
-                    "where contains([nt:base].[text], cast('hello OR hallo' as string)) */", 
-                    getResult(q.execute(), "plan"));
-        } else {
-            assertEquals("[nt:base] as [nt:base] /* traverse \"*\" " + 
-                    "where contains([nt:base].[*], cast('hello OR hallo' as string)) */", 
-                    getResult(q.execute(), "plan"));
-        }
+
+        assertEquals("[nt:base] as [nt:base] /* traverse \"*\" " + 
+                "where contains([nt:base].[text], cast('hello OR hallo' as string)) */", 
+                getResult(q.execute(), "plan"));
         
         // verify the result
         // uppercase "OR" mean logical "or"

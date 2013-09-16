@@ -20,13 +20,13 @@ import java.util.Map;
 import java.util.Set;
 
 import org.apache.jackrabbit.oak.plugins.mongomk.util.Utils;
-import org.junit.Ignore;
 import org.junit.Test;
 
 import com.google.common.collect.Sets;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -40,20 +40,18 @@ public class DocumentSplitTest extends BaseMongoMKTest {
         Set<String> revisions = Sets.newHashSet();
         NodeDocument doc = store.find(Collection.NODES, Utils.getIdFromPath("/"));
         assertNotNull(doc);
-        revisions.addAll(doc.getRevisionsMap().keySet());
-        int numRevs = 1; // MongoMK initializes with a root node with a single revision
+        revisions.addAll(doc.getLocalRevisions().keySet());
         revisions.add(mk.commit("/", "+\"foo\":{}+\"bar\":{}", null, null));
-        numRevs++;
         // create nodes
-        while (numRevs++ <= NodeDocument.REVISIONS_SPLIT_OFF_SIZE) {
-            revisions.add(mk.commit("/", "+\"foo/node-" + numRevs + "\":{}" +
-                    "+\"bar/node-" + numRevs + "\":{}", null, null));
+        while (revisions.size() <= NodeDocument.REVISIONS_SPLIT_OFF_SIZE) {
+            revisions.add(mk.commit("/", "+\"foo/node-" + revisions.size() + "\":{}" +
+                    "+\"bar/node-" + revisions.size() + "\":{}", null, null));
         }
         mk.runBackgroundOperations();
         String head = mk.getHeadRevision();
         doc = store.find(Collection.NODES, Utils.getIdFromPath("/"));
         assertNotNull(doc);
-        Map<String, String> revs = doc.getRevisionsMap();
+        Map<String, String> revs = doc.getLocalRevisions();
         // one remaining in the local revisions map
         assertEquals(1, revs.size());
         for (String r : revisions) {
@@ -66,5 +64,43 @@ public class DocumentSplitTest extends BaseMongoMKTest {
         mk.commit("/", "+\"baz\":{}", null, null);
         mk.setAsyncDelay(0);
         mk.backgroundWrite();
+    }
+
+    @Test
+    public void splitDeleted() throws Exception {
+        DocumentStore store = mk.getDocumentStore();
+        Set<String> revisions = Sets.newHashSet();
+        mk.commit("/", "+\"foo\":{}", null, null);
+        NodeDocument doc = store.find(Collection.NODES, Utils.getIdFromPath("/foo"));
+        assertNotNull(doc);
+        revisions.addAll(doc.getLocalRevisions().keySet());
+        boolean create = false;
+        while (revisions.size() <= NodeDocument.REVISIONS_SPLIT_OFF_SIZE) {
+            if (create) {
+                revisions.add(mk.commit("/", "+\"foo\":{}", null, null));
+            } else {
+                revisions.add(mk.commit("/", "-\"foo\"", null, null));
+            }
+            create = !create;
+        }
+        mk.runBackgroundOperations();
+        String head = mk.getHeadRevision();
+        doc = store.find(Collection.NODES, Utils.getIdFromPath("/foo"));
+        assertNotNull(doc);
+        Map<String, String> deleted = doc.getLocalDeleted();
+        // one remaining in the local deleted map
+        assertEquals(1, deleted.size());
+        for (String r : revisions) {
+            Revision rev = Revision.fromString(r);
+            assertTrue(doc.containsRevision(rev));
+            assertTrue(doc.isCommitted(rev));
+        }
+        Node node = doc.getNodeAtRevision(mk, Revision.fromString(head));
+        // check status of node
+        if (create) {
+            assertNull(node);
+        } else {
+            assertNotNull(node);
+        }
     }
 }

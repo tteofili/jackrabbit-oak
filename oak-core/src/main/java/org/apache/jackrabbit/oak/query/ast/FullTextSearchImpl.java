@@ -41,13 +41,6 @@ import org.apache.jackrabbit.oak.spi.query.QueryIndex.FulltextQueryIndex;
  * A fulltext "contains(...)" condition.
  */
 public class FullTextSearchImpl extends ConstraintImpl {
-    
-    /**
-     * Feature flag. 
-     * Disabled until OAK-890 is fully implemented.
-     * Enable for testing OAK-890 related changes.
-     */
-    public static final boolean OAK_890_ADVANCED_FT_SEARCH = true;
 
     /**
      * Compatibility for Jackrabbit 2.0 single quoted phrase queries.
@@ -56,14 +49,6 @@ public class FullTextSearchImpl extends ConstraintImpl {
      * instead, as in the spec, using double quotes.
      */
     public static final boolean JACKRABBIT_2_SINGLE_QUOTED_PHRASE = true;
-
-    /**
-     * Compatibility for Jackrabbit 2.0 queries with ampersand.
-     * (contains(., "max&moritz"))
-     * The ampersand is converted to a space, and a search is made for the 
-     * two words "max" and "moritz" (not a phrase search).
-     */
-    public static final boolean JACKRABBIT_2_AMPERSAND_TO_SPACE = true;
 
     private final String selectorName;
     private final String relativePath;
@@ -85,13 +70,6 @@ public class FullTextSearchImpl extends ConstraintImpl {
         } else {
             this.relativePath = propertyName.substring(0, slash);
             propertyName = propertyName.substring(slash + 1);
-        }
-
-        if (!OAK_890_ADVANCED_FT_SEARCH) {
-            // temporary workaround to support using an index for
-            // "contains(a/*, 'x') or contains(a/a, x') or contains(a/b, 'x')"
-            // TODO this behavior does not match the specification
-            propertyName = null;
         }
 
         if (propertyName == null || "*".equals(propertyName)) {
@@ -156,13 +134,11 @@ public class FullTextSearchImpl extends ConstraintImpl {
         PropertyValue v = fullTextSearchExpression.currentValue();
         try {
             String p = propertyName;
-            if (OAK_890_ADVANCED_FT_SEARCH) {
-                if (relativePath != null) {
-                    if (p == null) {
-                        p = "*";
-                    }
-                    p = PathUtils.concat(relativePath, p);
+            if (relativePath != null) {
+                if (p == null) {
+                    p = "*";
                 }
+                p = PathUtils.concat(relativePath, p);
             }
             return FullTextParser.parse(p, v.getValue(Type.STRING));
         } catch (ParseException e) {

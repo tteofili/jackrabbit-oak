@@ -53,9 +53,9 @@ public class SegmentNodeStoreService extends AbstractNodeStore {
     public static final String NAME = "name";
 
     @Property(description="TarMK directory (if unset, use MongoDB)")
-    public static final String DIRECTORY = "directory";
+    public static final String DIRECTORY = "repository.home";
 
-    @Property(description="MongoDB host", value="localhost")
+    @Property(description="MongoDB host")
     public static final String HOST = "host";
 
     @Property(description="MongoDB host", intValue=27017)
@@ -90,13 +90,12 @@ public class SegmentNodeStoreService extends AbstractNodeStore {
         Dictionary<?, ?> properties = context.getProperties();
         name = "" + properties.get(NAME);
 
-        if (properties.get(DIRECTORY) != null) {
-            String directory = properties.get(DIRECTORY).toString();
-
+        String host = lookup(context, HOST);
+        if (host == null) {
+            String directory = lookup(context, DIRECTORY);
             mongo = null;
             store = new FileStore(directory);
         } else {
-            String host = String.valueOf(properties.get(HOST));
             int port = Integer.parseInt(String.valueOf(properties.get(PORT)));
             String db = String.valueOf(properties.get(DB));
             int cache = Integer.parseInt(String.valueOf(properties.get(CACHE)));
@@ -110,6 +109,16 @@ public class SegmentNodeStoreService extends AbstractNodeStore {
         }
 
         delegate = new SegmentNodeStore(store);
+    }
+
+    private static String lookup(ComponentContext context, String property) {
+        if (context.getProperties().get(property) != null) {
+            return context.getProperties().get(property).toString();
+        }
+        if (context.getBundleContext().getProperty(property) != null) {
+            return context.getBundleContext().getProperty(property).toString();
+        }
+        return null;
     }
 
     @Deactivate
