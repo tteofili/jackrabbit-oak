@@ -175,7 +175,9 @@ public class RemoteSolrServerProvider implements SolrServerProvider {
             } catch (Exception e) {
                 // wait a bit
                 try {
-                    log.warn("wait a bit", e);
+                    if (log.isWarnEnabled()) {
+                        log.warn("wait a bit", e);
+                    }
                     Thread.sleep(3000);
                 } catch (InterruptedException e1) {
                     // do nothing
