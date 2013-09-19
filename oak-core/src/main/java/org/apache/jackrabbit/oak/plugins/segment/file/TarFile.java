@@ -18,6 +18,9 @@ package org.apache.jackrabbit.oak.plugins.segment.file;
 
 import static com.google.common.base.Charsets.UTF_8;
 import static com.google.common.base.Preconditions.checkState;
+import static com.google.common.base.Predicates.equalTo;
+import static com.google.common.base.Predicates.not;
+import static com.google.common.collect.Maps.filterKeys;
 
 import java.io.File;
 import java.io.IOException;
@@ -28,11 +31,6 @@ import java.util.UUID;
 import com.google.common.collect.ImmutableMap;
 
 class TarFile {
-
-    private static boolean USE_MEMORY_MAPPING =
-            System.getProperty("tarmk.mmap") != null
-            ? Boolean.getBoolean("tarmk.mmap")
-            : "64".equals(System.getProperty("sun.arch.data.model"));
 
     /** The tar file block size. */
     private static final int BLOCK_SIZE = 512;
@@ -56,23 +54,25 @@ class TarFile {
 
     private int position = 0;
 
-    private final int maxLength;
+    private final int maxFileSize;
 
     private volatile Map<UUID, Location> entries;
 
-    TarFile(File file, int maxLength) throws IOException {
+    TarFile(File file, int maxFileSize, boolean memoryMapping)
+            throws IOException {
         long len = file.length();
         checkState(len <= Integer.MAX_VALUE);
-        this.maxLength = Math.max((int) len, maxLength);
+        this.maxFileSize = Math.max((int) len, maxFileSize);
 
-        if (USE_MEMORY_MAPPING) {
-            this.file = new MappedAccess(file, maxLength);
+        if (memoryMapping) {
+            this.file = new MappedAccess(file, this.maxFileSize);
         } else {
             this.file = new RandomAccess(file);
         }
 
         ImmutableMap.Builder<UUID, Location> builder = ImmutableMap.builder();
 
+        Location journals = null;
         this.position = 0;
         while (position + BLOCK_SIZE <= len) {
             // read the tar header block
@@ -87,13 +87,21 @@ class TarFile {
             }
 
             try {
+                Location location = new Location(position + BLOCK_SIZE, size);
                 UUID id = UUID.fromString(name);
-                builder.put(id, new Location(position + BLOCK_SIZE, size));
+                if (FileStore.JOURNALS_UUID.equals(id)) {
+                    journals = location;
+                } else {
+                    builder.put(id, location);
+                }
             } catch (IllegalArgumentException e) {
                 throw new IOException("Unexpected tar entry: " + name);
             }
 
             position += (1 + (size + BLOCK_SIZE - 1) / BLOCK_SIZE) * BLOCK_SIZE;
+        }
+        if (journals != null) {
+            builder.put(FileStore.JOURNALS_UUID, journals);
         }
 
         this.entries = builder.build();
@@ -110,7 +118,7 @@ class TarFile {
 
     synchronized boolean writeEntry(UUID id, byte[] b, int offset, int size)
             throws IOException {
-        if (position + BLOCK_SIZE + size > maxLength) {
+        if (position + BLOCK_SIZE + size > maxFileSize) {
             return false;
         }
 
@@ -169,7 +177,7 @@ class TarFile {
 
         file.write(position, b, offset, size);
         entries = ImmutableMap.<UUID, Location>builder()
-                .putAll(entries)
+                .putAll(filterKeys(entries, not(equalTo(id))))
                 .put(id, new Location(position, size))
                 .build();
         position += size;

@@ -36,6 +36,7 @@ import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import org.apache.jackrabbit.oak.cache.CacheValue;
 import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.plugins.mongomk.util.Utils;
 import org.slf4j.Logger;
@@ -83,7 +84,7 @@ public class NodeDocument extends Document {
      */
     static final String MODIFIED = "_modified";
 
-    private static final SortedMap<Revision, Range> EMPTY_RANGE_MAP = 
+    private static final SortedMap<Revision, Range> EMPTY_RANGE_MAP =
             Collections.unmodifiableSortedMap(new TreeMap<Revision, Range>());
 
     /**
@@ -139,20 +140,18 @@ public class NodeDocument extends Document {
 
     /**
      * Gets the value map for the given key. This method is similar to {@link
-     * #get(String)} but only returns a map instance if the value associated
-     * with <code>key</code> is a map. The returned value map may span multiple
-     * documents if the values of the given <code>key</code> were split off to
-     * {@link #PREVIOUS} documents.
+     * #get(String)} but will always return a value map. The returned value map
+     * may span multiple documents if the values of the given <code>key</code>
+     * were split off to {@link #PREVIOUS} documents.
      *
      * @param key a string key.
-     * @return the map associated with the key or <code>null</code> if there is
-     *         no such entry.
+     * @return the map associated with the key.
      */
-    @CheckForNull
+    @Nonnull
     public Map<String, String> getValueMap(@Nonnull String key) {
         Object value = super.get(key);
         if (IGNORE_ON_SPLIT.contains(key) || !(value instanceof Map)) {
-            return null;
+            return Collections.emptyMap();
         } else {
             return ValueMap.create(this, key);
         }
@@ -293,7 +292,7 @@ public class NodeDocument extends Document {
      * @param context the revision context
      * @param changeRev the revision of the current change
      * @param handler the conflict handler, which is called for concurrent changes
-     *                preceding <code>before</code>.
+     *                preceding <code>changeRev</code>.
      * @return the revision, or null if deleted
      */
     @SuppressWarnings("unchecked")
@@ -302,10 +301,11 @@ public class NodeDocument extends Document {
                                       Revision changeRev,
                                       CollisionHandler handler) {
         SortedSet<String> revisions = new TreeSet<String>(Collections.reverseOrder());
-        revisions.addAll(getRevisions().keySet());
-        revisions.addAll(getCommitRoot().keySet());
-        Map<String, String> deletedMap = getDeleted();
-        revisions.addAll(deletedMap.keySet());
+        // no need to look at all commits. the primary document
+        // always contains at least one commit, including all
+        // branch commits which are not yet merged
+        revisions.addAll(getLocalRevisions().keySet());
+        revisions.addAll(getLocalCommitRoot().keySet());
         Revision newestRev = null;
         for (String r : revisions) {
             Revision propRev = Revision.fromString(r);
@@ -329,7 +329,8 @@ public class NodeDocument extends Document {
         if (newestRev == null) {
             return null;
         }
-        String value = deletedMap.get(newestRev.toString());
+
+        String value = getDeleted().get(newestRev.toString());
         if ("true".equals(value)) {
             // deleted in the newest revision
             return null;
@@ -383,7 +384,8 @@ public class NodeDocument extends Document {
      */
     @CheckForNull
     public Node getNodeAtRevision(RevisionContext context, Revision readRevision) {
-        Revision min = getLiveRevision(context, readRevision, new HashSet<Revision>());
+        Set<Revision> validRevisions = new HashSet<Revision>();
+        Revision min = getLiveRevision(context, readRevision, validRevisions);
         if (min == null) {
             // deleted
             return null;
@@ -394,17 +396,17 @@ public class NodeDocument extends Document {
             if (!Utils.isPropertyName(key)) {
                 continue;
             }
-            Map<String, String> valueMap = getValueMap(key);
-            if (valueMap != null) {
-                if (valueMap instanceof NavigableMap) {
-                    // TODO instanceof should be avoided
-                    // use descending keys (newest first) if map is sorted
-                    valueMap = ((NavigableMap<String, String>) valueMap).descendingMap();
-                }
-                String value = getLatestValue(context, valueMap, min, readRevision);
-                String propertyName = Utils.unescapePropertyName(key);
-                n.setProperty(propertyName, value);
+            // first check local map, which contains most recent values
+            Value value = getLatestValue(context, getLocalMap(key),
+                    min, readRevision, validRevisions);
+            if (value == null) {
+                // check complete revision history
+                value = getLatestValue(context, getValueMap(key),
+                        min, readRevision, validRevisions);
             }
+            String propertyName = Utils.unescapePropertyName(key);
+            String v = value != null ? value.value : null;
+            n.setProperty(propertyName, v);
         }
 
         // when was this node last modified?
@@ -465,32 +467,7 @@ public class NodeDocument extends Document {
     public boolean isDeleted(RevisionContext context,
                              Revision readRevision,
                              Set<Revision> validRevisions) {
-        Map<String, String> valueMap = getDeleted();
-        if (valueMap.isEmpty()) {
-            return false;
-        }
-        if (valueMap instanceof NavigableMap) {
-            // TODO instanceof should be avoided
-            // use descending keys (newest first) if map is sorted
-            valueMap = ((NavigableMap<String, String>) valueMap).descendingMap();
-        }
-        Revision mostRecent = null;
-        boolean deleted = false;
-        for (Map.Entry<String, String> entry : valueMap.entrySet()) {
-            Revision r = Revision.fromString(entry.getKey());
-            if (isRevisionNewer(context, r, readRevision)) {
-                // ignore -> newer than readRevision
-                continue;
-            }
-            if (mostRecent != null && isRevisionNewer(context, mostRecent, r)) {
-                continue;
-            }
-            if (isValidRevision(context, r, readRevision, validRevisions)) {
-                mostRecent = r;
-                deleted = "true".equals(entry.getValue());
-            }
-        }
-        return mostRecent == null || deleted;
+        return getLiveRevision(context, readRevision, validRevisions) == null;
     }
 
     /**
@@ -507,55 +484,15 @@ public class NodeDocument extends Document {
     @CheckForNull
     public Revision getLiveRevision(RevisionContext context, Revision maxRev,
                                     Set<Revision> validRevisions) {
-        Map<String, String> valueMap = getDeleted();
-        if (valueMap.isEmpty()) {
-            return null;
+        // check local deleted map first
+        Value value = getLatestValue(context, getLocalDeleted(),
+                null, maxRev, validRevisions);
+        if (value == null) {
+            // need to check complete map
+            value = getLatestValue(context, getDeleted(),
+                    null, maxRev, validRevisions);
         }
-        // first, search the newest deleted revision
-        Revision deletedRev = null;
-        if (valueMap instanceof NavigableMap) {
-            // TODO instanceof should be avoided
-            // use descending keys (newest first) if map is sorted
-            valueMap = ((NavigableMap<String, String>) valueMap).descendingMap();
-        }
-        for (String r : valueMap.keySet()) {
-            String value = valueMap.get(r);
-            if (!"true".equals(value)) {
-                // only look at deleted revisions now
-                continue;
-            }
-            Revision propRev = Revision.fromString(r);
-            if (isRevisionNewer(context, propRev, maxRev)
-                    || !isValidRevision(context, propRev, maxRev, validRevisions)) {
-                continue;
-            }
-            if (deletedRev == null || isRevisionNewer(context, propRev, deletedRev)) {
-                deletedRev = propRev;
-            }
-        }
-        // now search the oldest non-deleted revision that is newer than the
-        // newest deleted revision
-        Revision liveRev = null;
-        for (String r : valueMap.keySet()) {
-            String value = valueMap.get(r);
-            if ("true".equals(value)) {
-                // ignore deleted revisions
-                continue;
-            }
-            Revision propRev = Revision.fromString(r);
-            if (deletedRev != null && isRevisionNewer(context, deletedRev, propRev)) {
-                // the node was deleted later on
-                continue;
-            }
-            if (isRevisionNewer(context, propRev, maxRev)
-                    || !isValidRevision(context, propRev, maxRev, validRevisions)) {
-                continue;
-            }
-            if (liveRev == null || isRevisionNewer(context, liveRev, propRev)) {
-                liveRev = propRev;
-            }
-        }
-        return liveRev;
+        return value != null && value.value.equals("false") ? value.revision : null;
     }
 
     /**
@@ -593,11 +530,7 @@ public class NodeDocument extends Document {
                 continue;
             }
             // was this property touched after baseRevision?
-            Map<String, String> changes = getValueMap(name);
-            if (changes == null) {
-                continue;
-            }
-            for (String rev : changes.keySet()) {
+            for (String rev : getValueMap(name).keySet()) {
                 if (isRevisionNewer(context, Revision.fromString(rev), baseRevision)) {
                     return true;
                 }
@@ -861,6 +794,21 @@ public class NodeDocument extends Document {
         checkNotNull(op).setMapEntry(DELETED, checkNotNull(revision).toString(), String.valueOf(deleted));
     }
 
+    static final class Children implements CacheValue {
+
+        final List<String> childNames = new ArrayList<String>();
+        boolean isComplete;
+
+        @Override
+        public int getMemory() {
+            int size = 8;
+            for (String name : childNames) {
+                size += name.length() * 2 + 8;
+            }
+            return size;
+        }
+    }
+
     //----------------------------< internal >----------------------------------
 
     /**
@@ -998,39 +946,37 @@ public class NodeDocument extends Document {
 
     /**
      * Get the latest property value that is larger or equal the min revision,
-     * and smaller or equal the max revision.
+     * and smaller or equal the readRevision revision.
      *
      * @param valueMap the revision-value map
      * @param min the minimum revision (null meaning unlimited)
-     * @param max the maximum revision
+     * @param readRevision the maximum revision
+     * @param validRevisions set of revision considered valid against the given
+     *                       readRevision.
      * @return the value, or null if not found
      */
     @CheckForNull
-    private static String getLatestValue(@Nonnull RevisionContext context,
-                                         @Nonnull Map<String, String> valueMap,
-                                         @Nullable Revision min,
-                                         @Nonnull Revision max) {
+    private Value getLatestValue(@Nonnull RevisionContext context,
+                                 @Nonnull Map<String, String> valueMap,
+                                 @Nullable Revision min,
+                                 @Nonnull Revision readRevision,
+                                 @Nonnull Set<Revision> validRevisions) {
         String value = null;
         Revision latestRev = null;
-        for (String r : valueMap.keySet()) {
-            Revision propRev = Revision.fromString(r);
+        for (Map.Entry<String, String> entry : valueMap.entrySet()) {
+            Revision propRev = Revision.fromString(entry.getKey());
             if (min != null && isRevisionNewer(context, min, propRev)) {
                 continue;
             }
             if (latestRev != null && !isRevisionNewer(context, propRev, latestRev)) {
                 continue;
             }
-            if (includeRevision(context, propRev, max)) {
+            if (isValidRevision(context, propRev, readRevision, validRevisions)) {
                 latestRev = propRev;
-                value = valueMap.get(r);
+                value = entry.getValue();
             }
         }
-        return value;
-    }
-
-    @Nonnull
-    private Map<String, String> getRevisions() {
-        return ValueMap.create(this, REVISIONS);
+        return value != null ? new Value(value, latestRev) : null;
     }
 
     @Nonnull
@@ -1041,5 +987,16 @@ public class NodeDocument extends Document {
     @Nonnull
     private Map<String, String> getCommitRoot() {
         return ValueMap.create(this, COMMIT_ROOT);
+    }
+
+    private static final class Value {
+
+        final String value;
+        final Revision revision;
+
+        Value(@Nonnull String value, @Nonnull Revision revision) {
+            this.value = checkNotNull(value);
+            this.revision = checkNotNull(revision);
+        }
     }
 }
