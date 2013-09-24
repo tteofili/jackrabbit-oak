@@ -107,14 +107,11 @@ public class EmbeddedSolrServerProvider implements SolrServerProvider {
                 if (log.isInfoEnabled()) {
                     log.info("starting HTTP Solr server");
                 }
-                HttpSolrServer httpSolrServer = new HttpSolrServer(new StringBuilder(SolrServerConfigurationDefaults.LOCAL_BASE_URL)
-                        .append(':').append(httpPort).append(context).append('/').append(coreName).toString());
-                if (httpSolrServer != null) {
-                    return httpSolrServer;
-                } else {
-                    throw new IOException("the spawn HTTP Solr server is not alive");
-                }
-
+                HttpSolrServer httpSolrServer = new HttpSolrServer(new StringBuilder(
+                                SolrServerConfigurationDefaults.LOCAL_BASE_URL).append(':')
+                                .append(httpPort).append(context).append('/').append(coreName)
+                                .toString());
+                return httpSolrServer;
             } else {
                 ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
                 Thread.currentThread().setContextClassLoader(CoreContainer.class.getClassLoader());
@@ -127,7 +124,7 @@ public class EmbeddedSolrServerProvider implements SolrServerProvider {
                 }
 
                 EmbeddedSolrServer server = new EmbeddedSolrServer(coreContainer, coreName);
-                if (solrServer.ping().getStatus() == 0) {
+                if (server.ping().getStatus() == 0) {
                     return server;
                 } else {
                     throw new IOException("the embedded Solr server is not alive");
