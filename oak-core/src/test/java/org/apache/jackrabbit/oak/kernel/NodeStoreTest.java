@@ -31,6 +31,8 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 
+import javax.annotation.Nonnull;
+
 import org.apache.jackrabbit.oak.NodeStoreFixture;
 import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.api.PropertyState;
@@ -76,8 +78,7 @@ public class NodeStoreTest {
     @Before
     public void setUp() throws Exception {
         store = fixture.createNodeStore();
-        NodeStoreBranch branch = store.branch();
-        NodeBuilder builder = branch.getHead().builder();
+        NodeBuilder builder = store.getRoot().builder();
         NodeBuilder test = builder.child("test");
         test.setProperty("a", 1);
         test.setProperty("b", 2);
@@ -85,9 +86,7 @@ public class NodeStoreTest {
         test.child("x");
         test.child("y");
         test.child("z");
-        branch.setRoot(builder.getNodeState());
-        branch.merge(EmptyHook.INSTANCE, PostCommitHook.EMPTY);
-        root = store.getRoot();
+        root = store.merge(builder, EmptyHook.INSTANCE, PostCommitHook.EMPTY);
     }
 
     @After
@@ -110,10 +109,8 @@ public class NodeStoreTest {
     }
 
     @Test
-    public void branch() throws CommitFailedException {
-        NodeStoreBranch branch = store.branch();
-
-        NodeBuilder rootBuilder = branch.getHead().builder();
+    public void simpleMerge() throws CommitFailedException {
+        NodeBuilder rootBuilder = store.getRoot().builder();
         NodeBuilder testBuilder = rootBuilder.child("test");
         NodeBuilder newNodeBuilder = testBuilder.child("newNode");
 
@@ -127,25 +124,12 @@ public class NodeStoreTest {
         assertFalse(testState.getChildNode("x").exists());
         assertEquals(42, (long) testState.getChildNode("newNode").getProperty("n").getValue(LONG));
 
-        // Assert changes are not yet present in the branch
-        testState = branch.getHead().getChildNode("test");
-        assertFalse(testState.getChildNode("newNode").exists());
-        assertTrue(testState.getChildNode("x").exists());
-
-        branch.setRoot(rootBuilder.getNodeState());
-
-        // Assert changes are present in the branch
-        testState = branch.getHead().getChildNode("test");
-        assertTrue(testState.getChildNode("newNode").exists());
-        assertFalse(testState.getChildNode("x").exists());
-        assertEquals(42, (long) testState.getChildNode("newNode").getProperty("n").getValue(LONG));
-
         // Assert changes are not yet present in the trunk
         testState = store.getRoot().getChildNode("test");
         assertFalse(testState.getChildNode("newNode").exists());
         assertTrue(testState.getChildNode("x").exists());
 
-        branch.merge(EmptyHook.INSTANCE, PostCommitHook.EMPTY);
+        store.merge(rootBuilder, EmptyHook.INSTANCE, PostCommitHook.EMPTY);
 
         // Assert changes are present in the trunk
         testState = store.getRoot().getChildNode("test");
@@ -176,12 +160,8 @@ public class NodeStoreTest {
 
         testBuilder.getChildNode("a").remove();
 
-        NodeState newRoot = rootBuilder.getNodeState();
-
-        NodeStoreBranch branch = store.branch();
-        branch.setRoot(newRoot);
-        branch.merge(EmptyHook.INSTANCE, PostCommitHook.EMPTY);
-        store.getRoot(); // triggers the observer
+        store.merge(rootBuilder, EmptyHook.INSTANCE, PostCommitHook.EMPTY);
+        NodeState newRoot = store.getRoot(); // triggers the observer
 
         NodeState before = states[0];
         NodeState after = states[1];
@@ -206,11 +186,7 @@ public class NodeStoreTest {
 
         testBuilder.getChildNode("a").remove();
 
-        NodeState newRoot = rootBuilder.getNodeState();
-
-        NodeStoreBranch branch = store.branch();
-        branch.setRoot(newRoot);
-        branch.merge(new CommitHook() {
+        store.merge(rootBuilder, new CommitHook() {
             @Override
             public NodeState processCommit(NodeState before, NodeState after) {
                 NodeBuilder rootBuilder = after.builder();
@@ -230,22 +206,18 @@ public class NodeStoreTest {
 
     @Test
     public void manyChildNodes() throws CommitFailedException {
-        NodeStoreBranch branch = store.branch();
-        NodeBuilder root = branch.getHead().builder();
+        NodeBuilder root = store.getRoot().builder();
         NodeBuilder parent = root.child("parent");
         for (int i = 0; i <= KernelNodeState.MAX_CHILD_NODE_NAMES; i++) {
             parent.child("child-" + i);
         }
-        branch.setRoot(root.getNodeState());
-        branch.merge(EmptyHook.INSTANCE, PostCommitHook.EMPTY);
+        store.merge(root, EmptyHook.INSTANCE, PostCommitHook.EMPTY);
 
         NodeState base = store.getRoot();
-        branch = store.branch();
-        root = branch.getHead().builder();
+        root = base.builder();
         parent = root.child("parent");
         parent.child("child-new");
-        branch.setRoot(root.getNodeState());
-        branch.merge(EmptyHook.INSTANCE, PostCommitHook.EMPTY);
+        store.merge(root, EmptyHook.INSTANCE, PostCommitHook.EMPTY);
 
         Diff diff = new Diff();
         store.getRoot().compareAgainstBaseState(base, diff);
@@ -255,9 +227,10 @@ public class NodeStoreTest {
         assertEquals("child-new", diff.added.get(0));
 
         base = store.getRoot();
-        branch = store.branch();
-        branch.move("/parent/child-new", "/parent/child-moved");
-        branch.merge(EmptyHook.INSTANCE, PostCommitHook.EMPTY);
+        root = base.builder();
+        parent = root.getChildNode("parent");
+        parent.getChildNode("child-new").moveTo(parent, "child-moved");
+        store.merge(root, EmptyHook.INSTANCE, PostCommitHook.EMPTY);
 
         diff = new Diff();
         store.getRoot().compareAgainstBaseState(base, diff);
@@ -268,14 +241,12 @@ public class NodeStoreTest {
         assertEquals("child-moved", diff.added.get(0));
 
         base = store.getRoot();
-        branch = store.branch();
-        root = branch.getHead().builder();
+        root = base.builder();
         parent = root.child("parent");
         parent.child("child-moved").setProperty("foo", "value");
         parent.child("child-moved").setProperty(
                 new MultiStringPropertyState("bar", Arrays.asList("value")));
-        branch.setRoot(root.getNodeState());
-        branch.merge(EmptyHook.INSTANCE, PostCommitHook.EMPTY);
+        store.merge(root, EmptyHook.INSTANCE, PostCommitHook.EMPTY);
 
         diff = new Diff();
         store.getRoot().compareAgainstBaseState(base, diff);
@@ -287,14 +258,12 @@ public class NodeStoreTest {
         assertTrue(diff.addedProperties.contains("bar"));
 
         base = store.getRoot();
-        branch = store.branch();
-        root = branch.getHead().builder();
+        root = base.builder();
         parent = root.child("parent");
         parent.setProperty("foo", "value");
         parent.setProperty(new MultiStringPropertyState(
                 "bar", Arrays.asList("value")));
-        branch.setRoot(root.getNodeState());
-        branch.merge(EmptyHook.INSTANCE, PostCommitHook.EMPTY);
+        store.merge(root, EmptyHook.INSTANCE, PostCommitHook.EMPTY);
 
         diff = new Diff();
         store.getRoot().compareAgainstBaseState(base, diff);
@@ -306,12 +275,10 @@ public class NodeStoreTest {
         assertTrue(diff.addedProperties.contains("bar"));
 
         base = store.getRoot();
-        branch = store.branch();
-        root = branch.getHead().builder();
+        root = base.builder();
         parent = root.child("parent");
         parent.getChildNode("child-moved").remove();
-        branch.setRoot(root.getNodeState());
-        branch.merge(EmptyHook.INSTANCE, PostCommitHook.EMPTY);
+        store.merge(root, EmptyHook.INSTANCE, PostCommitHook.EMPTY);
 
         diff = new Diff();
         store.getRoot().compareAgainstBaseState(base, diff);
@@ -323,8 +290,8 @@ public class NodeStoreTest {
 
     @Test
     public void moveToSelf() throws CommitFailedException {
-        NodeStoreBranch branch = store.branch();
-        assertTrue(branch.move("/x", "/x"));
+        NodeBuilder builder = store.getRoot().builder();
+        assertTrue(builder.getChildNode("x").moveTo(builder, "x"));
     }
 
     @Test
@@ -342,12 +309,45 @@ public class NodeStoreTest {
     }
 
     private static NodeStore init(NodeStore store) throws CommitFailedException {
-        NodeStoreBranch branch = store.branch();
-        NodeBuilder builder = branch.getHead().builder();
+        NodeBuilder builder = store.getRoot().builder();
         builder.setChildNode("root");
-        branch.setRoot(builder.getNodeState());
-        branch.merge(EmptyHook.INSTANCE, PostCommitHook.EMPTY);
+        store.merge(builder, EmptyHook.INSTANCE, PostCommitHook.EMPTY);
         return store;
+    }
+
+    @Test
+    public void merge() throws CommitFailedException {
+        NodeState base = store.getRoot();
+        NodeBuilder builder1 = base.builder();
+
+        NodeBuilder builder2 = base.builder();
+
+        builder1.setChildNode("node1");
+        builder2.setChildNode("node2");
+
+        store.merge(builder1, EmptyHook.INSTANCE, new PostCommitHook() {
+            @Override
+            public void contentChanged(@Nonnull NodeState before, @Nonnull NodeState after) {
+                assertFalse(before.hasChildNode("node1"));
+                assertFalse(before.hasChildNode("node2"));
+                assertTrue(after.hasChildNode("node1"));
+                assertFalse(after.hasChildNode("node2"));
+            }
+        });
+        assertTrue(store.getRoot().hasChildNode("node1"));
+        assertFalse(store.getRoot().hasChildNode("node2"));
+
+        store.merge(builder2, EmptyHook.INSTANCE, new PostCommitHook() {
+            @Override
+            public void contentChanged(@Nonnull NodeState before, @Nonnull NodeState after) {
+                assertTrue(before.hasChildNode("node1"));
+                assertFalse(before.hasChildNode("node2"));
+                assertTrue(after.hasChildNode("node1"));
+                assertTrue(after.hasChildNode("node2"));
+            }
+        });
+        assertTrue(store.getRoot().hasChildNode("node1"));
+        assertTrue(store.getRoot().hasChildNode("node2"));
     }
 
     @Test
@@ -366,17 +366,14 @@ public class NodeStoreTest {
     }
 
     private void compareAgainstBaseState(int childNodeCount) throws CommitFailedException {
-        NodeStoreBranch branch = store.branch();
-
-        NodeState before = branch.getHead();
+        NodeState before = store.getRoot();
         NodeBuilder builder = before.builder();
         for (int k = 0; k < childNodeCount; k++) {
             builder.child("c" + k);
         }
 
         builder.child("foo").child(":bar").child("quz").setProperty("p", "v");
-        branch.setRoot(builder.getNodeState());
-        branch.merge(EmptyHook.INSTANCE, PostCommitHook.EMPTY);
+        store.merge(builder, EmptyHook.INSTANCE, PostCommitHook.EMPTY);
 
         NodeState after = store.getRoot();
         Diff diff = new Diff();

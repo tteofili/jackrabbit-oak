@@ -144,7 +144,7 @@ public class MemoryNodeBuilderTest {
         assertTrue(child.hasChildNode("new"));
         assertTrue(root.child("x").hasChildNode("new"));
 
-        root.reset(base);
+        ((MemoryNodeBuilder) root).reset(base);
         assertFalse(child.hasChildNode("new"));
         assertFalse(root.child("x").hasChildNode("new"));
     }
@@ -155,7 +155,7 @@ public class MemoryNodeBuilderTest {
         NodeBuilder x = root.child("x");
         x.child("y");
 
-        root.reset(base);
+        ((MemoryNodeBuilder) root).reset(base);
         assertTrue(root.hasChildNode("x"));
         assertFalse(x.hasChildNode("y"));
     }
@@ -286,6 +286,81 @@ public class MemoryNodeBuilderTest {
         c = rootBuilder.getNodeState().getChildNode("a").getChildNode("c");
         assertTrue(c.hasProperty("c"));
         assertTrue(c.hasProperty("c2"));
+    }
+
+    @Test
+    public void testMove() {
+        NodeBuilder rootBuilder = base.builder();
+        assertTrue(rootBuilder.getChildNode("y").moveTo(rootBuilder.child("x"), "yy"));
+
+        NodeState newRoot = rootBuilder.getNodeState();
+        assertFalse(newRoot.hasChildNode("y"));
+        assertTrue(newRoot.hasChildNode("x"));
+        assertTrue(newRoot.getChildNode("x").hasChildNode("q"));
+        assertTrue(newRoot.getChildNode("x").hasChildNode("yy"));
+    }
+
+    @Test
+    public void testRename() {
+        NodeBuilder rootBuilder = base.builder();
+        assertTrue(rootBuilder.getChildNode("y").moveTo(rootBuilder, "yy"));
+
+        NodeState newRoot = rootBuilder.getNodeState();
+        assertFalse(newRoot.hasChildNode("y"));
+        assertTrue(newRoot.hasChildNode("yy"));
+    }
+
+    @Test
+    public void testMoveToSelf() {
+        NodeBuilder rootBuilder = base.builder();
+        assertTrue(rootBuilder.getChildNode("y").moveTo(rootBuilder, "y"));
+
+        NodeState newRoot = rootBuilder.getNodeState();
+        assertTrue(newRoot.hasChildNode("y"));
+    }
+
+    @Test
+    public void testMoveToDescendant() {
+        NodeBuilder rootBuilder = base.builder();
+        assertFalse(rootBuilder.getChildNode("x").moveTo(rootBuilder.getChildNode("x"), "xx"));
+    }
+
+    @Test
+    public void testCopy() {
+        NodeBuilder rootBuilder = base.builder();
+        assertTrue(rootBuilder.getChildNode("y").copyTo(rootBuilder.child("x"), "yy"));
+
+        NodeState newRoot = rootBuilder.getNodeState();
+        assertTrue(newRoot.hasChildNode("y"));
+        assertTrue(newRoot.hasChildNode("x"));
+        assertTrue(newRoot.getChildNode("x").hasChildNode("q"));
+        assertTrue(newRoot.getChildNode("x").hasChildNode("yy"));
+    }
+
+    @Test
+    public void testDuplicate() {
+        NodeBuilder rootBuilder = base.builder();
+        assertTrue(rootBuilder.getChildNode("y").copyTo(rootBuilder, "yy"));
+
+        NodeState newRoot = rootBuilder.getNodeState();
+        assertTrue(newRoot.hasChildNode("y"));
+        assertTrue(newRoot.hasChildNode("yy"));
+    }
+
+    @Test
+    public void testCopyToSelf() {
+        NodeBuilder rootBuilder = base.builder();
+        assertTrue(rootBuilder.getChildNode("y").copyTo(rootBuilder, "y"));
+    }
+
+    @Test
+    public void testCopyToDescendant() {
+        NodeBuilder rootBuilder = base.builder();
+        assertTrue(rootBuilder.getChildNode("x").copyTo(rootBuilder.getChildNode("x"), "xx"));
+
+        NodeState newRoot = rootBuilder.getNodeState();
+        assertTrue(rootBuilder.hasChildNode("x"));
+        assertTrue(rootBuilder.getChildNode("x").hasChildNode("xx"));
     }
 
     @Test

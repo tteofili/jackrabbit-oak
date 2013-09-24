@@ -25,6 +25,7 @@ import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.INDEX_DEFIN
 import static org.apache.jackrabbit.oak.plugins.index.IndexUtils.createIndexDefinition;
 import static org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState.EMPTY_NODE;
 import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.JCR_NODE_TYPES;
+import static org.apache.jackrabbit.oak.plugins.nodetype.write.InitialContent.INITIAL_CONTENT;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
@@ -35,7 +36,6 @@ import java.util.Set;
 import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.plugins.index.IndexUpdateProvider;
-import org.apache.jackrabbit.oak.plugins.nodetype.write.InitialContent;
 import org.apache.jackrabbit.oak.query.ast.SelectorImpl;
 import org.apache.jackrabbit.oak.query.index.FilterImpl;
 import org.apache.jackrabbit.oak.spi.commit.EditorHook;
@@ -57,10 +57,53 @@ public class PropertyIndexTest {
 
     private static final EditorHook HOOK = new EditorHook(
             new IndexUpdateProvider(new PropertyIndexEditorProvider()));
+    
+    @Test
+    public void costEstimation() throws Exception {
+        NodeState root = INITIAL_CONTENT;
+
+        // Add index definition
+        NodeBuilder builder = root.builder();
+        createIndexDefinition(builder.child(INDEX_DEFINITIONS_NAME), "foo",
+                true, false, ImmutableSet.of("foo"), null);
+        NodeState before = builder.getNodeState();
+
+        // Add some content and process it through the property index hook
+        for (int i = 0; i < MANY; i++) {
+            builder.child("n" + i).setProperty("foo", "x" + i % 20);
+        }
+        NodeState after = builder.getNodeState();
+
+        NodeState indexed = HOOK.processCommit(before, after);
+
+        FilterImpl f = createFilter(indexed, NT_BASE);
+
+        // Query the index
+        PropertyIndexLookup lookup = new PropertyIndexLookup(indexed);
+        double cost;
+        
+        cost = lookup.getCost(f, "foo", PropertyValues.newString("x1"));
+        assertTrue("cost: " + cost, cost >= 4.5 && cost <= 5.5);
+        
+        cost = lookup.getCost(f, "foo", PropertyValues.newString(
+                Arrays.asList("x1", "x2")));
+        assertTrue("cost: " + cost, cost >= 9.5 && cost <= 10.5);
+        
+        cost = lookup.getCost(f, "foo", PropertyValues.newString(
+                Arrays.asList("x1", "x2", "x3", "x4", "x5")));
+        assertTrue("cost: " + cost, cost >= 24.5 && cost <= 25.5);
+
+        cost = lookup.getCost(f, "foo", PropertyValues.newString(
+                Arrays.asList("x1", "x2", "x3", "x4", "x5", "x6", "x7", "x8", "x9", "x0")));
+        assertTrue("cost: " + cost, cost >= 49.5 && cost <= 50.5);
+
+        cost = lookup.getCost(f, "foo", null);
+        assertTrue("cost: " + cost, cost >= MANY);
+    }
 
     @Test
     public void testPropertyLookup() throws Exception {
-        NodeState root = new InitialContent().initialize(EMPTY_NODE);
+        NodeState root = INITIAL_CONTENT;
 
         // Add index definition
         NodeBuilder builder = root.builder();
@@ -105,7 +148,7 @@ public class PropertyIndexTest {
 
     @Test
     public void testCustomConfigPropertyLookup() throws Exception {
-        NodeState root = new InitialContent().initialize(EMPTY_NODE);
+        NodeState root = INITIAL_CONTENT;
 
         // Add index definition
         NodeBuilder builder = root.builder();
@@ -153,7 +196,7 @@ public class PropertyIndexTest {
      */
     @Test
     public void testCustomConfigNodeType() throws Exception {
-        NodeState root = new InitialContent().initialize(EMPTY_NODE);
+        NodeState root = INITIAL_CONTENT;
 
         // Add index definitions
         NodeBuilder builder = root.builder();

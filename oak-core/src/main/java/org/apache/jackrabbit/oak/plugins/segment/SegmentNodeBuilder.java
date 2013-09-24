@@ -6,7 +6,7 @@
  * (the "License"); you may not use this file except in compliance with
  * the License.  You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *      http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,21 +14,23 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.jackrabbit.oak.spi.state;
+package org.apache.jackrabbit.oak.plugins.segment;
 
+import org.apache.jackrabbit.oak.plugins.memory.MemoryNodeBuilder;
 
-/**
- * Abstract base class for {@link NodeStore} implementations.
- */
-public abstract class AbstractNodeStore implements NodeStore {
+class SegmentNodeBuilder extends MemoryNodeBuilder {
 
-    //------------------------------------------------------------< Object >--
+    protected SegmentNodeBuilder(SegmentNodeState base) {
+        super(base);
+    }
 
-    /**
-     * Returns a string representation the head state of this node store.
-     */
-    public String toString() {
-        return getRoot().toString();
+    private SegmentNodeBuilder(SegmentNodeBuilder parent, String name) {
+        super(parent, name);
+    }
+
+    @Override
+    protected SegmentNodeBuilder createChildBuilder(String name) {
+        return new SegmentNodeBuilder(this, name);
     }
 
 }
