@@ -43,8 +43,8 @@ import org.slf4j.LoggerFactory;
 /**
  * {@link QueryIndexProvider} for {@link SolrQueryIndex}
  */
-@Component
-@Service(QueryIndexProvider.class)
+@Component(metatype = false)
+@Service(value = QueryIndexProvider.class)
 public class SolrQueryIndexProvider implements QueryIndexProvider {
 
     private final Logger log = LoggerFactory.getLogger(SolrQueryIndexProvider.class);
@@ -65,27 +65,7 @@ public class SolrQueryIndexProvider implements QueryIndexProvider {
     @Override
     public List<? extends QueryIndex> getQueryIndexes(NodeState nodeState) {
 
-        if (solrServerProvider == null) {
-            BundleContext bundleContext = FrameworkUtil.getBundle(getClass()).getBundleContext();
-            ServiceReference serverProviderServiceReference = bundleContext.getServiceReference(SolrServerProvider.class.getName());
-            if (serverProviderServiceReference != null) {
-                try {
-                    solrServerProvider = (SolrServerProvider) bundleContext.getService(serverProviderServiceReference);
-                } catch (Throwable t) {
-                }
-            }
-        }
-
-        if (oakSolrConfigurationProvider == null) {
-            BundleContext bundleContext = FrameworkUtil.getBundle(getClass()).getBundleContext();
-            ServiceReference configurationProviderServiceReference = bundleContext.getServiceReference(OakSolrConfigurationProvider.class.getName());
-            if (configurationProviderServiceReference != null) {
-                try {
-                    oakSolrConfigurationProvider = (OakSolrConfigurationProvider) bundleContext.getService(configurationProviderServiceReference);
-                } catch (Throwable t) {
-                }
-            }
-        }
+        checkConfiguration();
 
         List<QueryIndex> tempIndexes = new ArrayList<QueryIndex>();
         if (solrServerProvider == null || oakSolrConfigurationProvider == null) {
@@ -114,5 +94,29 @@ public class SolrQueryIndexProvider implements QueryIndexProvider {
             
         }
         return tempIndexes;
+    }
+
+    private void checkConfiguration() {
+        if (solrServerProvider == null) {
+            BundleContext bundleContext = FrameworkUtil.getBundle(getClass()).getBundleContext();
+            ServiceReference serverProviderServiceReference = bundleContext.getServiceReference(SolrServerProvider.class.getName());
+            if (serverProviderServiceReference != null) {
+                try {
+                    solrServerProvider = (SolrServerProvider) bundleContext.getService(serverProviderServiceReference);
+                } catch (Throwable t) {
+                }
+            }
+        }
+
+        if (oakSolrConfigurationProvider == null) {
+            BundleContext bundleContext = FrameworkUtil.getBundle(getClass()).getBundleContext();
+            ServiceReference configurationProviderServiceReference = bundleContext.getServiceReference(OakSolrConfigurationProvider.class.getName());
+            if (configurationProviderServiceReference != null) {
+                try {
+                    oakSolrConfigurationProvider = (OakSolrConfigurationProvider) bundleContext.getService(configurationProviderServiceReference);
+                } catch (Throwable t) {
+                }
+            }
+        }
     }
 }

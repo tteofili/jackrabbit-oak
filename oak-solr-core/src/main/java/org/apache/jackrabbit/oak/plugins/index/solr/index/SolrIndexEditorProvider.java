@@ -40,8 +40,8 @@ import org.slf4j.LoggerFactory;
  * @see IndexEditorProvider
  * 
  */
-@Component
-@Service(IndexEditorProvider.class)
+@Component(metatype = false)
+@Service(value = IndexEditorProvider.class)
 public class SolrIndexEditorProvider implements IndexEditorProvider {
 
     private final Logger log = LoggerFactory.getLogger(getClass());
@@ -64,7 +64,27 @@ public class SolrIndexEditorProvider implements IndexEditorProvider {
     public Editor getIndexEditor(
             String type, NodeBuilder definition, NodeState root)
             throws CommitFailedException {
-        
+
+        checkConfiguration();
+
+        if (SolrQueryIndex.TYPE.equals(type)
+                && solrServerProvider != null
+                && oakSolrConfigurationProvider != null) {
+            try {
+                return new SolrIndexEditor(
+                        definition,
+                        solrServerProvider.getSolrServer(),
+                        oakSolrConfigurationProvider.getConfiguration());
+            } catch (Exception e) {
+                if (log.isErrorEnabled()) {
+                    log.error("unable to create SolrIndexEditor", e);
+                }
+            }
+        }
+        return null;
+    }
+
+    private void checkConfiguration() {
         if (solrServerProvider == null) {
             BundleContext bundleContext = FrameworkUtil.getBundle(getClass()).getBundleContext();
             ServiceReference serverProviderServiceReference = bundleContext.getServiceReference(SolrServerProvider.class.getName());
@@ -86,22 +106,6 @@ public class SolrIndexEditorProvider implements IndexEditorProvider {
                 }
             }
         }
-
-        if (SolrQueryIndex.TYPE.equals(type)
-                && solrServerProvider != null
-                && oakSolrConfigurationProvider != null) {
-            try {
-                return new SolrIndexEditor(
-                        definition,
-                        solrServerProvider.getSolrServer(),
-                        oakSolrConfigurationProvider.getConfiguration());
-            } catch (Exception e) {
-                if (log.isErrorEnabled()) {
-                    log.error("unable to create SolrIndexEditor", e);
-                }
-            }
-        }
-        return null;
     }
 
 }

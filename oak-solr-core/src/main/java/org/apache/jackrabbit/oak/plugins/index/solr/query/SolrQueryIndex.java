@@ -73,18 +73,11 @@ public class SolrQueryIndex implements QueryIndex {
     private SolrQuery getQuery(Filter filter) {
 
         SolrQuery solrQuery = new SolrQuery();
-        solrQuery.setParam("q.op", "AND");
-
-        // TODO : change this to be not hard coded
-        solrQuery.setParam("df", "catch_all");
-
-        // TODO : can we handle this better?
-        solrQuery.setParam("rows", String.valueOf(Integer.MAX_VALUE));
+        setDefaults(solrQuery);
 
         StringBuilder queryBuilder = new StringBuilder();
 
         // TODO : handle node type restriction
-
         Filter.PathRestriction pathRestriction = filter.getPathRestriction();
         if (pathRestriction != null) {
             String path = purgePath(filter);
@@ -165,6 +158,16 @@ public class SolrQueryIndex implements QueryIndex {
         }
 
         return solrQuery;
+    }
+
+    private void setDefaults(SolrQuery solrQuery) {
+        solrQuery.setParam("q.op", "AND");
+
+        // TODO : change this to be not hard coded
+        solrQuery.setParam("df", "catch_all");
+
+        // TODO : can we handle this better?
+        solrQuery.setParam("rows", String.valueOf(Integer.MAX_VALUE));
     }
 
     private static String createRangeQuery(String first, String last, boolean firstIncluding, boolean lastIncluding) {
