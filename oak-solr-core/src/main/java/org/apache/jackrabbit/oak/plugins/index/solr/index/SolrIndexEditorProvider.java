@@ -16,11 +16,7 @@
  */
 package org.apache.jackrabbit.oak.plugins.index.solr.index;
 
-import static org.apache.felix.scr.annotations.ReferencePolicy.STATIC;
-import static org.apache.felix.scr.annotations.ReferencePolicyOption.GREEDY;
-
 import org.apache.felix.scr.annotations.Component;
-import org.apache.felix.scr.annotations.Reference;
 import org.apache.felix.scr.annotations.Service;
 import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.plugins.index.IndexEditor;
@@ -31,6 +27,11 @@ import org.apache.jackrabbit.oak.plugins.index.solr.query.SolrQueryIndex;
 import org.apache.jackrabbit.oak.spi.commit.Editor;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
+import org.osgi.framework.BundleContext;
+import org.osgi.framework.FrameworkUtil;
+import org.osgi.framework.ServiceReference;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Service that provides Lucene based {@link IndexEditor}s
@@ -43,10 +44,10 @@ import org.apache.jackrabbit.oak.spi.state.NodeState;
 @Service(IndexEditorProvider.class)
 public class SolrIndexEditorProvider implements IndexEditorProvider {
 
-    @Reference(policyOption = GREEDY, policy = STATIC)
+    private final Logger log = LoggerFactory.getLogger(getClass());
+
     private SolrServerProvider solrServerProvider;
 
-    @Reference(policyOption = GREEDY, policy = STATIC)
     private OakSolrConfigurationProvider oakSolrConfigurationProvider;
 
     public SolrIndexEditorProvider(
@@ -63,6 +64,29 @@ public class SolrIndexEditorProvider implements IndexEditorProvider {
     public Editor getIndexEditor(
             String type, NodeBuilder definition, NodeState root)
             throws CommitFailedException {
+        
+        if (solrServerProvider == null) {
+            BundleContext bundleContext = FrameworkUtil.getBundle(getClass()).getBundleContext();
+            ServiceReference serverProviderServiceReference = bundleContext.getServiceReference(SolrServerProvider.class.getName());
+            if (serverProviderServiceReference != null) {
+                try {
+                    solrServerProvider = (SolrServerProvider) bundleContext.getService(serverProviderServiceReference);
+                } catch (Throwable t) {
+                }
+            }
+        }
+
+        if (oakSolrConfigurationProvider == null) {
+            BundleContext bundleContext = FrameworkUtil.getBundle(getClass()).getBundleContext();
+            ServiceReference configurationProviderServiceReference = bundleContext.getServiceReference(OakSolrConfigurationProvider.class.getName());
+            if (configurationProviderServiceReference != null) {
+                try {
+                    oakSolrConfigurationProvider = (OakSolrConfigurationProvider) bundleContext.getService(configurationProviderServiceReference);
+                } catch (Throwable t) {
+                }
+            }
+        }
+
         if (SolrQueryIndex.TYPE.equals(type)
                 && solrServerProvider != null
                 && oakSolrConfigurationProvider != null) {
@@ -72,8 +96,9 @@ public class SolrIndexEditorProvider implements IndexEditorProvider {
                         solrServerProvider.getSolrServer(),
                         oakSolrConfigurationProvider.getConfiguration());
             } catch (Exception e) {
-                // TODO Auto-generated catch block
-                e.printStackTrace();
+                if (log.isErrorEnabled()) {
+                    log.error("unable to create SolrIndexEditor", e);
+                }
             }
         }
         return null;
