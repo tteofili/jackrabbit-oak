@@ -16,10 +16,7 @@
  */
 package org.apache.jackrabbit.oak.plugins.index.solr.index;
 
-import org.apache.felix.scr.annotations.Component;
-import org.apache.felix.scr.annotations.Service;
 import org.apache.jackrabbit.oak.api.CommitFailedException;
-import org.apache.jackrabbit.oak.plugins.index.IndexEditor;
 import org.apache.jackrabbit.oak.plugins.index.IndexEditorProvider;
 import org.apache.jackrabbit.oak.plugins.index.solr.OakSolrConfigurationProvider;
 import org.apache.jackrabbit.oak.plugins.index.solr.SolrServerProvider;
@@ -27,21 +24,15 @@ import org.apache.jackrabbit.oak.plugins.index.solr.query.SolrQueryIndex;
 import org.apache.jackrabbit.oak.spi.commit.Editor;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
-import org.osgi.framework.BundleContext;
-import org.osgi.framework.FrameworkUtil;
-import org.osgi.framework.ServiceReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Service that provides Lucene based {@link IndexEditor}s
+ * Solr based {@link IndexEditorProvider}
  * 
  * @see SolrIndexEditor
- * @see IndexEditorProvider
  * 
  */
-@Component(metatype = false)
-@Service(value = IndexEditorProvider.class)
 public class SolrIndexEditorProvider implements IndexEditorProvider {
 
     private final Logger log = LoggerFactory.getLogger(getClass());
@@ -57,19 +48,13 @@ public class SolrIndexEditorProvider implements IndexEditorProvider {
         this.oakSolrConfigurationProvider = oakSolrConfigurationProvider;
     }
 
-    public SolrIndexEditorProvider() {
-    }
-
     @Override
     public Editor getIndexEditor(
             String type, NodeBuilder definition, NodeState root)
             throws CommitFailedException {
 
-        checkConfiguration();
-
         if (SolrQueryIndex.TYPE.equals(type)
-                && solrServerProvider != null
-                && oakSolrConfigurationProvider != null) {
+                && isConfigurationOk()) {
             try {
                 return new SolrIndexEditor(
                         definition,
@@ -84,28 +69,32 @@ public class SolrIndexEditorProvider implements IndexEditorProvider {
         return null;
     }
 
-    private void checkConfiguration() {
-        if (solrServerProvider == null) {
-            BundleContext bundleContext = FrameworkUtil.getBundle(getClass()).getBundleContext();
-            ServiceReference serverProviderServiceReference = bundleContext.getServiceReference(SolrServerProvider.class.getName());
-            if (serverProviderServiceReference != null) {
-                try {
-                    solrServerProvider = (SolrServerProvider) bundleContext.getService(serverProviderServiceReference);
-                } catch (Throwable t) {
-                }
-            }
-        }
-
-        if (oakSolrConfigurationProvider == null) {
-            BundleContext bundleContext = FrameworkUtil.getBundle(getClass()).getBundleContext();
-            ServiceReference configurationProviderServiceReference = bundleContext.getServiceReference(OakSolrConfigurationProvider.class.getName());
-            if (configurationProviderServiceReference != null) {
-                try {
-                    oakSolrConfigurationProvider = (OakSolrConfigurationProvider) bundleContext.getService(configurationProviderServiceReference);
-                } catch (Throwable t) {
-                }
-            }
-        }
+    private boolean isConfigurationOk() {
+        return solrServerProvider != null && oakSolrConfigurationProvider != null;
     }
+
+//    private void checkConfiguration() {
+//        if (solrServerProvider == null) {
+//            BundleContext bundleContext = FrameworkUtil.getBundle(getClass()).getBundleContext();
+//            ServiceReference serverProviderServiceReference = bundleContext.getServiceReference(SolrServerProvider.class.getName());
+//            if (serverProviderServiceReference != null) {
+//                try {
+//                    solrServerProvider = (SolrServerProvider) bundleContext.getService(serverProviderServiceReference);
+//                } catch (Throwable t) {
+//                }
+//            }
+//        }
+//
+//        if (oakSolrConfigurationProvider == null) {
+//            BundleContext bundleContext = FrameworkUtil.getBundle(getClass()).getBundleContext();
+//            ServiceReference configurationProviderServiceReference = bundleContext.getServiceReference(OakSolrConfigurationProvider.class.getName());
+//            if (configurationProviderServiceReference != null) {
+//                try {
+//                    oakSolrConfigurationProvider = (OakSolrConfigurationProvider) bundleContext.getService(configurationProviderServiceReference);
+//                } catch (Throwable t) {
+//                }
+//            }
+//        }
+//    }
 
 }

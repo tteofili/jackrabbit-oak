@@ -24,8 +24,6 @@ import java.util.List;
 
 import javax.annotation.Nonnull;
 
-import org.apache.felix.scr.annotations.Component;
-import org.apache.felix.scr.annotations.Service;
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.plugins.index.solr.OakSolrConfigurationProvider;
@@ -43,8 +41,6 @@ import org.slf4j.LoggerFactory;
 /**
  * {@link QueryIndexProvider} for {@link SolrQueryIndex}
  */
-@Component(metatype = false)
-@Service(value = QueryIndexProvider.class)
 public class SolrQueryIndexProvider implements QueryIndexProvider {
 
     private final Logger log = LoggerFactory.getLogger(SolrQueryIndexProvider.class);
@@ -52,9 +48,6 @@ public class SolrQueryIndexProvider implements QueryIndexProvider {
     private SolrServerProvider solrServerProvider;
 
     private OakSolrConfigurationProvider oakSolrConfigurationProvider;
-
-    public SolrQueryIndexProvider() {
-    }
 
     public SolrQueryIndexProvider(SolrServerProvider solrServerProvider, OakSolrConfigurationProvider oakSolrConfigurationProvider) {
         this.oakSolrConfigurationProvider = oakSolrConfigurationProvider;
