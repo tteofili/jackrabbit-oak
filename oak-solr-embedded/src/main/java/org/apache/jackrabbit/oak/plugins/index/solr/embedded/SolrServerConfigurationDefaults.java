@@ -21,8 +21,8 @@ package org.apache.jackrabbit.oak.plugins.index.solr.embedded;
  */
 public class SolrServerConfigurationDefaults {
 
-    public static final String SOLR_HOME_PATH = "./";
-    public static final String SOLR_CONFIG_PATH = "./solr.xml";
+    public static final String SOLR_HOME_PATH = "solr";
+    public static final String SOLR_CONFIG_PATH = "solr.xml";
     public static final String CORE_NAME = "oak";
 
     public static final String HTTP_PORT = "8983";

@@ -33,7 +33,7 @@ import org.osgi.service.component.ComponentContext;
  * An OSGi service {@link SolrServerConfigurationProvider}
  */
 @Component(metatype = true,
-        label = "OSGi Solr server configuration provider")
+        label = "OSGi Embedded Solr server configuration provider")
 @Service(value = SolrServerConfigurationProvider.class)
 public class OsgiSolrServerConfigurationProvider implements SolrServerConfigurationProvider {
 
