@@ -16,20 +16,29 @@
  */
 package org.apache.jackrabbit.oak.plugins.segment;
 
-import java.util.Collection;
-import java.util.Map;
+import java.util.List;
 import java.util.UUID;
 
 public interface SegmentStore {
+
+    SegmentWriter getWriter();
 
     Journal getJournal(String name);
 
     Segment readSegment(UUID segmentId);
 
-    void createSegment(
+    /**
+     * Writes the given segment to the segment store.
+     *
+     * @param segmentId segment identifier
+     * @param bytes byte buffer that contains the raw contents of the segment
+     * @param offset start offset within the byte buffer
+     * @param length length of the segment
+     * @param referencedSegmentIds identifiers of all the referenced segments
+     */
+    void writeSegment(
             UUID segmentId, byte[] bytes, int offset, int length,
-            Collection<UUID> referencedSegmentIds,
-            Map<String, RecordId> strings, Map<Template, RecordId> templates);
+            List<UUID> referencedSegmentIds);
 
     void deleteSegment(UUID segmentId);
 

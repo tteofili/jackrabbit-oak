@@ -68,6 +68,12 @@ public class NodeDocument extends Document {
     static final int SPLIT_CANDIDATE_THRESHOLD = 32 * 1024;
 
     /**
+     * A document size threshold after which a split is forced even if
+     * {@link #REVISIONS_SPLIT_OFF_SIZE} is not reached.
+     */
+    static final int FORCE_SPLIT_THRESHOLD = 1024 * 1024;
+
+    /**
      * Only split off at least this number of revisions.
      */
     static final int REVISIONS_SPLIT_OFF_SIZE = 1000;
@@ -283,7 +289,6 @@ public class NodeDocument extends Document {
      *                preceding <code>changeRev</code>.
      * @return the revision, or null if deleted
      */
-    @SuppressWarnings("unchecked")
     @CheckForNull
     public Revision getNewestRevision(RevisionContext context,
                                       Revision changeRev,
@@ -536,8 +541,10 @@ public class NodeDocument extends Document {
      */
     @Nonnull
     public Iterable<UpdateOp> split(@Nonnull RevisionContext context) {
-        // only consider if there are enough commits
-        if (getLocalRevisions().size() + getLocalCommitRoot().size() <= REVISIONS_SPLIT_OFF_SIZE) {
+        // only consider if there are enough commits,
+        // unless document is really big
+        if (getLocalRevisions().size() + getLocalCommitRoot().size() <= REVISIONS_SPLIT_OFF_SIZE
+                && getMemory() < FORCE_SPLIT_THRESHOLD) {
             return Collections.emptyList();
         }
         String id = getId();
@@ -600,7 +607,8 @@ public class NodeDocument extends Document {
             }
             numValues += splitMap.size();
         }
-        if (high != null && low != null && numValues >= REVISIONS_SPLIT_OFF_SIZE) {
+        if (high != null && low != null
+                && (numValues >= REVISIONS_SPLIT_OFF_SIZE || getMemory() > FORCE_SPLIT_THRESHOLD)) {
             // enough revisions to split off
             splitOps = new ArrayList<UpdateOp>(2);
             // move to another document
@@ -671,8 +679,8 @@ public class NodeDocument extends Document {
      * @param property the name of a property.
      * @return previous documents.
      */
-    Iterable<NodeDocument> getPreviousDocs(final @Nullable Revision revision,
-                                           final @Nonnull String property) {
+    Iterable<NodeDocument> getPreviousDocs(@Nullable final Revision revision,
+                @Nonnull final String property) {
         checkNotNull(property);
         Iterable<NodeDocument> docs = Iterables.transform(
                 Iterables.filter(getPreviousRanges().entrySet(),
@@ -781,21 +789,6 @@ public class NodeDocument extends Document {
                                   boolean deleted) {
         checkNotNull(op).setMapEntry(DELETED, checkNotNull(revision),
                 String.valueOf(deleted));
-    }
-
-    static final class Children implements CacheValue {
-
-        final List<String> childNames = new ArrayList<String>();
-        boolean isComplete;
-
-        @Override
-        public int getMemory() {
-            int size = 8;
-            for (String name : childNames) {
-                size += name.length() * 2 + 8;
-            }
-            return size;
-        }
     }
 
     //----------------------------< internal >----------------------------------
@@ -974,7 +967,49 @@ public class NodeDocument extends Document {
     private Map<Revision, String> getCommitRoot() {
         return ValueMap.create(this, COMMIT_ROOT);
     }
+    
+    /**
+     * The list of children for a node. The list might be complete or not, in
+     * which case it only represents a block of children.
+     */
+    static final class Children implements CacheValue, Cloneable {
 
+        /**
+         * The child node names, ordered as stored in MongoDB.
+         */
+        ArrayList<String> childNames = new ArrayList<String>();
+        
+        /**
+         * Whether the list is complete (in which case there are no other
+         * children) or not.
+         */
+        boolean isComplete;
+
+        @Override
+        public int getMemory() {
+            int size = 114;
+            for (String name : childNames) {
+                size += name.length() * 2 + 56;
+            }
+            return size;
+        }
+
+        @SuppressWarnings("unchecked")
+        @Override
+        public Children clone() {
+            try {
+                Children clone = (Children) super.clone();
+                clone.childNames = (ArrayList<String>) childNames.clone();
+                return clone;
+            } catch (CloneNotSupportedException e) {
+                throw new RuntimeException();
+            }
+        }
+    }
+
+    /**
+     * A property value / revision combination.
+     */
     private static final class Value {
 
         final String value;
