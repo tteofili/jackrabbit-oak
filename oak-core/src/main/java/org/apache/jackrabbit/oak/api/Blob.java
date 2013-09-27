@@ -24,8 +24,18 @@ import javax.annotation.Nonnull;
 
 /**
  * Immutable representation of a binary value of finite length.
+ * <p>
+ * Two blobs are considered equal in terms of {@link Object#equals(Object)}
+ * if they contain the same sequences of bytes. Implementations can optimize
+ * the equality checks by using strong hash codes or other similar means as
+ * long as they comply with the above definition of equality.
+ * <p>
+ * Due to their nature blobs should not be used as keys in hash tables.
+ * To highlight that and to ensure semantic correctness of the equality
+ * contract across different blob implementations, the {@link #hashCode()}
+ * method of all blob instances should return zero.
  */
-public interface Blob extends Comparable<Blob> {
+public interface Blob {
 
     /**
      * Returns a new stream for this value object. Multiple calls to this
@@ -42,9 +52,4 @@ public interface Blob extends Comparable<Blob> {
      */
     long length();
 
-    /**
-     * The SHA-256 digest of the underlying stream
-     * @return
-     */
-    byte[] sha256();
 }

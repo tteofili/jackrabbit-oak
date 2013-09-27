@@ -33,6 +33,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 
+import org.apache.jackrabbit.oak.api.Blob;
 import org.apache.jackrabbit.oak.plugins.segment.memory.MemoryStore;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
@@ -50,8 +51,6 @@ public class RecordTest {
 
     private SegmentStore store = new MemoryStore();
 
-    private SegmentReader reader = new SegmentReader(store);
-
     private SegmentWriter writer = store.getWriter();
 
     private final Random random = new Random(0xcafefaceL);
@@ -59,21 +58,21 @@ public class RecordTest {
     @Test
     public void testBlockRecord() {
         RecordId blockId = writer.writeBlock(bytes, 0, bytes.length);
-        writer.flush();
-        BlockRecord block = new BlockRecord(blockId, bytes.length);
+        BlockRecord block = new BlockRecord(
+                writer.getDummySegment(), blockId, bytes.length);
 
         // Check reading with all valid positions and lengths
         for (int n = 1; n < bytes.length; n++) {
             for (int i = 0; i + n <= bytes.length; i++) {
                 Arrays.fill(bytes, i, i + n, (byte) '.');
-                assertEquals(n, block.read(reader, i, bytes, i, n));
+                assertEquals(n, block.read(i, bytes, i, n));
                 assertEquals(hello, new String(bytes, Charsets.UTF_8));
             }
         }
 
         // Check reading with a too long length
         byte[] large = new byte[bytes.length * 2];
-        assertEquals(bytes.length, block.read(reader, 0, large, 0, large.length));
+        assertEquals(bytes.length, block.read(0, large, 0, large.length));
         assertEquals(hello, new String(large, 0, bytes.length, Charsets.UTF_8));
     }
 
@@ -86,27 +85,27 @@ public class RecordTest {
         ListRecord level1p = writeList(LEVEL_SIZE + 1, blockId);
         ListRecord level2 = writeList(LEVEL_SIZE * LEVEL_SIZE, blockId);
         ListRecord level2p = writeList(LEVEL_SIZE * LEVEL_SIZE + 1, blockId);
-        writer.flush();
 
         assertEquals(1, one.size());
-        assertEquals(blockId, one.getEntry(reader, 0));
+        assertEquals(blockId, one.getEntry(0));
         assertEquals(LEVEL_SIZE, level1.size());
-        assertEquals(blockId, level1.getEntry(reader, 0));
-        assertEquals(blockId, level1.getEntry(reader, LEVEL_SIZE - 1));
+        assertEquals(blockId, level1.getEntry(0));
+        assertEquals(blockId, level1.getEntry(LEVEL_SIZE - 1));
         assertEquals(LEVEL_SIZE + 1, level1p.size());
-        assertEquals(blockId, level1p.getEntry(reader, 0));
-        assertEquals(blockId, level1p.getEntry(reader, LEVEL_SIZE));
+        assertEquals(blockId, level1p.getEntry(0));
+        assertEquals(blockId, level1p.getEntry(LEVEL_SIZE));
         assertEquals(LEVEL_SIZE * LEVEL_SIZE, level2.size());
-        assertEquals(blockId, level2.getEntry(reader, 0));
-        assertEquals(blockId, level2.getEntry(reader, LEVEL_SIZE * LEVEL_SIZE - 1));
+        assertEquals(blockId, level2.getEntry(0));
+        assertEquals(blockId, level2.getEntry(LEVEL_SIZE * LEVEL_SIZE - 1));
         assertEquals(LEVEL_SIZE * LEVEL_SIZE + 1, level2p.size());
-        assertEquals(blockId, level2p.getEntry(reader, 0));
-        assertEquals(blockId, level2p.getEntry(reader, LEVEL_SIZE * LEVEL_SIZE));
+        assertEquals(blockId, level2p.getEntry(0));
+        assertEquals(blockId, level2p.getEntry(LEVEL_SIZE * LEVEL_SIZE));
     }
 
     private ListRecord writeList(int size, RecordId id) {
         List<RecordId> list = Collections.nCopies(size, id);
-        return new ListRecord(writer.writeList(list), size);
+        return new ListRecord(
+                writer.getDummySegment(), writer.writeList(list), size);
     }
 
     @Test
@@ -129,10 +128,8 @@ public class RecordTest {
         byte[] source = new byte[size];
         random.nextBytes(source);
 
-        RecordId valueId = writer.writeStream(new ByteArrayInputStream(source));
-        writer.flush();
-
-        InputStream stream = reader.readStream(valueId);
+        Blob value = writer.writeStream(new ByteArrayInputStream(source));
+        InputStream stream = value.getNewStream();
         try {
             byte[] b = new byte[349]; // prime number
             int offset = 0;
@@ -161,7 +158,6 @@ public class RecordTest {
         }
         RecordId large = writer.writeString(builder.toString());
 
-        writer.flush();
         Segment segment = store.readSegment(large.getSegmentId());
 
         assertEquals("", segment.readString(empty));
@@ -186,7 +182,6 @@ public class RecordTest {
         }
         MapRecord many = writer.writeMap(null, map);
 
-        writer.flush();
         Iterator<MapEntry> iterator;
 
         assertEquals(0, zero.size());
@@ -227,7 +222,6 @@ public class RecordTest {
         changes.put("key0", null);
         changes.put("key1000", blockId);
         MapRecord modified = writer.writeMap(many, changes);
-        writer.flush();
         assertEquals(1000, modified.size());
         iterator = modified.getEntries().iterator();
         for (int i = 1; i <= 1000; i++) {
@@ -251,7 +245,6 @@ public class RecordTest {
         }
 
         MapRecord bad = writer.writeMap(null, map);
-        writer.flush();
 
         assertEquals(map.size(), bad.size());
         Iterator<MapEntry> iterator = bad.getEntries().iterator();
@@ -266,7 +259,6 @@ public class RecordTest {
     public void testEmptyNode() {
         NodeState before = EMPTY_NODE;
         NodeState after = writer.writeNode(before);
-        writer.flush();
         assertEquals(before, after);
     }
 
@@ -278,7 +270,6 @@ public class RecordTest {
                 .setProperty("baz", Math.PI)
                 .getNodeState();
         NodeState after = writer.writeNode(before);
-        writer.flush();
         assertEquals(before, after);
     }
 
@@ -291,7 +282,6 @@ public class RecordTest {
         }
         NodeState before = builder.getNodeState();
         NodeState after = writer.writeNode(before);
-        writer.flush();
         assertEquals(before, after);
     }
 
@@ -302,7 +292,6 @@ public class RecordTest {
             builder.child("test" + i);
         }
         NodeState before = writer.writeNode(builder.getNodeState());
-        writer.flush();
         assertEquals(builder.getNodeState(), before);
 
         builder = before.builder();
@@ -310,7 +299,6 @@ public class RecordTest {
             builder.getChildNode("test" + i).remove();
         }
         NodeState after = writer.writeNode(builder.getNodeState());
-        writer.flush();
         assertEquals(builder.getNodeState(), after);
     }
 

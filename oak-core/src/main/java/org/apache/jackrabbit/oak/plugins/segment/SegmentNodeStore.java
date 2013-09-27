@@ -46,8 +46,6 @@ public class SegmentNodeStore implements NodeStore {
 
     private final Journal journal;
 
-    private final SegmentReader reader;
-
     private final Observer observer;
 
     private SegmentNodeState head;
@@ -57,7 +55,6 @@ public class SegmentNodeStore implements NodeStore {
     public SegmentNodeStore(SegmentStore store, String journal) {
         this.store = store;
         this.journal = store.getJournal(journal);
-        this.reader = new SegmentReader(store);
         this.observer = EmptyObserver.INSTANCE;
         this.head = new SegmentNodeState(store, this.journal.getHead());
     }
@@ -130,10 +127,7 @@ public class SegmentNodeStore implements NodeStore {
 
     @Override
     public Blob createBlob(InputStream stream) throws IOException {
-        SegmentWriter writer = store.getWriter();
-        RecordId recordId = writer.writeStream(stream);
-        writer.flush();
-        return new SegmentBlob(reader, recordId);
+        return store.getWriter().writeStream(stream);
     }
 
     @Override @Nonnull

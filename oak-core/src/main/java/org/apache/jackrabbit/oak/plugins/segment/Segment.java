@@ -16,6 +16,7 @@
  */
 package org.apache.jackrabbit.oak.plugins.segment;
 
+import static com.google.common.base.Objects.equal;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.base.Preconditions.checkPositionIndexes;
 import static org.apache.jackrabbit.oak.plugins.segment.SegmentWriter.BLOCK_SIZE;
@@ -88,7 +89,7 @@ public class Segment {
                 }
             };
 
-    private final SegmentStore store;
+    final SegmentStore store; // TODO: should be private
 
     private final UUID uuid;
 
@@ -132,7 +133,7 @@ public class Segment {
     private int pos(int offset, int length) {
         int pos = offset - (MAX_SEGMENT_SIZE - size());
         checkPositionIndexes(pos, pos + length, size());
-        return pos;
+        return data.position() + pos;
     }
 
     public UUID getSegmentId() {
@@ -144,12 +145,37 @@ public class Segment {
     }
 
     public int size() {
-        return data.limit();
+        return data.remaining();
     }
 
     byte readByte(int offset) {
         return data.get(pos(offset, 1));
     }
+
+    /**
+     * Returns the identified segment.
+     *
+     * @param uuid segment identifier
+     * @return identified segment
+     */
+    Segment getSegment(UUID uuid) {
+        if (equal(uuid, this.uuid)) {
+            return this; // optimization for the common case (OAK-1031)
+        } else {
+            return store.readSegment(uuid);
+        }
+    }
+
+    /**
+     * Returns the segment that contains the identified record.
+     *
+     * @param id record identifier
+     * @return segment that contains the identified record
+     */
+    Segment getSegment(RecordId id) {
+        return getSegment(checkNotNull(id).getSegmentId());
+    }
+
 
     /**
      * Reads the given number of bytes starting from the given position
@@ -188,17 +214,12 @@ public class Segment {
                 | (data.get(pos + 3) & 0xff);
     }
 
-    String readString(int offset) {
-        return strings.get(offset);
+    String readString(RecordId id) {
+        return getSegment(id).readString(id.getOffset());
     }
 
-    String readString(RecordId id) {
-        checkNotNull(id);
-        Segment segment = this;
-        if (!uuid.equals(id.getSegmentId())) {
-            segment = store.readSegment(id.getSegmentId());
-        }
-        return segment.readString(id.getOffset());
+    String readString(int offset) {
+        return strings.get(offset);
     }
 
     private String loadString(int offset) {
@@ -219,7 +240,7 @@ public class Segment {
         } else if (length < Integer.MAX_VALUE) {
             int size = (int) ((length + BLOCK_SIZE - 1) / BLOCK_SIZE);
             ListRecord list =
-                    new ListRecord(internalReadRecordId(pos + 8), size);
+                    new ListRecord(this, internalReadRecordId(pos + 8), size);
             SegmentStream stream = new SegmentStream(
                     store, new RecordId(uuid, offset), list, length);
             try {
@@ -232,17 +253,12 @@ public class Segment {
         }
     }
 
-    Template readTemplate(int offset) {
-        return templates.get(offset);
+    Template readTemplate(RecordId id) {
+        return getSegment(id).readTemplate(id.getOffset());
     }
 
-    Template readTemplate(RecordId id) {
-        checkNotNull(id);
-        Segment segment = this;
-        if (!uuid.equals(id.getSegmentId())) {
-            segment = store.readSegment(id.getSegmentId());
-        }
-        return segment.readTemplate(id.getOffset());
+    Template readTemplate(int offset) {
+        return templates.get(offset);
     }
 
     private Template loadTemplate(int offset) {
@@ -299,6 +315,10 @@ public class Segment {
                 primaryType, mixinTypes, properties, childName);
     }
 
+    long readLength(RecordId id) {
+        return getSegment(id).readLength(id.getOffset());
+    }
+
     long readLength(int offset) {
         return internalReadLength(pos(offset, 1));
     }
@@ -340,7 +360,8 @@ public class Segment {
             return new SegmentStream(id, inline);
         } else {
             int size = (int) ((length + BLOCK_SIZE - 1) / BLOCK_SIZE);
-            ListRecord list = new ListRecord(internalReadRecordId(pos + 8), size);
+            ListRecord list =
+                    new ListRecord(this, internalReadRecordId(pos + 8), size);
             return new SegmentStream(store, id, list, length);
         }
     }

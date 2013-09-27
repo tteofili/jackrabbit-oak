@@ -16,6 +16,7 @@
  */
 package org.apache.jackrabbit.oak.plugins.segment;
 
+import static com.google.common.base.Objects.equal;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkElementIndex;
 import static com.google.common.base.Preconditions.checkNotNull;
@@ -30,6 +31,7 @@ import static org.apache.jackrabbit.oak.plugins.segment.Segment.MAX_SEGMENT_SIZE
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -57,6 +59,7 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.io.ByteStreams;
+import com.google.common.io.Closeables;
 
 public class SegmentWriter {
 
@@ -89,10 +92,9 @@ public class SegmentWriter {
 
     /**
      * The segment write buffer, filled from the end to the beginning
-     * (see OAK-629). The buffer grows automatically up to
-     * {@link Segment#MAX_SEGMENT_SIZE}.
+     * (see OAK-629).
      */
-    private byte[] buffer = new byte[MAX_SEGMENT_SIZE];
+    private final byte[] buffer = new byte[MAX_SEGMENT_SIZE];
 
     /**
      * The number of bytes already written (or allocated). Counted from
@@ -106,8 +108,34 @@ public class SegmentWriter {
      */
     private int position;
 
+    private Segment currentSegment = null;
+
+    private final Segment dummySegment;
+
     public SegmentWriter(SegmentStore store) {
         this.store = store;
+        this.dummySegment = new Segment(
+                store, UUID.randomUUID(),
+                ByteBuffer.allocate(0), Collections.<UUID>emptyList());
+    }
+
+    public synchronized Segment getCurrentSegment(UUID id) {
+        if (equal(id, uuid)) {
+            if (currentSegment == null) {
+                ByteBuffer b = ByteBuffer.allocate(length);
+                System.arraycopy(
+                        buffer, buffer.length - length, b.array(), 0, length);
+                currentSegment = new Segment(
+                        store, uuid, b, newArrayList(uuids.keySet()));
+            }
+            return currentSegment;
+        } else {
+            return null;
+        }
+    }
+
+    public Segment getDummySegment() {
+        return dummySegment;
     }
 
     public synchronized void flush() {
@@ -118,9 +146,9 @@ public class SegmentWriter {
 
             uuid = UUID.randomUUID();
             uuids.clear();
-            buffer = new byte[MAX_SEGMENT_SIZE];
             length = 0;
             position = buffer.length;
+            currentSegment = null;
         }
     }
 
@@ -152,6 +180,7 @@ public class SegmentWriter {
         length += alignedSize;
         position = buffer.length - length;
         checkState(position >= 0);
+        currentSegment = null;
         return new RecordId(uuid, position);
     }
 
@@ -218,7 +247,7 @@ public class SegmentWriter {
             for (MapEntry entry : array) {
                 writeRecordId(entry.getValue());
             }
-            return new MapLeaf(store, id, size, level);
+            return new MapLeaf(dummySegment, id, size, level);
         }
     }
 
@@ -239,7 +268,7 @@ public class SegmentWriter {
             for (RecordId id : ids) {
                 writeRecordId(id);
             }
-            return new MapBranch(store, mapId, size, level, bitmap);
+            return new MapBranch(dummySegment, mapId, size, level, bitmap);
         }
     }
 
@@ -259,19 +288,19 @@ public class SegmentWriter {
 
         if (entries == null || entries.isEmpty()) {
             if (baseId != null) {
-                return MapRecord.readMap(store, baseId);
+                return MapRecord.readMap(dummySegment, baseId);
             } else if (level == 0) {
                 synchronized (this) {
                     RecordId id = prepare(4);
                     writeInt(0);
-                    return new MapLeaf(store, id, 0, 0);
+                    return new MapLeaf(dummySegment, id, 0, 0);
                 }
             } else {
                 return null;
             }
         } else if (baseId != null) {
             // FIXME: messy code with lots of duplication
-            MapRecord base = MapRecord.readMap(store, baseId);
+            MapRecord base = MapRecord.readMap(dummySegment, baseId);
             if (base instanceof MapLeaf) {
                 Map<String, MapEntry> map = ((MapLeaf) base).getMapEntries();
                 for (MapEntry entry : entries) {
@@ -324,7 +353,7 @@ public class SegmentWriter {
                         synchronized (this) {
                             RecordId id = prepare(4);
                             writeInt(0);
-                            return new MapLeaf(store, id, 0, 0);
+                            return new MapLeaf(dummySegment, id, 0, 0);
                         }
                     } else {
                         return null;
@@ -419,7 +448,7 @@ public class SegmentWriter {
         for (Map.Entry<String, RecordId> entry : changes.entrySet()) {
             String name = entry.getKey();
             entries.add(new MapEntry(
-                    store, name, writeString(name), entry.getValue()));
+                    dummySegment, name, writeString(name), entry.getValue()));
         }
         RecordId baseId = null;
         if (base != null) {
@@ -440,13 +469,21 @@ public class SegmentWriter {
             if (id == null) {
                 byte[] data = string.getBytes(Charsets.UTF_8);
                 try {
-                    id = writeStream(new ByteArrayInputStream(data));
+                    id = writeStream(new ByteArrayInputStream(data)).getRecordId();
                 } catch (IOException e) {
                     throw new IllegalStateException("Unexpected IOException", e);
                 }
                 strings.put(string, id);
             }
             return id;
+        }
+    }
+
+    public SegmentBlob writeBlob(Blob blob) throws IOException {
+        if (blob instanceof SegmentBlob) {
+            return (SegmentBlob) blob;
+        } else {
+            return writeStream(blob.getNewStream());
         }
     }
 
@@ -458,16 +495,18 @@ public class SegmentWriter {
      * @return value record identifier
      * @throws IOException if the stream could not be read
      */
-    public RecordId writeStream(InputStream stream) throws IOException {
+    public SegmentBlob writeStream(InputStream stream) throws IOException {
         RecordId id = SegmentStream.getRecordIdIfAvailable(stream);
         if (id == null) {
+            boolean threw = true;
             try {
                 id = internalWriteStream(stream);
+                threw = false;
             } finally {
-                stream.close();
+                Closeables.close(stream, threw);
             }
         }
-        return id;
+        return new SegmentBlob(dummySegment, id);
     }
 
     private RecordId internalWriteStream(InputStream stream)
@@ -537,8 +576,9 @@ public class SegmentWriter {
         for (int i = 0; i < count; i++) {
             if (type.tag() == PropertyType.BINARY) {
                 try {
-                    Blob blob = state.getValue(Type.BINARY, i);
-                    valueIds.add(writeStream(blob.getNewStream()));
+                    SegmentBlob blob =
+                            writeBlob(state.getValue(Type.BINARY, i));
+                    valueIds.add(blob.getRecordId());
                 } catch (IOException e) {
                     throw new IllegalStateException("Unexpected IOException", e);
                 }

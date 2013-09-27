@@ -238,7 +238,7 @@ public class Template {
         offset += index * RECORD_ID_BYTES;
         Segment segment = store.readSegment(recordId.getSegmentId());
         return new SegmentPropertyState(
-                properties[index], store, segment.readRecordId(offset));
+                segment, segment.readRecordId(offset), properties[index]);
     }
 
     public Iterable<PropertyState> getProperties(
@@ -259,7 +259,7 @@ public class Template {
         for (int i = 0; i < properties.length; i++) {
             RecordId propertyId = segment.readRecordId(offset);
             list.add(new SegmentPropertyState(
-                    properties[i], store, propertyId));
+                    segment, propertyId, properties[i]));
             offset += RECORD_ID_BYTES;
         }
         return list;
@@ -281,7 +281,7 @@ public class Template {
         int offset = recordId.getOffset() + RECORD_ID_BYTES;
         Segment segment = store.readSegment(recordId.getSegmentId());
         RecordId childNodesId = segment.readRecordId(offset);
-        return MapRecord.readMap(store, childNodesId);
+        return MapRecord.readMap(segment, childNodesId);
     }
 
     public boolean hasChildNode(
@@ -562,7 +562,7 @@ public class Template {
 
         if (childName == MANY_CHILD_NODES) {
             RecordId childNodesId = segment.readRecordId(offset);
-            MapRecord children = MapRecord.readMap(store, childNodesId);
+            MapRecord children = MapRecord.readMap(segment, childNodesId);
             children.compareAgainstEmptyMap(new MapDiff() {
                 @Override
                 public boolean entryAdded(String key, RecordId after) {
@@ -592,7 +592,7 @@ public class Template {
         // Other properties
         for (int i = 0; i < properties.length; i++) {
             if (!diff.propertyAdded(new SegmentPropertyState(
-                    properties[i], store, segment.readRecordId(offset)))) {
+                    segment, segment.readRecordId(offset), properties[i]))) {
                 return false;
             }
             offset += RECORD_ID_BYTES;
