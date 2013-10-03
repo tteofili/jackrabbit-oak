@@ -24,7 +24,6 @@ import java.util.Map;
 import javax.annotation.Nonnull;
 
 import org.apache.jackrabbit.oak.spi.state.AbstractChildNodeEntry;
-import org.apache.jackrabbit.oak.spi.state.NodeState;
 
 import com.google.common.collect.ComparisonChain;
 
@@ -40,13 +39,17 @@ class MapEntry extends AbstractChildNodeEntry
 
     private final RecordId key;
 
-    private RecordId value;
+    private final RecordId value;
 
     MapEntry(Segment segment, String name, RecordId key, RecordId value) {
         this.segment = checkNotNull(segment);
         this.name = checkNotNull(name);
         this.key = checkNotNull(key);
         this.value = value;
+    }
+
+    public int getHash() {
+        return name.hashCode();
     }
 
     //----------------------------------------------------< ChildNodeEntry >--
@@ -57,7 +60,7 @@ class MapEntry extends AbstractChildNodeEntry
     }
 
     @Override @Nonnull
-    public NodeState getNodeState() {
+    public SegmentNodeState getNodeState() {
         checkState(value != null);
         return new SegmentNodeState(segment, value);
     }
@@ -76,9 +79,7 @@ class MapEntry extends AbstractChildNodeEntry
 
     @Override
     public RecordId setValue(RecordId value) {
-        RecordId old = this.value;
-        this.value = value;
-        return old;
+        throw new UnsupportedOperationException();
     }
 
     //--------------------------------------------------------< Comparable >--

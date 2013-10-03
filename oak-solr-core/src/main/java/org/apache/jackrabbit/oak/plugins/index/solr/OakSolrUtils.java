@@ -20,12 +20,14 @@ import java.io.IOException;
 
 import javax.annotation.Nonnull;
 
+import org.apache.jackrabbit.oak.plugins.index.solr.configuration.DefaultSolrConfigurationProvider;
 import org.apache.jackrabbit.oak.plugins.index.solr.query.SolrQueryIndexProvider;
 import org.apache.jackrabbit.oak.spi.query.QueryIndexProvider;
 import org.apache.solr.client.solrj.SolrServer;
 import org.apache.solr.client.solrj.SolrServerException;
 import org.osgi.framework.BundleContext;
 import org.osgi.framework.BundleReference;
+import org.osgi.framework.FrameworkUtil;
 import org.osgi.framework.ServiceReference;
 
 /**
@@ -35,30 +37,37 @@ public class OakSolrUtils {
 
     /**
      * Check if a given Solr instance is alive
-     *
-     * @param solrServer the {@link SolrServer} used to communicate with the Solr instance
+     * 
+     * @param solrServer
+     *            the {@link SolrServer} used to communicate with the Solr instance
      * @return <code>true</code> if the given Solr instance is alive and responding
-     * @throws IOException         if any low level IO error occurs
-     * @throws SolrServerException if any error occurs while trying to communicate with the Solr instance
+     * @throws IOException
+     *             if any low level IO error occurs
+     * @throws SolrServerException
+     *             if any error occurs while trying to communicate with the Solr instance
      */
-    public static boolean checkServerAlive(@Nonnull SolrServer solrServer) throws IOException, SolrServerException {
+    public static boolean checkServerAlive(@Nonnull
+    SolrServer solrServer) throws IOException, SolrServerException {
         return solrServer.ping().getStatus() == 0;
     }
 
     /**
      * adapts the OSGi Solr {@link QueryIndexProvider} service
-     *
+     * 
      * @return a {@link SolrQueryIndexProvider}
      */
     public static QueryIndexProvider adaptOsgiQueryIndexProvider() {
         QueryIndexProvider queryIndexProvider = null;
         try {
-            BundleContext ctx = BundleReference.class.cast(SolrQueryIndexProvider.class
-                    .getClassLoader()).getBundle().getBundleContext();
+            BundleContext ctx = BundleReference.class
+                            .cast(SolrQueryIndexProvider.class.getClassLoader()).getBundle()
+                            .getBundleContext();
 
-            ServiceReference serviceReference = ctx.getServiceReference(QueryIndexProvider.class.getName());
+            ServiceReference serviceReference = ctx.getServiceReference(QueryIndexProvider.class
+                            .getName());
             if (serviceReference != null) {
-                queryIndexProvider = QueryIndexProvider.class.cast(ctx.getService(serviceReference));
+                queryIndexProvider = QueryIndexProvider.class
+                                .cast(ctx.getService(serviceReference));
             }
         } catch (Throwable e) {
             // do nothing
@@ -67,28 +76,37 @@ public class OakSolrUtils {
     }
 
     /**
-     * adapt the OSGi Solr {@link SolrServerProvider} service of a given extending class
-     * and tries to instantiate it if non existing.
-     *
-     * @param providerClass the {@link Class} extending {@link SolrServerProvider}
-     *                      to adapt or instantiate
-     * @param <T>           the {@link SolrServerProvider} extension
-     * @return a {@link SolrServerProvider} adapted from the OSGi service, or a
-     *         directly instantiated one or <code>null</code> if both failed
+     * adapt the OSGi Solr {@link SolrServerProvider} service of a given extending class and tries
+     * to instantiate it if non existing.
+     * 
+     * @param providerClass
+     *            the {@link Class} extending {@link SolrServerProvider} to adapt or instantiate
+     * @param <T>
+     *            the {@link SolrServerProvider} extension
+     * @return a {@link SolrServerProvider} adapted from the OSGi service, or a directly
+     *         instantiated one or <code>null</code> if both failed
      */
-    public static <T extends SolrServerProvider> SolrServerProvider adaptOsgiSolrServerProvider(Class<T> providerClass) {
+    public static <T extends SolrServerProvider> SolrServerProvider adaptOsgiSolrServerProvider(
+                    Class<T> providerClass) {
         SolrServerProvider solrServerProvider = null;
         try {
-            BundleContext ctx = BundleReference.class.cast(providerClass
-                    .getClassLoader()).getBundle().getBundleContext();
-            ServiceReference serviceReference = ctx.getServiceReference(SolrServerProvider.class.getName());
+            BundleContext ctx = FrameworkUtil.getBundle(providerClass).getBundleContext();
+            ServiceReference serviceReference = ctx.getServiceReference(SolrServerProvider.class
+                            .getName());
             if (serviceReference != null) {
-                solrServerProvider = SolrServerProvider.class.cast(ctx.getService(serviceReference));
+                solrServerProvider = SolrServerProvider.class
+                                .cast(ctx.getService(serviceReference));
             }
-        } catch (Exception e) {
+        } catch (Throwable e) {
             // do nothing
         }
 
+        return solrServerProvider;
+    }
+
+    public static <T extends SolrServerProvider> SolrServerProvider getSolrServerProvider(
+                    Class<T> providerClass) {
+        SolrServerProvider solrServerProvider = adaptOsgiSolrServerProvider(providerClass);
         if (solrServerProvider == null && providerClass != null) {
             try {
                 solrServerProvider = providerClass.newInstance();
@@ -98,33 +116,46 @@ public class OakSolrUtils {
                 // do nothing
             }
         }
-
+        if (solrServerProvider == null) {
+            // TODO : implement this
+        }
         return solrServerProvider;
     }
 
     /**
-     * adapt the OSGi Solr {@link OakSolrConfigurationProvider} service of a given
-     * extending class and tries to instantiate it if non existing.
-     *
-     * @param providerClass the {@link Class} extending {@link OakSolrConfigurationProvider}
-     *                      to adapt or instantiate
-     * @param <T>           the {@link OakSolrConfigurationProvider} extension
-     * @return a {@link OakSolrConfigurationProvider} adapted from the OSGi service, or a
-     *         directly instantiated one or <code>null</code> if both failed
+     * adapt the OSGi Solr {@link OakSolrConfigurationProvider} service of a given extending class
+     * and tries to instantiate it if non existing.
+     * 
+     * @param providerClass
+     *            the {@link Class} extending {@link OakSolrConfigurationProvider} to adapt or
+     *            instantiate
+     * @param <T>
+     *            the {@link OakSolrConfigurationProvider} extension
+     * @return a {@link OakSolrConfigurationProvider} adapted from the OSGi service, or a directly
+     *         instantiated one or <code>null</code> if both failed
      */
-    public static <T extends OakSolrConfigurationProvider> OakSolrConfigurationProvider adaptOsgiOakSolrConfigurationProvider(Class<T> providerClass) {
+    public static <T extends OakSolrConfigurationProvider> OakSolrConfigurationProvider adaptOsgiOakSolrConfigurationProvider(
+                    Class<T> providerClass) {
         OakSolrConfigurationProvider oakSolrConfigurationProvider = null;
         try {
-            BundleContext ctx = BundleReference.class.cast(providerClass
-                    .getClassLoader()).getBundle().getBundleContext();
-            ServiceReference serviceReference = ctx.getServiceReference(OakSolrConfigurationProvider.class.getName());
+            BundleContext ctx = FrameworkUtil.getBundle(providerClass).getBundleContext();
+            ServiceReference serviceReference = ctx
+                            .getServiceReference(OakSolrConfigurationProvider.class.getName());
             if (serviceReference != null) {
-                oakSolrConfigurationProvider = OakSolrConfigurationProvider.class.cast(ctx.getService(serviceReference));
+                oakSolrConfigurationProvider = OakSolrConfigurationProvider.class.cast(ctx
+                                .getService(serviceReference));
             }
-        } catch (Exception e) {
+        } catch (Throwable e) {
             // do nothing
         }
 
+        return oakSolrConfigurationProvider;
+    }
+
+    public static <T extends OakSolrConfigurationProvider> OakSolrConfigurationProvider getOakSolrConfigurationProvider(
+                    Class<T> providerClass) {
+        OakSolrConfigurationProvider oakSolrConfigurationProvider = OakSolrUtils
+                        .adaptOsgiOakSolrConfigurationProvider(providerClass);
         if (oakSolrConfigurationProvider == null && providerClass != null) {
             try {
                 oakSolrConfigurationProvider = providerClass.newInstance();
@@ -134,20 +165,26 @@ public class OakSolrUtils {
                 // do nothing
             }
         }
-
+        if (oakSolrConfigurationProvider == null) {
+            oakSolrConfigurationProvider = new DefaultSolrConfigurationProvider();
+        }
         return oakSolrConfigurationProvider;
     }
 
     /**
      * Trigger a Solr commit on the basis of the given commit policy (e.g. hard, soft, auto)
-     *
-     * @param solrServer   the {@link SolrServer} used to communicate with the Solr instance
-     * @param commitPolicy the {@link CommitPolicy} used to commit changes to a Solr index
-     * @throws IOException         if any low level IO error occurs
-     * @throws SolrServerException if any error occurs while trying to communicate with the Solr instance
+     * 
+     * @param solrServer
+     *            the {@link SolrServer} used to communicate with the Solr instance
+     * @param commitPolicy
+     *            the {@link CommitPolicy} used to commit changes to a Solr index
+     * @throws IOException
+     *             if any low level IO error occurs
+     * @throws SolrServerException
+     *             if any error occurs while trying to communicate with the Solr instance
      */
     public static void commitByPolicy(SolrServer solrServer, CommitPolicy commitPolicy)
-            throws IOException, SolrServerException {
+                    throws IOException, SolrServerException {
         switch (commitPolicy) {
             case HARD: {
                 solrServer.commit();

@@ -54,6 +54,7 @@ import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.plugins.mongomk.Node.Children;
 import org.apache.jackrabbit.oak.plugins.mongomk.Revision.RevisionComparator;
 import org.apache.jackrabbit.oak.plugins.mongomk.blob.MongoBlobStore;
+import org.apache.jackrabbit.oak.plugins.mongomk.util.LoggingDocumentStoreWrapper;
 import org.apache.jackrabbit.oak.plugins.mongomk.util.TimingDocumentStoreWrapper;
 import org.apache.jackrabbit.oak.plugins.mongomk.util.Utils;
 import org.slf4j.Logger;
@@ -247,6 +248,9 @@ public class MongoMK implements MicroKernel, RevisionContext {
         DocumentStore s = builder.getDocumentStore();
         if (builder.getTiming()) {
             s = new TimingDocumentStoreWrapper(s);
+        }
+        if (builder.getLogging()) {
+            s = new LoggingDocumentStoreWrapper(s);
         }
         this.store = s;
         this.blobStore = builder.getBlobStore();
@@ -447,7 +451,11 @@ public class MongoMK implements MicroKernel, RevisionContext {
         });
         
         long now = Revision.getCurrentTimestamp();
-        for (String p : paths) {
+        UpdateOp updateOp = null;
+        Revision lastRev = null;
+        List<String> ids = new ArrayList<String>();
+        for (int i = 0; i < paths.size(); i++) {
+            String p = paths.get(i);
             Revision r = unsavedLastRevisions.get(p);
             if (r == null) {
                 continue;
@@ -458,10 +466,29 @@ public class MongoMK implements MicroKernel, RevisionContext {
             if (Revision.getTimestampDifference(now, r.getTimestamp()) < asyncDelay) {
                 continue;
             }
-            Commit commit = new Commit(this, null, r);
-            commit.touchNode(p);
-            store.createOrUpdate(Collection.NODES, commit.getUpdateOperationForNode(p));
-            unsavedLastRevisions.remove(p);
+            int size = ids.size();
+            if (updateOp == null) {
+                // create UpdateOp
+                Commit commit = new Commit(this, null, r);
+                commit.touchNode(p);
+                updateOp = commit.getUpdateOperationForNode(p);
+                lastRev = r;
+                ids.add(Utils.getIdFromPath(p));
+            } else if (r.equals(lastRev)) {
+                // use multi update when possible
+                ids.add(Utils.getIdFromPath(p));
+            }
+            // update if this is the last path or
+            // revision is not equal to last revision
+            if (i + 1 >= paths.size() || size == ids.size()) {
+                store.update(Collection.NODES, ids, updateOp);
+                for (String id : ids) {
+                    unsavedLastRevisions.remove(Utils.getPathFromId(id));
+                }
+                ids.clear();
+                updateOp = null;
+                lastRev = null;
+            }
         }
     }
 
@@ -1118,13 +1145,9 @@ public class MongoMK implements MicroKernel, RevisionContext {
         commit.removeNode(path);
 
         if (subTreeAlso) {
-
             // recurse down the tree
             // TODO causes issue with large number of children
             Node n = getNode(path, rev);
-
-            // remove from the cache
-            nodeCache.invalidate(path + "@" + rev);
 
             if (n != null) {
                 Node.Children c = getChildren(path, rev, Integer.MAX_VALUE);
@@ -1134,9 +1157,6 @@ public class MongoMK implements MicroKernel, RevisionContext {
                 nodeChildrenCache.invalidate(n.getId());
             }
         }
-
-        // Remove the node from the cache
-        nodeCache.invalidate(path + "@" + rev);
     }
 
     public static void parseAddNode(Commit commit, JsopReader t, String path) {
@@ -1458,6 +1478,7 @@ public class MongoMK implements MicroKernel, RevisionContext {
         private int clusterId  = Integer.getInteger("oak.mongoMK.clusterId", 0);
         private int asyncDelay = 1000;
         private boolean timing;
+        private boolean logging;
         private Weigher<String, CacheValue> weigher = new EmpiricalWeigher();
         private long nodeCacheSize;
         private long childrenCacheSize;
@@ -1498,6 +1519,15 @@ public class MongoMK implements MicroKernel, RevisionContext {
         
         public boolean getTiming() {
             return timing;
+        }
+
+        public Builder setLogging(boolean logging) {
+            this.logging = logging;
+            return this;
+        }
+
+        public boolean getLogging() {
+            return logging;
         }
 
         /**

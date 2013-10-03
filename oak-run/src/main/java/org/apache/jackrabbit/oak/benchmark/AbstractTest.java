@@ -18,6 +18,7 @@ package org.apache.jackrabbit.oak.benchmark;
 
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Random;
 import java.util.concurrent.TimeUnit;
 
 import javax.jcr.Credentials;
@@ -28,6 +29,7 @@ import javax.jcr.Session;
 import javax.jcr.SimpleCredentials;
 
 import org.apache.commons.math.stat.descriptive.DescriptiveStatistics;
+import org.apache.jackrabbit.oak.benchmark.util.Profiler;
 import org.apache.jackrabbit.oak.fixture.RepositoryFixture;
 
 /**
@@ -35,12 +37,23 @@ import org.apache.jackrabbit.oak.fixture.RepositoryFixture;
  */
 abstract class AbstractTest extends Benchmark {
 
+    /**
+     * A random string to guarantee concurrently running tests don't overwrite
+     * each others changes (for example in a cluster).
+     * <p>
+     * The probability of duplicates, for 50 concurrent processes, is less than
+     * 1 in 1 million.
+     */
+    static final String TEST_ID = Integer.toHexString(new Random().nextInt());
+    
     private static final Credentials CREDENTIALS = new SimpleCredentials("admin", "admin".toCharArray());
 
-    private static final int WARMUP = Integer.getInteger("warmup", 5);
+    private static final long WARMUP = TimeUnit.SECONDS.toMillis(Long.getLong("warmup", 5));
 
     private static final long RUNTIME = TimeUnit.SECONDS.toMillis(Long.getLong("runtime", 60));
-
+    
+    private static final boolean PROFILE = Boolean.getBoolean("profile");
+    
     private Repository repository;
 
     private Credentials credentials;
@@ -50,6 +63,8 @@ abstract class AbstractTest extends Benchmark {
     private List<Thread> threads;
 
     private volatile boolean running;
+    
+    private Profiler profiler;
 
     protected static int getScale(int def) {
         int scale = Integer.getInteger("scale", 0);
@@ -76,6 +91,9 @@ abstract class AbstractTest extends Benchmark {
         this.running = true;
 
         beforeSuite();
+        if (PROFILE) {
+            profiler = new Profiler().startCollecting();
+        }
     }
 
     @Override
@@ -114,16 +132,16 @@ abstract class AbstractTest extends Benchmark {
 
         setUp(repository, CREDENTIALS);
         try {
+            
             // Run a few iterations to warm up the system
-            for (int i = 0; i < WARMUP; i++) {
+            long warmupEnd = System.currentTimeMillis() + WARMUP;
+            while (System.currentTimeMillis() < warmupEnd) {
                 execute();
             }
 
             // Run test iterations, and capture the execution times
-            int iterations = 0;
             long runtimeEnd = System.currentTimeMillis() + RUNTIME;
-            while (iterations++ < 10
-                    || System.currentTimeMillis() < runtimeEnd) {
+            while (System.currentTimeMillis() < runtimeEnd) {
                 statistics.addValue(execute());
             }
         } finally {
@@ -160,6 +178,11 @@ abstract class AbstractTest extends Benchmark {
         this.running = false;
         for (Thread thread : threads) {
             thread.join();
+        }
+        
+        if (profiler != null) {
+            System.out.println(profiler.stopCollecting().getTop(5));
+            profiler = null;
         }
 
         afterSuite();

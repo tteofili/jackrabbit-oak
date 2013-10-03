@@ -78,32 +78,38 @@ abstract class MapRecord extends Record {
         return size;
     }
 
-    abstract RecordId getEntry(String key);
+    abstract MapEntry getEntry(String key);
 
     abstract Iterable<String> getKeys();
 
     abstract Iterable<MapEntry> getEntries();
 
-    abstract boolean compareAgainstEmptyMap(MapDiff diff);
+    boolean compareAgainstEmptyMap(MapDiff diff) {
+        for (MapEntry entry : getEntries()) {
+            if (!diff.entryAdded(entry)) {
+                return false;
+            }
+        }
+        return true;
+    }
 
     interface MapDiff {
-        boolean entryAdded(String key, RecordId after);
-        boolean entryChanged(String key, RecordId before, RecordId after);
-        boolean entryDeleted(String key, RecordId before);
+        boolean entryAdded(MapEntry after);
+        boolean entryChanged(MapEntry before, MapEntry after);
+        boolean entryDeleted(MapEntry before);
     }
 
     boolean compare(MapRecord that, MapDiff diff) {
         Set<String> keys = newHashSet();
         for (MapEntry entry : getEntries()) {
             String name = entry.getName();
-            RecordId thisId = entry.getValue();
-            RecordId thatId = that.getEntry(name);
-            if (thatId == null) {
-                if (!diff.entryAdded(name, thisId)) {
+            MapEntry thatEntry = that.getEntry(name);
+            if (thatEntry == null) {
+                if (!diff.entryAdded(entry)) {
                     return false;
                 }
-            } else if (!thisId.equals(thatId)) {
-                if (!diff.entryChanged(name, thatId, thisId)) {
+            } else if (!entry.getValue().equals(thatEntry.getValue())) {
+                if (!diff.entryChanged(thatEntry, entry)) {
                     return false;
                 }
             }
@@ -112,7 +118,7 @@ abstract class MapRecord extends Record {
         for (MapEntry entry : that.getEntries()) {
             String name = entry.getName();
             if (!keys.contains(name)) {
-                if (!diff.entryDeleted(name, entry.getValue())) {
+                if (!diff.entryDeleted(entry)) {
                     return false;
                 }
             }

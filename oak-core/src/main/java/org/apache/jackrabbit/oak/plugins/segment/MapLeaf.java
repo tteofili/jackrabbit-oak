@@ -19,69 +19,44 @@ package org.apache.jackrabbit.oak.plugins.segment;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
 
-import java.util.Iterator;
-import java.util.Map;
-import java.util.NoSuchElementException;
-
-import com.google.common.collect.Maps;
+import java.util.Arrays;
 
 class MapLeaf extends MapRecord {
-
-    private final String[] keys;
 
     MapLeaf(Segment segment, int offset, int size, int level) {
         super(segment, offset, size, level);
         checkArgument(size != 0 || level == 0);
         checkArgument(size <= BUCKETS_PER_LEVEL || level == MAX_NUMBER_OF_LEVELS);
-        this.keys = new String[size];
     }
 
     MapLeaf(Segment segment, RecordId id, int size, int level) {
         super(segment, id, size, level);
         checkArgument(size != 0 || level == 0);
         checkArgument(size <= BUCKETS_PER_LEVEL || level == MAX_NUMBER_OF_LEVELS);
-        this.keys = new String[size];
-    }
-
-    Map<String, MapEntry> getMapEntries() {
-        RecordId[] keys = new RecordId[size];
-        RecordId[] values = new RecordId[size];
-
-        Segment segment = getSegment();
-        int bytes = 4 + size * 4;
-        int ids = 0;
-        for (int i = 0; i < size; i++) {
-            keys[i] = segment.readRecordId(getOffset(bytes, ids++));
-        }
-        for (int i = 0; i < size; i++) {
-            values[i] = segment.readRecordId(getOffset(bytes, ids++));
-        }
-
-        Map<String, MapEntry> entries = Maps.newHashMapWithExpectedSize(size);
-        for (int i = 0; i < size; i++) {
-            String name = getKey(segment, i, keys[i]);
-            entries.put(name, new MapEntry(segment, name, keys[i], values[i]));
-        }
-        return entries;
     }
 
     @Override
-    RecordId getEntry(String key) {
-        checkNotNull(key);
+    MapEntry getEntry(String key) {
+        if (size == 0) {
+            return null;
+        }
 
-        if (size > 0) {
-            int hash = key.hashCode();
-            Segment segment = getSegment();
+        Segment segment = getSegment();
+        int hash = checkNotNull(key).hashCode();
 
-            int index = 0;
-            while (index < size && getHash(segment, index) < hash) {
-                index++;
-            }
-            while (index < size && getHash(segment, index) == hash) {
-                if (key.equals(getKey(segment, index))) {
-                    return getValue(segment, index);
+        int d = -1;
+        for (int i = 0; i < size && d < 0; i++) {
+            d = Integer.valueOf(segment.readInt(getOffset(4 + i * 4)))
+                    .compareTo(Integer.valueOf(hash));
+            if (d == 0) {
+                RecordId keyId = segment.readRecordId(
+                        getOffset(4 + size * 4, i));
+                d = segment.readString(keyId).compareTo(key);
+                if (d == 0) {
+                    RecordId valueId = segment.readRecordId(
+                            getOffset(4 + size * 4, size + i));
+                    return new MapEntry(segment, key, keyId, valueId);
                 }
-                index++;
             }
         }
 
@@ -90,17 +65,40 @@ class MapLeaf extends MapRecord {
 
     @Override
     Iterable<String> getKeys() {
-        return new Iterable<String>() {
-            @Override
-            public Iterator<String> iterator() {
-                return getKeyIterator();
-            }
-        };
+        Segment segment = getSegment();
+
+        RecordId[] ids = new RecordId[size];
+        for (int i = 0; i < size; i++) {
+            ids[i] = segment.readRecordId(getOffset(4 + size * 4, i));
+        }
+
+        String[] keys = new String[size];
+        for (int i = 0; i < size; i++) {
+            keys[i] = segment.readString(ids[i]);
+        }
+        return Arrays.asList(keys);
     }
 
     @Override
     Iterable<MapEntry> getEntries() {
-        return getMapEntries().values();
+        Segment segment = getSegment();
+
+        RecordId[] keys = new RecordId[size];
+        for (int i = 0; i < size; i++) {
+            keys[i] = segment.readRecordId(getOffset(4 + size * 4, i));
+        }
+
+        RecordId[] values = new RecordId[size];
+        for (int i = 0; i < size; i++) {
+            values[i] = segment.readRecordId(getOffset(4 + size * 4, size + i));
+        }
+
+        MapEntry[] entries = new MapEntry[size];
+        for (int i = 0; i < size; i++) {
+            String name = segment.readString(keys[i]);
+            entries[i] = new MapEntry(segment, name, keys[i], values[i]);
+        }
+        return Arrays.asList(entries);
     }
 
     @Override
@@ -129,8 +127,7 @@ class MapLeaf extends MapRecord {
                     && (before.getHash(bs, bi) < afterHash
                         || (before.getHash(bs, bi) == afterHash
                             && before.getKey(bs, bi).compareTo(afterKey) < 0))) {
-                if (!diff.entryDeleted(
-                        before.getKey(bs, bi), before.getValue(bs, bi))) {
+                if (!diff.entryDeleted(before.getEntry(bs, bi))) {
                     return false;
                 }
                 bi++;
@@ -141,11 +138,13 @@ class MapLeaf extends MapRecord {
                     && before.getKey(bs, bi).equals(afterKey)) {
                 RecordId beforeValue = before.getValue(bs, bi);
                 if (!afterValue.equals(beforeValue)
-                        && !diff.entryChanged(afterKey, beforeValue, afterValue)) {
+                        && !diff.entryChanged(
+                                before.getEntry(bs, bi),
+                                after.getEntry(as, ai))) {
                     return false;
                 }
                 bi++;
-            } else if (!diff.entryAdded(afterKey, afterValue)) {
+            } else if (!diff.entryAdded(after.getEntry(as, ai))) {
                 return false;
             }
 
@@ -153,8 +152,7 @@ class MapLeaf extends MapRecord {
         }
 
         while (bi < before.size) {
-            if (!diff.entryDeleted(
-                    before.getKey(bs, bi), before.getValue(bs, bi))) {
+            if (!diff.entryDeleted(before.getEntry(bs, bi))) {
                 return false;
             }
             bi++;
@@ -163,66 +161,25 @@ class MapLeaf extends MapRecord {
         return true;
     }
 
-    @Override
-    public boolean compareAgainstEmptyMap(MapDiff diff) {
-        Segment segment = getSegment();
-
-        for (int i = 0; i < size; i++) {
-            RecordId key = segment.readRecordId(getOffset(4 + size * 4, i));
-            RecordId value = segment.readRecordId(getOffset(4 + size * 4, size + i));
-            if (!diff.entryAdded(getKey(segment, i, key), value)) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
     //-----------------------------------------------------------< private >--
 
-    private Iterator<String> getKeyIterator() {
-        return new Iterator<String>() {
-            private final Segment segment = getSegment();
-            private int index = 0;
-            @Override
-            public boolean hasNext() {
-                return index < size;
-            }
-            @Override
-            public String next() {
-                int i = index++;
-                if (i < size) {
-                    return getKey(segment, i);
-                } else {
-                    throw new NoSuchElementException();
-                }
-            }
-            @Override
-            public void remove() {
-                throw new UnsupportedOperationException();
-            }
-        };
+    private MapEntry getEntry(Segment segment, int index) {
+        checkNotNull(segment);
+        RecordId key =
+                segment.readRecordId(getOffset(4 + size * 4, index));
+        RecordId value =
+                segment.readRecordId(getOffset(4 + size * 4, size + index));
+        return new MapEntry(segment, segment.readString(key), key, value);
     }
 
     private int getHash(Segment segment, int index) {
         return checkNotNull(segment).readInt(getOffset() + 4 + index * 4);
     }
 
-    private synchronized String getKey(Segment segment, int index) {
+    private String getKey(Segment segment, int index) {
         checkNotNull(segment);
-        if (keys[index] == null) {
-            int offset = getOffset(4 + size * 4, index);
-            keys[index] = segment.readString(segment.readRecordId(offset));
-        }
-        return keys[index];
-    }
-
-    private synchronized String getKey(Segment segment, int index, RecordId id) {
-        checkNotNull(segment);
-        if (keys[index] == null) {
-            keys[index] = segment.readString(id);
-        }
-        return keys[index];
+        int offset = getOffset(4 + size * 4, index);
+        return segment.readString(segment.readRecordId(offset));
     }
 
     private RecordId getValue(Segment segment, int index) {

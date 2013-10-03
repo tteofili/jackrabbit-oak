@@ -24,7 +24,10 @@ import static com.google.common.base.Preconditions.checkPositionIndex;
 import static com.google.common.base.Preconditions.checkPositionIndexes;
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.collect.Lists.newArrayList;
+import static com.google.common.collect.Maps.newHashMap;
 import static java.util.Collections.emptyMap;
+import static org.apache.jackrabbit.oak.api.Type.NAME;
+import static org.apache.jackrabbit.oak.api.Type.NAMES;
 import static org.apache.jackrabbit.oak.plugins.segment.MapRecord.BUCKETS_PER_LEVEL;
 import static org.apache.jackrabbit.oak.plugins.segment.Segment.MAX_SEGMENT_SIZE;
 
@@ -239,7 +242,7 @@ public class SegmentWriter {
             RecordId id = prepare(4 + size * 4, ids);
             writeInt((level << MapRecord.SIZE_BITS) | size);
             for (MapEntry entry : array) {
-                writeInt(entry.getName().hashCode());
+                writeInt(entry.getHash());
             }
             for (MapEntry entry : array) {
                 writeRecordId(entry.getKey());
@@ -302,7 +305,10 @@ public class SegmentWriter {
             // FIXME: messy code with lots of duplication
             MapRecord base = dummySegment.readMap(baseId);
             if (base instanceof MapLeaf) {
-                Map<String, MapEntry> map = ((MapLeaf) base).getMapEntries();
+                Map<String, MapEntry> map = newHashMap();
+                for (MapEntry entry : base.getEntries()) {
+                    map.put(entry.getName(), entry);
+                }
                 for (MapEntry entry : entries) {
                     if (entry.getValue() != null) {
                         map.put(entry.getName(), entry);
@@ -620,17 +626,19 @@ public class SegmentWriter {
                 int head = 0;
 
                 RecordId primaryId = null;
-                if (template.hasPrimaryType()) {
+                PropertyState primaryType = template.getPrimaryType();
+                if (primaryType != null) {
                     head |= 1 << 31;
-                    primaryId = writeString(template.getPrimaryType());
+                    primaryId = writeString(primaryType.getValue(NAME));
                     ids.add(primaryId);
                 }
 
                 List<RecordId> mixinIds = null;
-                if (template.hasMixinTypes()) {
+                PropertyState mixinTypes = template.getMixinTypes();
+                if (mixinTypes != null) {
                     head |= 1 << 30;
                     mixinIds = Lists.newArrayList();
-                    for (String mixin : template.getMixinTypes()) {
+                    for (String mixin : mixinTypes.getValue(NAMES)) {
                         mixinIds.add(writeString(mixin));
                     }
                     ids.addAll(mixinIds);
@@ -639,12 +647,13 @@ public class SegmentWriter {
                 }
 
                 RecordId childNameId = null;
-                if (template.hasNoChildNodes()) {
+                String childName = template.getChildName();
+                if (childName == Template.ZERO_CHILD_NODES) {
                     head |= 1 << 29;
-                } else if (template.hasManyChildNodes()) {
+                } else if (childName == Template.MANY_CHILD_NODES) {
                     head |= 1 << 28;
                 } else {
-                    childNameId = writeString(template.getChildName());
+                    childNameId = writeString(childName);
                     ids.add(childNameId);
                 }
 
@@ -716,7 +725,8 @@ public class SegmentWriter {
         List<RecordId> ids = Lists.newArrayList();
         ids.add(templateId);
 
-        if (template.hasManyChildNodes()) {
+        String childName = template.getChildName();
+        if (childName == Template.MANY_CHILD_NODES) {
             MapRecord base;
             final Map<String, RecordId> childNodes = Maps.newHashMap();
             if (before != null
@@ -750,7 +760,7 @@ public class SegmentWriter {
                 }
             }
             ids.add(writeMap(base, childNodes).getRecordId());
-        } else if (!template.hasNoChildNodes()) {
+        } else if (childName != Template.ZERO_CHILD_NODES) {
             ids.add(writeNode(state.getChildNode(template.getChildName())).getRecordId());
         }
 
