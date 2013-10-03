@@ -23,9 +23,9 @@ import org.apache.felix.scr.annotations.Component;
 import org.apache.felix.scr.annotations.Deactivate;
 import org.apache.felix.scr.annotations.Property;
 import org.apache.felix.scr.annotations.Service;
-import org.apache.jackrabbit.oak.plugins.index.solr.embedded.SolrServerConfiguration;
-import org.apache.jackrabbit.oak.plugins.index.solr.embedded.SolrServerConfigurationDefaults;
-import org.apache.jackrabbit.oak.plugins.index.solr.embedded.SolrServerConfigurationProvider;
+import org.apache.jackrabbit.oak.plugins.index.solr.configuration.SolrServerConfiguration;
+import org.apache.jackrabbit.oak.plugins.index.solr.configuration.SolrServerConfigurationDefaults;
+import org.apache.jackrabbit.oak.plugins.index.solr.configuration.SolrServerConfigurationProvider;
 import org.apache.solr.client.solrj.SolrServer;
 import org.osgi.service.component.ComponentContext;
 

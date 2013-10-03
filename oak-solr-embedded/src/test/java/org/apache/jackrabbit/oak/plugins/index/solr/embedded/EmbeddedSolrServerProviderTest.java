@@ -16,10 +16,11 @@
  */
 package org.apache.jackrabbit.oak.plugins.index.solr.embedded;
 
+import static org.junit.Assert.assertNotNull;
+
+import org.apache.jackrabbit.oak.plugins.index.solr.configuration.SolrServerConfiguration;
 import org.apache.solr.client.solrj.SolrServer;
 import org.junit.Test;
-
-import static org.junit.Assert.assertNotNull;
 
 /**
  * Testcase for {@link EmbeddedSolrServerProvider}

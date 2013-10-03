@@ -14,7 +14,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.jackrabbit.oak.plugins.index.solr.embedded;
+package org.apache.jackrabbit.oak.plugins.index.solr.configuration;
 
 /**
  * Configuration parameters for starting a {@link org.apache.solr.client.solrj.SolrServer}
@@ -77,7 +77,7 @@ public class SolrServerConfiguration {
         return httpConfiguration;
     }
 
-    class HttpConfiguration {
+    public class HttpConfiguration {
         private String context;
         private Integer httpPort;
 

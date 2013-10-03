@@ -41,8 +41,11 @@
           <instructions>
             <Export-Package>
               org.apache.jackrabbit.oak.plugins.index.solr,
+              org.apache.jackrabbit.oak.plugins.index.solr.configuration,
               org.apache.jackrabbit.oak.plugins.index.solr.index,
-              org.apache.jackrabbit.oak.plugins.index.solr.query
+              org.apache.jackrabbit.oak.plugins.index.solr.query,
+              org.apache.jackrabbit.oak.plugins.index.solr.server,
+              org.apache.jackrabbit.oak.plugins.index.solr.util
             </Export-Package>
             <Embed-Dependency>solr-solrj</Embed-Dependency>
           </instructions>
@@ -168,7 +171,6 @@
     <dependency>
       <groupId>junit</groupId>
       <artifactId>junit</artifactId>
-      <version>4.7</version>
       <scope>test</scope>
     </dependency>
     <dependency>

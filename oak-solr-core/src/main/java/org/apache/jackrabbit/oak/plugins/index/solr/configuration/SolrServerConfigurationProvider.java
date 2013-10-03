@@ -14,22 +14,18 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.jackrabbit.oak.plugins.index.solr;
+package org.apache.jackrabbit.oak.plugins.index.solr.configuration;
 
 /**
- * Enum for describing Solr commit policy used in a certain instance
+ * {@link org.apache.solr.client.solrj.SolrServer} configuration provider.
  */
-public enum CommitPolicy {
+public interface SolrServerConfigurationProvider {
+
     /**
-     * for default Solr commit
+     * Provide a {@lin SolrServerConfiguration} to be used to initialize a specific
+     * {@link org.apache.solr.client.solrj.SolrServer} implementation.
+     *
+     * @return the {@link SolrServerConfiguration} holding the configuration parameters
      */
-    HARD,
-    /**
-     * for Solr soft commit
-     */
-    SOFT,
-    /**
-     * if no commits should be sent (relying on auto(soft)commit on the instance itself)
-     */
-    AUTO
+    public SolrServerConfiguration getSolrServerConfiguration();
 }

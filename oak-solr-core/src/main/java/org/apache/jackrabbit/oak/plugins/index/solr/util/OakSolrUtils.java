@@ -14,14 +14,18 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.jackrabbit.oak.plugins.index.solr;
+package org.apache.jackrabbit.oak.plugins.index.solr.util;
 
 import java.io.IOException;
 
 import javax.annotation.Nonnull;
 
+import org.apache.jackrabbit.oak.plugins.index.solr.configuration.CommitPolicy;
 import org.apache.jackrabbit.oak.plugins.index.solr.configuration.DefaultSolrConfigurationProvider;
+import org.apache.jackrabbit.oak.plugins.index.solr.configuration.OakSolrConfigurationProvider;
 import org.apache.jackrabbit.oak.plugins.index.solr.query.SolrQueryIndexProvider;
+import org.apache.jackrabbit.oak.plugins.index.solr.server.DefaultSolrServerProvider;
+import org.apache.jackrabbit.oak.plugins.index.solr.server.SolrServerProvider;
 import org.apache.jackrabbit.oak.spi.query.QueryIndexProvider;
 import org.apache.solr.client.solrj.SolrServer;
 import org.apache.solr.client.solrj.SolrServerException;
@@ -46,8 +50,8 @@ public class OakSolrUtils {
      * @throws SolrServerException
      *             if any error occurs while trying to communicate with the Solr instance
      */
-    public static boolean checkServerAlive(@Nonnull
-    SolrServer solrServer) throws IOException, SolrServerException {
+    public static boolean checkServerAlive(@Nonnull SolrServer solrServer) 
+                    throws IOException, SolrServerException {
         return solrServer.ping().getStatus() == 0;
     }
 
@@ -117,7 +121,7 @@ public class OakSolrUtils {
             }
         }
         if (solrServerProvider == null) {
-            // TODO : implement this
+            solrServerProvider = new DefaultSolrServerProvider();
         }
         return solrServerProvider;
     }

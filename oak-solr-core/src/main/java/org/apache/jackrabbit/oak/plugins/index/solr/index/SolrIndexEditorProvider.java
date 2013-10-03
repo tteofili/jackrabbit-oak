@@ -18,9 +18,9 @@ package org.apache.jackrabbit.oak.plugins.index.solr.index;
 
 import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.plugins.index.IndexEditorProvider;
-import org.apache.jackrabbit.oak.plugins.index.solr.OakSolrConfigurationProvider;
-import org.apache.jackrabbit.oak.plugins.index.solr.SolrServerProvider;
+import org.apache.jackrabbit.oak.plugins.index.solr.configuration.OakSolrConfigurationProvider;
 import org.apache.jackrabbit.oak.plugins.index.solr.query.SolrQueryIndex;
+import org.apache.jackrabbit.oak.plugins.index.solr.server.SolrServerProvider;
 import org.apache.jackrabbit.oak.spi.commit.Editor;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
@@ -72,29 +72,5 @@ public class SolrIndexEditorProvider implements IndexEditorProvider {
     private boolean isConfigurationOk() {
         return solrServerProvider != null && oakSolrConfigurationProvider != null;
     }
-
-//    private void checkConfiguration() {
-//        if (solrServerProvider == null) {
-//            BundleContext bundleContext = FrameworkUtil.getBundle(getClass()).getBundleContext();
-//            ServiceReference serverProviderServiceReference = bundleContext.getServiceReference(SolrServerProvider.class.getName());
-//            if (serverProviderServiceReference != null) {
-//                try {
-//                    solrServerProvider = (SolrServerProvider) bundleContext.getService(serverProviderServiceReference);
-//                } catch (Throwable t) {
-//                }
-//            }
-//        }
-//
-//        if (oakSolrConfigurationProvider == null) {
-//            BundleContext bundleContext = FrameworkUtil.getBundle(getClass()).getBundleContext();
-//            ServiceReference configurationProviderServiceReference = bundleContext.getServiceReference(OakSolrConfigurationProvider.class.getName());
-//            if (configurationProviderServiceReference != null) {
-//                try {
-//                    oakSolrConfigurationProvider = (OakSolrConfigurationProvider) bundleContext.getService(configurationProviderServiceReference);
-//                } catch (Throwable t) {
-//                }
-//            }
-//        }
-//    }
 
 }

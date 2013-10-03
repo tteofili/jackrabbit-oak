@@ -14,24 +14,22 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.jackrabbit.oak.plugins.index.solr.embedded;
-
-import org.apache.jackrabbit.oak.spi.state.NodeState;
+package org.apache.jackrabbit.oak.plugins.index.solr.configuration;
 
 /**
- * A {@link OakSolrNodeStateConfiguration} whose {@link org.apache.jackrabbit.oak.spi.state.NodeState} is given once
- * and never updated so that the configuration is fixed.
+ * Enum for describing Solr commit policy used in a certain instance
  */
-public class FixedNodeStateConfiguration extends OakSolrNodeStateConfiguration {
-
-    private final NodeState configurationNodeState;
-
-    public FixedNodeStateConfiguration(NodeState configurationNodeState) {
-        this.configurationNodeState = configurationNodeState;
-    }
-
-    @Override
-    protected NodeState getConfigurationNodeState() {
-        return configurationNodeState;
-    }
+public enum CommitPolicy {
+    /**
+     * for default Solr commit
+     */
+    HARD,
+    /**
+     * for Solr soft commit
+     */
+    SOFT,
+    /**
+     * if no commits should be sent (relying on auto(soft)commit on the instance itself)
+     */
+    AUTO
 }
