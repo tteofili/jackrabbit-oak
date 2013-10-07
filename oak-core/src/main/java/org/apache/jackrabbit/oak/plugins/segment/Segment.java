@@ -239,26 +239,8 @@ public class Segment {
         }
     }
 
-    MapRecord readMap(final RecordId id) {
-        return store.getRecord(id, new Callable<MapRecord>() {
-            @Override
-            public MapRecord call() {
-                return getSegment(id).readMap(id.getOffset());
-            }
-        });
-    }
-
-    MapRecord readMap(int offset) {
-        int head = readInt(offset);
-        int level = head >>> MapRecord.SIZE_BITS;
-        int size = head & ((1 << MapRecord.SIZE_BITS) - 1);
-        if (size > MapRecord.BUCKETS_PER_LEVEL
-                && level < MapRecord.MAX_NUMBER_OF_LEVELS) {
-            int bitmap = readInt(offset + 4);
-            return new MapBranch(this, offset, size, level, bitmap);
-        } else {
-            return new MapLeaf(this, offset, size, level);
-        }
+    MapRecord readMap(RecordId id) {
+        return new MapRecord(this, id);
     }
 
     Template readTemplate(final RecordId id) {

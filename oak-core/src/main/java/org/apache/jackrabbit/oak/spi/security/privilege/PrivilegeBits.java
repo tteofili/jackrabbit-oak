@@ -232,9 +232,11 @@ public final class PrivilegeBits implements PrivilegeConstants {
         } else {
             if ((privs & ADD_PROPERTIES) == ADD_PROPERTIES) {
                 perm |= Permissions.ADD_PROPERTY;
-            } else if ((privs & ALTER_PROPERTIES) == ALTER_PROPERTIES) {
+            }
+            if ((privs & ALTER_PROPERTIES) == ALTER_PROPERTIES) {
                 perm |= Permissions.MODIFY_PROPERTY;
-            } else if ((privs & REMOVE_PROPERTIES) == REMOVE_PROPERTIES) {
+            }
+            if ((privs & REMOVE_PROPERTIES) == REMOVE_PROPERTIES) {
                 perm |= Permissions.REMOVE_PROPERTY;
             }
         }
@@ -507,10 +509,37 @@ public final class PrivilegeBits implements PrivilegeConstants {
 
         abstract boolean includes(long permissions);
 
+        /**
+         * Checks if all {@code otherBits} is already included in {@code bits}.
+         * <p>
+         * Truth table:
+         * <pre>
+         * | b\o | 0 | 1 |
+         * |  0  | 1 | 0 |
+         * |  1 |  1 | 1 |
+         * </pre>
+         * @param bits the super set of bits
+         * @param otherBits the bits to check against
+         * @return <code>true</code> if all other bits are included in bits.
+         */
         static boolean includes(long bits, long otherBits) {
+            // todo:  different check as 'and' check below. which one is faster?
             return (bits | ~otherBits) == -1;
         }
 
+        /**
+         * Checks if all {@code otherBits} is already included in {@code bits}.
+         * <p>
+         * Truth table:
+         * <pre>
+         * | b\o | 0 | 1 |
+         * |  0  | 1 | 0 |
+         * |  1 |  1 | 1 |
+         * </pre>
+         * @param bits the super set of bits
+         * @param otherBits the bits to check against
+         * @return <code>true</code> if all other bits are included in bits.
+         */
         static boolean includes(long[] bits, long[] otherBits) {
             if (otherBits.length <= bits.length) {
                 // test for each long if is included
