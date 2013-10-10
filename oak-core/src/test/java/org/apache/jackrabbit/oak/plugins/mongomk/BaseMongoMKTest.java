@@ -17,6 +17,7 @@
 package org.apache.jackrabbit.oak.plugins.mongomk;
 
 import org.apache.jackrabbit.mk.api.MicroKernel;
+import org.junit.After;
 import org.junit.Before;
 
 /**
@@ -34,5 +35,13 @@ public class BaseMongoMKTest extends MongoMKTestBase {
     @Override
     protected MicroKernel getMicroKernel() {
         return mk;
+    }
+
+    @After
+    public void disposeMongoMK() {
+        if (mk != null) {
+            mk.dispose();
+            mk = null;
+        }
     }
 }

@@ -20,21 +20,19 @@ import java.io.File;
 import java.util.List;
 import java.util.Set;
 
+import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
 import joptsimple.OptionParser;
 import joptsimple.OptionSet;
 import joptsimple.OptionSpec;
-
 import org.apache.jackrabbit.oak.benchmark.wikipedia.WikipediaImport;
 import org.apache.jackrabbit.oak.fixture.JackrabbitRepositoryFixture;
 import org.apache.jackrabbit.oak.fixture.OakRepositoryFixture;
 import org.apache.jackrabbit.oak.fixture.RepositoryFixture;
 
-import com.google.common.collect.Lists;
-import com.google.common.collect.Sets;
-
 public class BenchmarkRunner {
 
-    private static final long MB = 1024 * 1024;
+    private static final int MB = 1024 * 1024;
 
     public static void main(String[] args) throws Exception {
         OptionParser parser = new OptionParser();
@@ -45,6 +43,13 @@ public class BenchmarkRunner {
                 .withRequiredArg().defaultsTo("localhost");
         OptionSpec<Integer> port = parser.accepts("port", "MongoDB port")
                 .withRequiredArg().ofType(Integer.class).defaultsTo(27017);
+        OptionSpec<String> dbName = parser.accepts("db", "MongoDB database")
+                .withRequiredArg();
+        OptionSpec<Boolean> dropDBAfterTest = parser.accepts("dropDBAfterTest", "Whether to drop the MongoDB database after the test")
+                .withOptionalArg().ofType(Boolean.class).defaultsTo(true);
+        OptionSpec<Boolean> mmap = parser.accepts("mmap", "TarMK memory mapping")
+                .withOptionalArg().ofType(Boolean.class)
+                .defaultsTo("64".equals(System.getProperty("sun.arch.data.model")));
         OptionSpec<Integer> cache = parser.accepts("cache", "cache size (MB)")
                 .withRequiredArg().ofType(Integer.class).defaultsTo(100);
         OptionSpec<File> wikipedia =
@@ -56,7 +61,9 @@ public class BenchmarkRunner {
                 .withRequiredArg().ofType(Integer.class).defaultsTo(1000);
         OptionSpec<Integer> bgReaders = parser.accepts("bgReaders", "Number of background readers")
                 .withRequiredArg().ofType(Integer.class).defaultsTo(20);
-
+        OptionSpec<Boolean> report = parser.accepts("report", "Whether to output intermediate results")
+                .withOptionalArg().ofType(Boolean.class)
+                .defaultsTo(Boolean.FALSE);
 
         OptionSet options = parser.parse(args);
         int cacheSize = cache.value(options);
@@ -67,21 +74,30 @@ public class BenchmarkRunner {
                 OakRepositoryFixture.getDefault(
                         base.value(options), cacheSize * MB),
                 OakRepositoryFixture.getMongo(
-                        host.value(options), port.value(options), cacheSize * MB),
+                        host.value(options), port.value(options),
+                        dbName.value(options), dropDBAfterTest.value(options),
+                        cacheSize * MB),
                 OakRepositoryFixture.getSegment(
                         host.value(options), port.value(options), cacheSize * MB),
-                OakRepositoryFixture.getTar(base.value(options))
+                OakRepositoryFixture.getTar(
+                        base.value(options), 256 * 1024 * 1024, mmap.value(options))
         };
         Benchmark[] allBenchmarks = new Benchmark[] {
             new LoginTest(),
             new LoginLogoutTest(),
             new NamespaceTest(),
+            new NamespaceRegistryTest(),
             new ReadPropertyTest(),
+            GetNodeTest.withAdmin(),
+            GetNodeTest.withAnonymous(),
+            new GetDeepNodeTest(),
             new SetPropertyTest(),
             new SmallFileReadTest(),
             new SmallFileWriteTest(),
             new ConcurrentReadTest(),
             new ConcurrentReadWriteTest(),
+            new ConcurrentWriteReadTest(),
+            new ConcurrentWriteTest(),
             new SimpleSearchTest(),
             new SQL2SearchTest(),
             new DescendantSearchTest(),
@@ -95,9 +111,20 @@ public class BenchmarkRunner {
             new ObservationTest(),
             new XmlImportTest(),
             new FlatTreeWithAceForSamePrincipalTest(),
-            new ReadDeepTreeTest(runAsAdmin.value(options), itemsToRead.value(options)),
-            new ConcurrentReadAccessControlledTreeTest(runAsAdmin.value(options), itemsToRead.value(options), bgReaders.value(options)),
-            new ConcurrentReadDeepTreeTest(runAsAdmin.value(options), itemsToRead.value(options), bgReaders.value(options)),
+            new ReadDeepTreeTest(
+                    runAsAdmin.value(options),
+                    itemsToRead.value(options),
+                    report.value(options)),
+            new ConcurrentReadAccessControlledTreeTest(
+                    runAsAdmin.value(options),
+                    itemsToRead.value(options),
+                    bgReaders.value(options),
+                    report.value(options)),
+            new ConcurrentReadDeepTreeTest(
+                    runAsAdmin.value(options),
+                    itemsToRead.value(options),
+                    bgReaders.value(options),
+                    report.value(options)),
             ReadManyTest.linear("LinearReadEmpty", 1, ReadManyTest.EMPTY),
             ReadManyTest.linear("LinearReadFiles", 1, ReadManyTest.FILES),
             ReadManyTest.linear("LinearReadNodes", 1, ReadManyTest.NODES),

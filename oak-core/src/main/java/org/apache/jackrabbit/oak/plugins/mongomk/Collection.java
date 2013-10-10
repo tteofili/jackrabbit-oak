@@ -20,6 +20,8 @@ import javax.annotation.Nonnull;
 
 /**
  * The collection types.
+ * 
+ * @param <T> the document type
  */
 public abstract class Collection<T extends Document> {
 
@@ -37,8 +39,9 @@ public abstract class Collection<T extends Document> {
     public static final Collection<NodeDocument> NODES =
             new Collection<NodeDocument>("nodes") {
                 @Override
-                public NodeDocument newDocument() {
-                    return new NodeDocument();
+                @Nonnull
+                public NodeDocument newDocument(DocumentStore store) {
+                    return new NodeDocument(store);
                 }
             };
 
@@ -49,7 +52,8 @@ public abstract class Collection<T extends Document> {
     public static final Collection<ClusterNodeInfoDocument> CLUSTER_NODES =
             new Collection<ClusterNodeInfoDocument>("clusterNodes") {
                 @Override
-                public ClusterNodeInfoDocument newDocument() {
+                @Nonnull
+                public ClusterNodeInfoDocument newDocument(DocumentStore store) {
                     return new ClusterNodeInfoDocument();
                 }
             };
@@ -66,8 +70,9 @@ public abstract class Collection<T extends Document> {
     }
 
     /**
+     * @param store the document store.
      * @return a new document for this collection.
      */
     @Nonnull
-    public abstract T newDocument();
+    public abstract T newDocument(DocumentStore store);
 }

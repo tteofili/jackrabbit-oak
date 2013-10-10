@@ -51,18 +51,23 @@ public class Revision {
      * The cluster id (the MongoDB machine id).
      */
     private int clusterId;
-    
+
     /**
-     * The string representation.
+     * Whether this is a branch revision.
      */
-    private String string;
+    private final boolean branch;
     
     public Revision(long timestamp, int counter, int clusterId) {
+        this(timestamp, counter, clusterId, false);
+    }
+    
+    public Revision(long timestamp, int counter, int clusterId, boolean branch) {
         this.timestamp = timestamp;
         this.counter = counter;
         this.clusterId = clusterId;
+        this.branch = branch;
     }
-    
+
     /**
      * Compare the time part of two revisions. If they contain the same time,
      * the counter is compared.
@@ -128,6 +133,11 @@ public class Revision {
     }
     
     public static Revision fromString(String rev) {
+        boolean isBranch = false;
+        if (rev.startsWith("b")) {
+            isBranch = true;
+            rev = rev.substring(1);
+        }
         if (!rev.startsWith("r")) {
             throw new IllegalArgumentException(rev);
         }
@@ -145,22 +155,14 @@ public class Revision {
         int c = Integer.parseInt(t, 16);
         t = rev.substring(idxClusterId + 1);
         int clusterId = Integer.parseInt(t, 16);
-        Revision r = new Revision(timestamp, c, clusterId);
+        Revision r = new Revision(timestamp, c, clusterId, isBranch);
         return r;
     }
     
     @Override
     public String toString() {
-        if (string == null) {
-            string = new StringBuilder("r").
-                append(Long.toHexString(timestamp)).
-                append('-').
-                append(Integer.toHexString(counter)).
-                append('-').
-                append(Integer.toHexString(clusterId)).
-                toString();
-        }
-        return string;
+        return (branch ? "b" : "") + 'r' + Long.toHexString(timestamp) + '-' +
+                Integer.toHexString(counter) + '-' + Integer.toHexString(clusterId);
     }
     
     /**
@@ -175,7 +177,43 @@ public class Revision {
     public int getCounter() {
         return counter;
     }
-    
+
+    /**
+     * @return <code>true</code> if this is a branch revision, otherwise
+     *         <code>false</code>.
+     */
+    public boolean isBranch() {
+        return branch;
+    }
+
+    /**
+     * Returns a revision with the same timestamp, counter and clusterId as this
+     * revision and the branch flag set to <code>true</code>.
+     *
+     * @return branch revision with this timestamp, counter and clusterId.
+     */
+    public Revision asBranchRevision() {
+        if (isBranch()) {
+            return this;
+        } else {
+            return new Revision(timestamp, counter, clusterId, true);
+        }
+    }
+
+    /**
+     * Returns a revision with the same timestamp, counter and clusterId as this
+     * revision and the branch flag set to <code>false</code>.
+     *
+     * @return trunkrevision with this timestamp, counter and clusterId.
+     */
+    public Revision asTrunkRevision() {
+        if (!isBranch()) {
+            return this;
+        } else {
+            return new Revision(timestamp, counter, clusterId);
+        }
+    }
+
     @Override
     public int hashCode() {
         return (int) (timestamp >>> 32) ^ (int) timestamp ^ counter ^ clusterId;
@@ -193,7 +231,19 @@ public class Revision {
         Revision r = (Revision) other;
         return r.timestamp == this.timestamp && 
                 r.counter == this.counter && 
-                r.clusterId == this.clusterId;
+                r.clusterId == this.clusterId &&
+                r.branch == this.branch;
+    }
+
+    public boolean equalsIgnoreBranch(Revision other) {
+        if (this == other) {
+            return true;
+        } else if (other == null) {
+            return false;
+        }
+        return other.timestamp == this.timestamp &&
+                other.counter == this.counter &&
+                other.clusterId == this.clusterId;
     }
 
     public int getClusterId() {

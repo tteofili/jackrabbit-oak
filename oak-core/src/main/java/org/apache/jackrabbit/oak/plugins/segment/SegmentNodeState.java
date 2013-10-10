@@ -18,37 +18,44 @@ package org.apache.jackrabbit.oak.plugins.segment;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
+import static com.google.common.collect.Lists.newArrayListWithCapacity;
+import static org.apache.jackrabbit.JcrConstants.JCR_MIXINTYPES;
+import static org.apache.jackrabbit.JcrConstants.JCR_PRIMARYTYPE;
 import static org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState.EMPTY_NODE;
+import static org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState.MISSING_NODE;
+
+import java.util.Collections;
+import java.util.List;
 
 import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
 
 import org.apache.jackrabbit.oak.api.PropertyState;
-import org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState;
-import org.apache.jackrabbit.oak.plugins.memory.MemoryNodeBuilder;
+import org.apache.jackrabbit.oak.plugins.memory.MemoryChildNodeEntry;
 import org.apache.jackrabbit.oak.spi.state.AbstractNodeState;
 import org.apache.jackrabbit.oak.spi.state.ChildNodeEntry;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.apache.jackrabbit.oak.spi.state.NodeStateDiff;
 
-public class SegmentNodeState extends AbstractNodeState {
+import com.google.common.base.Objects;
 
-    private final SegmentStore store;
+public class SegmentNodeState extends Record implements NodeState {
 
-    private final RecordId recordId;
+    static boolean fastEquals(NodeState a, NodeState b) {
+        return a instanceof SegmentNodeState
+                && b instanceof SegmentNodeState
+                && Objects.equal(
+                        ((SegmentNodeState) a).getRecordId(),
+                        ((SegmentNodeState) b).getRecordId());
+    }
 
     private RecordId templateId = null;
 
     private Template template = null;
 
-    public SegmentNodeState(SegmentStore store, RecordId id) {
-        this.store = checkNotNull(store);
-        this.recordId = checkNotNull(id);
-    }
-
-    public RecordId getRecordId() {
-        return recordId;
+    public SegmentNodeState(Segment segment, RecordId id) {
+        super(segment, id);
     }
 
     RecordId getTemplateId() {
@@ -58,15 +65,16 @@ public class SegmentNodeState extends AbstractNodeState {
 
     synchronized Template getTemplate() {
         if (template == null) {
-            Segment segment = store.readSegment(recordId.getSegmentId());
-            templateId = segment.readRecordId(recordId.getOffset());
+            Segment segment = getSegment();
+            templateId = segment.readRecordId(getOffset(0));
             template = segment.readTemplate(templateId);
         }
         return template;
     }
 
     MapRecord getChildNodeMap() {
-        return getTemplate().getChildNodeMap(store, recordId);
+        Segment segment = getSegment();
+        return segment.readMap(segment.readRecordId(getOffset(0, 1)));
     }
 
     @Override
@@ -76,56 +84,192 @@ public class SegmentNodeState extends AbstractNodeState {
 
     @Override
     public long getPropertyCount() {
-        return getTemplate().getPropertyCount();
+        Template template = getTemplate();
+        long count = template.getPropertyTemplates().length;
+        if (template.getPrimaryType() != null) {
+            count++;
+        }
+        if (template.getMixinTypes() != null) {
+            count++;
+        }
+        return count;
     }
 
     @Override
     public boolean hasProperty(String name) {
         checkNotNull(name);
-        return getTemplate().hasProperty(name);
+        Template template = getTemplate();
+        if (JCR_PRIMARYTYPE.equals(name)) {
+            return template.getPrimaryType() != null;
+        } else if (JCR_MIXINTYPES.equals(name)) {
+            return template.getMixinTypes() != null;
+        } else {
+            return template.getPropertyTemplate(name) != null;
+        }
     }
 
     @Override @CheckForNull
     public PropertyState getProperty(String name) {
         checkNotNull(name);
-        return getTemplate().getProperty(name, store, recordId);
+        Template template = getTemplate();
+        if (JCR_PRIMARYTYPE.equals(name)) {
+            return template.getPrimaryType();
+        } else if (JCR_MIXINTYPES.equals(name)) {
+            return template.getMixinTypes();
+        } else {
+            PropertyTemplate propertyTemplate =
+                    template.getPropertyTemplate(name);
+            if (propertyTemplate != null) {
+                Segment segment = getSegment();
+                int ids = 1 + propertyTemplate.getIndex();
+                if (template.getChildName() != Template.ZERO_CHILD_NODES) {
+                    ids++;
+                }
+                return new SegmentPropertyState(
+                        segment, segment.readRecordId(getOffset(0, ids)),
+                        propertyTemplate);
+            } else {
+                return null;
+            }
+        }
     }
 
     @Override @Nonnull
     public Iterable<PropertyState> getProperties() {
-        return getTemplate().getProperties(store, recordId);
+        Template template = getTemplate();
+        PropertyTemplate[] propertyTemplates = template.getPropertyTemplates();
+        List<PropertyState> list =
+                newArrayListWithCapacity(propertyTemplates.length + 2);
+
+        PropertyState primaryType = template.getPrimaryType();
+        if (primaryType != null) {
+            list.add(primaryType);
+        }
+
+        PropertyState mixinTypes = template.getMixinTypes();
+        if (mixinTypes != null) {
+            list.add(mixinTypes);
+        }
+
+        Segment segment = getSegment();
+        int ids = 1;
+        if (template.getChildName() != Template.ZERO_CHILD_NODES) {
+            ids++;
+        }
+        for (int i = 0; i < propertyTemplates.length; i++) {
+            RecordId propertyId = segment.readRecordId(getOffset(0, ids++));
+            list.add(new SegmentPropertyState(
+                    segment, propertyId, propertyTemplates[i]));
+        }
+
+        return list;
+    }
+
+    @Override
+    public boolean getBoolean(String name) {
+        return AbstractNodeState.getBoolean(this, name);
+    }
+
+    @Override
+    public long getLong(String name) {
+        return AbstractNodeState.getLong(this, name);
+    }
+
+    @Override
+    public String getString(String name) {
+        return AbstractNodeState.getString(this, name);
+    }
+
+    @Override
+    public String getName(String name) {
+        return AbstractNodeState.getName(this, name);
+    }
+
+    @Override
+    public Iterable<String> getNames(String name) {
+        return AbstractNodeState.getNames(this, name);
     }
 
     @Override
     public long getChildNodeCount(long max) {
-        return getTemplate().getChildNodeCount(store, recordId);
+        String childName = getTemplate().getChildName();
+        if (childName == Template.ZERO_CHILD_NODES) {
+            return 0;
+        } else if (childName == Template.MANY_CHILD_NODES) {
+            return getChildNodeMap().size();
+        } else {
+            return 1;
+        }
     }
 
     @Override
     public boolean hasChildNode(String name) {
         checkArgument(!checkNotNull(name).isEmpty());
-        return getTemplate().hasChildNode(name, store, recordId);
+        String childName = getTemplate().getChildName();
+        if (childName == Template.ZERO_CHILD_NODES) {
+            return false;
+        } else if (childName == Template.MANY_CHILD_NODES) {
+            return getChildNodeMap().getEntry(name) != null;
+        } else {
+            return childName.equals(name);
+        }
     }
 
-    @Override @CheckForNull
+    @Override @Nonnull
     public NodeState getChildNode(String name) {
         // checkArgument(!checkNotNull(name).isEmpty()); // TODO
-        return getTemplate().getChildNode(name, store, recordId);
+        String childName = getTemplate().getChildName();
+        if (childName == Template.ZERO_CHILD_NODES) {
+            return MISSING_NODE;
+        } else if (childName == Template.MANY_CHILD_NODES) {
+            MapEntry child = getChildNodeMap().getEntry(name);
+            if (child != null) {
+                return child.getNodeState();
+            } else {
+                return MISSING_NODE;
+            }
+        } else {
+            if (childName.equals(name)) {
+                Segment segment = getSegment();
+                RecordId childNodeId = segment.readRecordId(getOffset(0, 1));
+                return new SegmentNodeState(segment, childNodeId);
+            } else {
+                return MISSING_NODE;
+            }
+        }
     }
 
-    @Override
+    @Override @Nonnull
     public Iterable<String> getChildNodeNames() {
-        return getTemplate().getChildNodeNames(store, recordId);
+        String childName = getTemplate().getChildName();
+        if (childName == Template.ZERO_CHILD_NODES) {
+            return Collections.emptyList();
+        } else if (childName == Template.MANY_CHILD_NODES) {
+            return getChildNodeMap().getKeys();
+        } else {
+            return Collections.singletonList(childName);
+        }
     }
 
     @Override @Nonnull
     public Iterable<? extends ChildNodeEntry> getChildNodeEntries() {
-        return getTemplate().getChildNodeEntries(store, recordId);
+        String childName = getTemplate().getChildName();
+        if (childName == Template.ZERO_CHILD_NODES) {
+            return Collections.emptyList();
+        } else if (childName == Template.MANY_CHILD_NODES) {
+            return getChildNodeMap().getEntries();
+        } else {
+            Segment segment = getSegment();
+            RecordId childNodeId = segment.readRecordId(getOffset(0, 1));
+            return Collections.singletonList(new MemoryChildNodeEntry(
+                    childName, new SegmentNodeState(segment, childNodeId)));
+        }
     }
 
     @Override @Nonnull
     public NodeBuilder builder() {
-        return new MemoryNodeBuilder(this);
+        // TODO: avoid the Segment.store reference
+        return new SegmentRootBuilder(this, getSegment().store.getWriter());
     }
 
     @Override
@@ -133,15 +277,18 @@ public class SegmentNodeState extends AbstractNodeState {
         if (base == this) {
              return true; // no changes
         } else if (base == EMPTY_NODE || !base.exists()) { // special case
-            return EmptyNodeState.compareAgainstEmptyState(this, diff);
+            return getTemplate().compareAgainstEmptyState(
+                    getSegment(), getRecordId(), diff);
         } else if (base instanceof SegmentNodeState) {
             SegmentNodeState that = (SegmentNodeState) base;
-            return recordId.equals(that.recordId)
+            return getRecordId().equals(that.getRecordId())
                 || getTemplate().compareAgainstBaseState(
-                        store, recordId, that.getTemplate(), that.recordId,
+                        getSegment(), getRecordId(),
+                        that.getTemplate(), that.getRecordId(),
                         diff);
         } else {
-            return super.compareAgainstBaseState(base, diff); // fallback
+            // fallback
+            return AbstractNodeState.compareAgainstBaseState(this, base, diff);
         }
     }
 
@@ -151,16 +298,25 @@ public class SegmentNodeState extends AbstractNodeState {
             return true;
         } else if (object instanceof SegmentNodeState) {
             SegmentNodeState that = (SegmentNodeState) object;
-            if (recordId.equals(that.recordId)) {
+            if (getRecordId().equals(that.getRecordId())) {
                 return true;
             } else {
                 Template template = getTemplate();
                 return template.equals(that.getTemplate())
-                        && template.compare(store, recordId, that.store, that.recordId);
+                        && template.compare(
+                                getSegment(), getRecordId(),
+                                that.getSegment(), that.getRecordId());
             }
+        } else if (object instanceof NodeState){
+            return AbstractNodeState.equals(this, (NodeState) object); // TODO
         } else {
-            return super.equals(object);
+            return false;
         }
+    }
+
+    @Override
+    public String toString() {
+        return AbstractNodeState.toString(this);
     }
 
 }

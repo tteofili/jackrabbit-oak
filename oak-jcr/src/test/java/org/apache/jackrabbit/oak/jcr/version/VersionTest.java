@@ -17,11 +17,16 @@
 package org.apache.jackrabbit.oak.jcr.version;
 
 import javax.jcr.Node;
+import javax.jcr.NodeIterator;
 import javax.jcr.RepositoryException;
+import javax.jcr.query.Query;
+import javax.jcr.query.QueryManager;
+import javax.jcr.query.RowIterator;
 import javax.jcr.version.Version;
 import javax.jcr.version.VersionManager;
 
 import org.apache.jackrabbit.test.AbstractJCRTest;
+import org.apache.jackrabbit.test.NotExecutableException;
 
 /**
  * <code>VersionTest</code> performs tests on JCR Version nodes.
@@ -47,5 +52,36 @@ public class VersionTest extends AbstractJCRTest {
         String uuid = vMgr.getBaseVersion(n.getPath()).getUUID();
         assertTrue("Session.getNodeByUUID() did not return Version object for a nt:version node.",
                 superuser.getNodeByUUID(uuid) instanceof Version);
+    }
+
+    public void testVersionFromQuery()
+            throws RepositoryException, NotExecutableException {
+        Node n = testRootNode.addNode(nodeName1, testNodeType);
+        n.addMixin(mixVersionable);
+        superuser.save();
+        VersionManager vMgr = superuser.getWorkspace().getVersionManager();
+        vMgr.checkpoint(n.getPath());
+        QueryManager qm = superuser.getWorkspace().getQueryManager();
+        Version v = vMgr.getBaseVersion(n.getPath());
+        Query q = qm.createQuery("//element(*, nt:version)[@jcr:uuid = '" +
+                v.getIdentifier() + "']", Query.XPATH);
+        NodeIterator nodes = q.execute().getNodes();
+        assertTrue(nodes.hasNext());
+        assertTrue(nodes.nextNode() instanceof Version);
+        RowIterator rows = q.execute().getRows();
+        assertTrue(rows.hasNext());
+        assertTrue(rows.nextRow().getNode() instanceof Version);
+    }
+
+    public void testFrozenNode() throws RepositoryException {
+        Node n = testRootNode.addNode(nodeName1, testNodeType);
+        n.addMixin(mixVersionable);
+        Node child = n.addNode(nodeName2, ntUnstructured);
+        superuser.save();
+        VersionManager vMgr = superuser.getWorkspace().getVersionManager();
+        vMgr.checkpoint(n.getPath());
+        Version v = vMgr.getBaseVersion(n.getPath());
+        Node frozenChild = v.getFrozenNode().getNode(child.getName());
+        assertEquals(ntFrozenNode, frozenChild.getPrimaryNodeType().getName());
     }
 }

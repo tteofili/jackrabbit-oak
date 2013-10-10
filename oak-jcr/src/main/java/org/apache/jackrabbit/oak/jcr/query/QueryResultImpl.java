@@ -18,6 +18,7 @@
  */
 package org.apache.jackrabbit.oak.jcr.query;
 
+import java.util.Arrays;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 
@@ -34,17 +35,21 @@ import org.apache.jackrabbit.oak.api.PropertyValue;
 import org.apache.jackrabbit.oak.api.Result;
 import org.apache.jackrabbit.oak.api.ResultRow;
 import org.apache.jackrabbit.oak.commons.PathUtils;
-import org.apache.jackrabbit.oak.jcr.NodeImpl;
-import org.apache.jackrabbit.oak.jcr.SessionContext;
+import org.apache.jackrabbit.oak.jcr.session.NodeImpl;
+import org.apache.jackrabbit.oak.jcr.session.SessionContext;
 import org.apache.jackrabbit.oak.jcr.delegate.NodeDelegate;
 import org.apache.jackrabbit.oak.jcr.delegate.SessionDelegate;
 import org.apache.jackrabbit.oak.plugins.value.ValueFactoryImpl;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * The implementation of the corresponding JCR interface.
  */
 public class QueryResultImpl implements QueryResult {
-    
+
+    static final Logger LOG = LoggerFactory.getLogger(QueryResultImpl.class);
+
     /**
      * The minimum number of rows / nodes to pre-fetch.
      */ 
@@ -103,9 +108,16 @@ public class QueryResultImpl implements QueryResult {
         Iterator<RowImpl> rowIterator = new Iterator<RowImpl>() {
 
             private final Iterator<? extends ResultRow> it = result.getRows().iterator();
+            private final String pathSelector;
             private RowImpl current;
 
             {
+                String[] columnSelectorNames = result.getColumnSelectorNames();
+                if (columnSelectorNames.length == 1) {
+                    pathSelector = columnSelectorNames[0];
+                } else {
+                    pathSelector = null;
+                }
                 fetch();
             }
 
@@ -113,12 +125,17 @@ public class QueryResultImpl implements QueryResult {
                 current = null;
                 while (it.hasNext()) {
                     ResultRow r = it.next();
+                    boolean include = true;
                     for (String s : getSelectorNames()) {
                         String path = r.getPath(s);
-                        if (includeRow(path)) {
-                            current = new RowImpl(QueryResultImpl.this, r);
-                            return;
+                        if (!includeRow(path)) {
+                            include = false;
+                            break;
                         }
+                    }
+                    if (include) {
+                        current = new RowImpl(QueryResultImpl.this, r, pathSelector);
+                        return;
                     }
                 }
             }
@@ -157,12 +174,12 @@ public class QueryResultImpl implements QueryResult {
     }
 
     @CheckForNull
-    NodeImpl<NodeDelegate> getNode(String path) {
+    NodeImpl<? extends NodeDelegate> getNode(String path) throws RepositoryException {
         if (path == null) {
             return null;
         }
         NodeDelegate d = sessionDelegate.getNode(path);
-        return d == null ? null : new NodeImpl<NodeDelegate>(d, sessionContext);
+        return d == null ? null : NodeImpl.createNode(d, sessionContext);
     }
 
     String getLocalPath(String path) {
@@ -174,20 +191,20 @@ public class QueryResultImpl implements QueryResult {
 
     @Override
     public NodeIterator getNodes() throws RepositoryException {
-        String[] selectorNames = getSelectorNames();
-        if (getSelectorNames().length > 1) {
-            // TODO verify using the last selector is allowed according to the specification,
-            // otherwise just allow it when using XPath queries, or make XPath queries
-            // look like they only contain one selector
-            // throw new RepositoryException("Query contains more than one selector: " +
-            //        Arrays.toString(getSelectorNames()));
+        String[] columnSelectorNames = result.getColumnSelectorNames();
+        if (columnSelectorNames.length != 1) {
+            throw new RepositoryException("Query contains more than one selector: " +
+                    Arrays.toString(columnSelectorNames));
         }
-        // use the last selector
-        final String selectorName = selectorNames[selectorNames.length - 1];
-        Iterator<NodeImpl<NodeDelegate>> nodeIterator = new Iterator<NodeImpl<NodeDelegate>>() {
+        final String selectorName = columnSelectorNames[0];
+        if (selectorName == null) {
+            throw new RepositoryException("Query does not contain a selector: " +
+                    Arrays.toString(columnSelectorNames));
+        }
+        Iterator<NodeImpl<? extends NodeDelegate>> nodeIterator = new Iterator<NodeImpl<? extends NodeDelegate>>() {
 
             private final Iterator<? extends ResultRow> it = result.getRows().iterator();
-            private NodeImpl<NodeDelegate> current;
+            private NodeImpl<? extends NodeDelegate> current;
 
             {
                 fetch();
@@ -199,8 +216,12 @@ public class QueryResultImpl implements QueryResult {
                     ResultRow r = it.next();
                     String path = r.getPath(selectorName);
                     if (includeRow(path)) {
-                        current = getNode(getLocalPath(path));
-                        break;
+                        try {
+                            current = getNode(getLocalPath(path));
+                            break;
+                        } catch (RepositoryException e) {
+                            LOG.warn("Unable to fetch result node for path " + path, e);
+                        }
                     }
                 }
             }
@@ -211,11 +232,11 @@ public class QueryResultImpl implements QueryResult {
             }
 
             @Override
-            public NodeImpl<NodeDelegate> next() {
+            public NodeImpl<? extends NodeDelegate> next() {
                 if (current == null) {
                     throw new NoSuchElementException();
                 }
-                NodeImpl<NodeDelegate> n = current;
+                NodeImpl<? extends NodeDelegate> n = current;
                 fetch();
                 return n;
             }
@@ -226,7 +247,7 @@ public class QueryResultImpl implements QueryResult {
             }
 
         };
-        final PrefetchIterator<NodeImpl<NodeDelegate>> prefIt = new  PrefetchIterator<NodeImpl<NodeDelegate>>(
+        final PrefetchIterator<NodeImpl<? extends NodeDelegate>> prefIt = new  PrefetchIterator<NodeImpl<? extends NodeDelegate>>(
                 nodeIterator, 
                 PREFETCH_MIN, PREFETCH_TIMEOUT, PREFETCH_MAX, 
                 result.getSize());

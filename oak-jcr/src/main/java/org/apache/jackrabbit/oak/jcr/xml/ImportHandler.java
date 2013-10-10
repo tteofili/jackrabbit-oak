@@ -24,7 +24,7 @@ import javax.jcr.ValueFactory;
 import org.apache.jackrabbit.commons.NamespaceHelper;
 import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.api.Root;
-import org.apache.jackrabbit.oak.jcr.SessionContext;
+import org.apache.jackrabbit.oak.jcr.session.SessionContext;
 import org.apache.jackrabbit.oak.jcr.delegate.SessionDelegate;
 import org.apache.jackrabbit.oak.plugins.name.NamespaceConstants;
 import org.apache.jackrabbit.oak.spi.xml.Importer;
@@ -57,6 +57,8 @@ public class ImportHandler extends DefaultHandler {
     private static final Logger log = LoggerFactory.getLogger(ImportHandler.class);
 
     private final Root root;
+    private final Root initialRoot;
+
     private final SessionContext sessionContext;
     private final Importer importer;
     private final NamespaceHelper helper;
@@ -72,9 +74,10 @@ public class ImportHandler extends DefaultHandler {
         this.isWorkspaceImport = isWorkspaceImport;
 
         SessionDelegate sd = sessionContext.getSessionDelegate();
+        initialRoot = sd.getContentSession().getLatestRoot();
         root = (isWorkspaceImport) ? sd.getContentSession().getLatestRoot() : sd.getRoot();
         helper = new NamespaceHelper(sessionContext.getSession());
-        importer = new ImporterImpl(absPath, sessionContext, root, uuidBehavior, isWorkspaceImport);
+        importer = new ImporterImpl(absPath, sessionContext, root, initialRoot, uuidBehavior, isWorkspaceImport);
     }
 
     //---------------------------------------------------------< ErrorHandler >

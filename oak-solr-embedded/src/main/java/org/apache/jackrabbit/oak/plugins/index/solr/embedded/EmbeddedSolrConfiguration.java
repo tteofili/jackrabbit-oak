@@ -17,8 +17,9 @@
 package org.apache.jackrabbit.oak.plugins.index.solr.embedded;
 
 import org.apache.jackrabbit.oak.api.Type;
-import org.apache.jackrabbit.oak.plugins.index.solr.CommitPolicy;
-import org.apache.jackrabbit.oak.plugins.index.solr.OakSolrConfiguration;
+import org.apache.jackrabbit.oak.plugins.index.solr.configuration.CommitPolicy;
+import org.apache.jackrabbit.oak.plugins.index.solr.configuration.OakSolrConfiguration;
+import org.apache.jackrabbit.oak.plugins.index.solr.configuration.SolrServerConfigurationDefaults;
 import org.apache.jackrabbit.oak.spi.query.Filter;
 
 /**
@@ -60,6 +61,10 @@ public class EmbeddedSolrConfiguration implements OakSolrConfiguration {
                 fieldName = SolrServerConfigurationDefaults.ANC_FIELD_NAME;
                 break;
             }
+            case NO_RESTRICTION:
+                break;
+            default:
+                break;
 
         }
         return fieldName;

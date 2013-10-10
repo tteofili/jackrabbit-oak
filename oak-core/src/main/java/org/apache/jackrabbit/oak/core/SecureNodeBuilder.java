@@ -35,13 +35,15 @@ import com.google.common.base.Predicate;
 import org.apache.jackrabbit.oak.api.Blob;
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Type;
+import org.apache.jackrabbit.oak.kernel.FastCopyMove;
+import org.apache.jackrabbit.oak.kernel.KernelNodeBuilder;
 import org.apache.jackrabbit.oak.spi.security.Context;
 import org.apache.jackrabbit.oak.spi.security.authorization.permission.PermissionProvider;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.apache.jackrabbit.oak.util.LazyValue;
 
-class SecureNodeBuilder implements NodeBuilder {
+class SecureNodeBuilder implements NodeBuilder, FastCopyMove {
 
     /**
      * Root builder, or {@code this} for the root builder itself.
@@ -138,9 +140,7 @@ class SecureNodeBuilder implements NodeBuilder {
         return builder.isModified();
     }
 
-    @Override
-    public void reset(@Nonnull NodeState state) throws IllegalStateException {
-        builder.reset(state); // NOTE: can be dangerous with SecureNodeState
+    public void baseChanged() {
         baseRevision++;
         securityContext = null;
     }
@@ -148,6 +148,17 @@ class SecureNodeBuilder implements NodeBuilder {
     @Override
     public boolean remove() {
         return exists() && builder.remove();
+    }
+
+
+    @Override
+    public boolean moveTo(NodeBuilder newParent, String newName) {
+        return exists() && builder.moveTo(newParent, newName);
+    }
+
+    @Override
+    public boolean copyTo(NodeBuilder newParent, String newName) {
+        return exists() && builder.copyTo(newParent, newName);
     }
 
     @Override @CheckForNull
@@ -272,13 +283,13 @@ class SecureNodeBuilder implements NodeBuilder {
 
     @Override @Nonnull
     public NodeBuilder setChildNode(@Nonnull String name) {
-        NodeBuilder child = builder.setChildNode(name);
+        builder.setChildNode(name);
         return new SecureNodeBuilder(this, name);
     }
 
     @Override @Nonnull
     public NodeBuilder setChildNode(String name, @Nonnull NodeState nodeState) {
-        NodeBuilder child = builder.setChildNode(name, nodeState);
+        builder.setChildNode(name, nodeState);
         return new SecureNodeBuilder(this, name);
     }
 
@@ -307,7 +318,31 @@ class SecureNodeBuilder implements NodeBuilder {
     }
 
     /**
-     * Security context of this subtree. This accessor memoizes the security context
+     * This implementation simply delegates back to {@code moveTo} method
+     * of {@code source} passing the underlying builder for {@code newParent}.
+     * @param source  source to move to this builder
+     * @param newName  the new name
+     * @return
+     */
+    @Override
+    public boolean moveFrom(KernelNodeBuilder source, String newName) {
+        return source.moveTo(builder, newName);
+    }
+
+    /**
+     * This implementation simply delegates back to {@code copyTo} method
+     * of {@code source} passing the underlying builder for {@code newParent}.
+     * @param source  source to move to this builder
+     * @param newName  the new name
+     * @return
+     */
+    @Override
+    public boolean copyFrom(KernelNodeBuilder source, String newName) {
+        return source.copyTo(builder, newName);
+    }
+
+    /**
+     * Security context of this subtree. This accessor memoises the security context
      * as long as {@link #reset(NodeState)} has not been called.
      */
     private SecurityContext getSecurityContext() {

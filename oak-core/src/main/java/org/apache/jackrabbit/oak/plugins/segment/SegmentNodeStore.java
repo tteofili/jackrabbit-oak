@@ -18,6 +18,8 @@ package org.apache.jackrabbit.oak.plugins.segment;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
+import static java.util.concurrent.TimeUnit.SECONDS;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -26,13 +28,17 @@ import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
 
 import org.apache.jackrabbit.oak.api.Blob;
+import org.apache.jackrabbit.oak.api.CommitFailedException;
+import org.apache.jackrabbit.oak.spi.commit.CommitHook;
 import org.apache.jackrabbit.oak.spi.commit.EmptyObserver;
 import org.apache.jackrabbit.oak.spi.commit.Observer;
-import org.apache.jackrabbit.oak.spi.state.AbstractNodeStore;
+import org.apache.jackrabbit.oak.spi.commit.PostCommitHook;
+import org.apache.jackrabbit.oak.spi.state.ConflictAnnotatingRebaseDiff;
+import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
-import org.apache.jackrabbit.oak.spi.state.NodeStoreBranch;
+import org.apache.jackrabbit.oak.spi.state.NodeStore;
 
-public class SegmentNodeStore extends AbstractNodeStore {
+public class SegmentNodeStore implements NodeStore {
 
     static final String ROOT = "root";
 
@@ -40,27 +46,32 @@ public class SegmentNodeStore extends AbstractNodeStore {
 
     private final Journal journal;
 
-    private final SegmentReader reader;
-
     private final Observer observer;
 
     private SegmentNodeState head;
 
+    private long maximumBackoff = MILLISECONDS.convert(10, SECONDS);
+
     public SegmentNodeStore(SegmentStore store, String journal) {
         this.store = store;
         this.journal = store.getJournal(journal);
-        this.reader = new SegmentReader(store);
         this.observer = EmptyObserver.INSTANCE;
-        this.head = new SegmentNodeState(store, this.journal.getHead());
+        this.head = new SegmentNodeState(
+                store.getWriter().getDummySegment(), this.journal.getHead());
     }
 
     public SegmentNodeStore(SegmentStore store) {
         this(store, "root");
     }
 
+    void setMaximumBackoff(long max) {
+        this.maximumBackoff = max;
+    }
+
     synchronized SegmentNodeState getHead() {
         NodeState before = head.getChildNode(ROOT);
-        head = new SegmentNodeState(store, journal.getHead());
+        head = new SegmentNodeState(
+                store.getWriter().getDummySegment(), journal.getHead());
         NodeState after = head.getChildNode(ROOT);
         observer.contentChanged(before, after);
         return head;
@@ -75,18 +86,50 @@ public class SegmentNodeStore extends AbstractNodeStore {
         return getHead().getChildNode(ROOT);
     }
 
+    @Override
+    public synchronized NodeState merge(
+            @Nonnull NodeBuilder builder,
+            @Nonnull CommitHook commitHook, PostCommitHook committed)
+            throws CommitFailedException {
+        checkArgument(builder instanceof SegmentNodeBuilder);
+        checkNotNull(commitHook);
+        SegmentNodeState head = getHead();
+        rebase(builder, head.getChildNode(ROOT)); // TODO: can we avoid this?
+        SegmentNodeStoreBranch branch = new SegmentNodeStoreBranch(
+                this, store.getWriter(), head, maximumBackoff);
+        branch.setRoot(builder.getNodeState());
+        NodeState merged = branch.merge(commitHook, committed);
+        ((SegmentNodeBuilder) builder).reset(merged);
+        return merged;
+    }
+
     @Override @Nonnull
-    public SegmentNodeStoreBranch branch() {
-        return new SegmentNodeStoreBranch(
-                this, new SegmentWriter(store), getHead());
+    public NodeState rebase(@Nonnull NodeBuilder builder) {
+        return rebase(builder, getRoot());
+    }
+
+    private NodeState rebase(@Nonnull NodeBuilder builder, NodeState newBase) {
+        checkArgument(builder instanceof SegmentNodeBuilder);
+        NodeState oldBase = builder.getBaseState();
+        if (!SegmentNodeState.fastEquals(oldBase, newBase)) {
+            NodeState head = builder.getNodeState();
+            ((SegmentNodeBuilder) builder).reset(newBase);
+            head.compareAgainstBaseState(oldBase, new ConflictAnnotatingRebaseDiff(builder));
+        }
+        return builder.getNodeState();
+    }
+
+    @Override @Nonnull
+    public NodeState reset(@Nonnull NodeBuilder builder) {
+        checkArgument(builder instanceof SegmentNodeBuilder);
+        NodeState state = getRoot();
+        ((SegmentNodeBuilder) builder).reset(state);
+        return state;
     }
 
     @Override
     public Blob createBlob(InputStream stream) throws IOException {
-        SegmentWriter writer = new SegmentWriter(store);
-        RecordId recordId = writer.writeStream(stream);
-        writer.flush();
-        return new SegmentBlob(reader, recordId);
+        return store.getWriter().writeStream(stream);
     }
 
     @Override @Nonnull
@@ -100,7 +143,9 @@ public class SegmentNodeStore extends AbstractNodeStore {
     public synchronized NodeState retrieve(@Nonnull String checkpoint) {
         // TODO: Verify validity of the checkpoint
         RecordId id = RecordId.fromString(checkNotNull(checkpoint));
-        return new SegmentNodeState(store, id).getChildNode(ROOT);
+        SegmentNodeState root =
+                new SegmentNodeState(store.getWriter().getDummySegment(), id);
+        return root.getChildNode(ROOT);
     }
 
 }

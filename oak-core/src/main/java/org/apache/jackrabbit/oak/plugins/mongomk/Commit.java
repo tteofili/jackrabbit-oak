@@ -20,7 +20,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 import javax.annotation.CheckForNull;
@@ -35,29 +34,15 @@ import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import static org.apache.jackrabbit.oak.plugins.mongomk.NodeDocument.SPLIT_CANDIDATE_THRESHOLD;
+
 /**
  * A higher level object representing a commit.
  */
 public class Commit {
 
-    /**
-     * Whether to purge old revisions if a node gets too large. If false, old
-     * revisions are stored in a separate document. If true, old revisions are
-     * removed (purged).
-     * TODO: enable once document split and garbage collection implementation is complete.
-     */
-    static final boolean PURGE_OLD_REVISIONS = false;
-    
     private static final Logger LOG = LoggerFactory.getLogger(Commit.class);
 
-    /**
-     * The maximum size of a document. If it is larger, it is split.
-     * TODO: check which value is the best one
-     *       Document splitting is currently disabled until the implementation
-     *       is complete.
-     */
-    private static final int MAX_DOCUMENT_SIZE = Integer.MAX_VALUE;
-   
     private final MongoMK mk;
     private final Revision baseRevision;
     private final Revision revision;
@@ -135,7 +120,7 @@ public class Commit {
     void updateProperty(String path, String propertyName, String value) {
         UpdateOp op = getUpdateOperationForNode(path);
         String key = Utils.escapePropertyName(propertyName);
-        op.setMapEntry(key, revision.toString(), value);
+        op.setMapEntry(key, revision, value);
     }
 
     void addNode(Node n) {
@@ -220,8 +205,8 @@ public class Commit {
                 // branch commits only become visible on merge
                 NodeDocument.setLastRev(op, revision);
             }
-            if (op.isNew) {
-                op.setMapEntry(NodeDocument.DELETED, revision.toString(), "false");
+            if (op.isNew()) {
+                NodeDocument.setDeleted(op, revision, false);
             }
             if (op == commitRoot) {
                 // apply at the end
@@ -234,7 +219,7 @@ public class Commit {
                 }
             }
         }
-        if (changedNodes.size() == 0 && commitRoot.isNew) {
+        if (changedNodes.size() == 0 && commitRoot.isNew()) {
             // no updates and root of commit is also new. that is,
             // it is the root of a subtree added in a commit.
             // so we try to add the root like all other nodes
@@ -259,8 +244,11 @@ public class Commit {
                 }
             }
             for (UpdateOp op : changedNodes) {
-                // set commit root on changed nodes
-                NodeDocument.setCommitRoot(op, revision, commitRootDepth);
+                // set commit root on changed nodes unless it's the
+                // commit root itself
+                if (op != commitRoot) {
+                    NodeDocument.setCommitRoot(op, revision, commitRootDepth);
+                }
                 opLog.add(op);
                 createOrUpdateNode(store, op);
             }
@@ -268,7 +256,7 @@ public class Commit {
             // with added nodes (the commit root might be written twice,
             // first to check if there was a conflict, and only then to commit
             // the revision, with the revision property set)
-            if (changedNodes.size() > 0 || !commitRoot.isNew) {
+            if (changedNodes.size() > 0 || !commitRoot.isNew()) {
                 NodeDocument.setRevision(commitRoot, revision, commitValue);
                 opLog.add(commitRoot);
                 createOrUpdateNode(store, commitRoot);
@@ -289,7 +277,7 @@ public class Commit {
             store.createOrUpdate(Collection.NODES, reverse);
         }
         for (UpdateOp op : newDocuments) {
-            store.remove(Collection.NODES, op.key);
+            store.remove(Collection.NODES, op.id);
         }
     }
 
@@ -306,7 +294,7 @@ public class Commit {
             final AtomicReference<List<Revision>> collisions = new AtomicReference<List<Revision>>();
             Revision newestRev = null;
             if (doc != null) {
-                newestRev = doc.getNewestRevision(mk, store, revision,
+                newestRev = doc.getNewestRevision(mk, revision,
                         new CollisionHandler() {
                             @Override
                             void concurrentModification(Revision other) {
@@ -319,19 +307,19 @@ public class Commit {
             }
             String conflictMessage = null;
             if (newestRev == null) {
-                if (op.isDelete || !op.isNew) {
+                if (op.isDelete() || !op.isNew()) {
                     conflictMessage = "The node " + 
-                            op.getKey() + " does not exist or is already deleted";
+                            op.getId() + " does not exist or is already deleted";
                 }
             } else {
-                if (op.isNew) {
+                if (op.isNew()) {
                     conflictMessage = "The node " + 
-                            op.getKey() + " was already added in revision\n" +
+                            op.getId() + " was already added in revision\n" +
                             newestRev;
                 } else if (mk.isRevisionNewer(newestRev, baseRevision)
-                        && (op.isDelete || isConflicting(doc, op))) {
+                        && (op.isDelete() || isConflicting(doc, op))) {
                     conflictMessage = "The node " + 
-                            op.getKey() + " was changed in revision\n" + newestRev +
+                            op.getId() + " was changed in revision\n" + newestRev +
                             ", which was applied after the base revision\n" + 
                             baseRevision;
                 }
@@ -348,28 +336,13 @@ public class Commit {
             if (collisions.get() != null && isConflicting(doc, op)) {
                 for (Revision r : collisions.get()) {
                     // mark collisions on commit root
-                    new Collision(doc, r, op, revision).mark(store);
+                    new Collision(doc, r, op, revision, mk).mark(store);
                 }
             }
         }
 
-        if (doc != null && doc.getMemory() > MAX_DOCUMENT_SIZE) {
-            UpdateOp[] split = doc.splitDocument(mk, revision, mk.getSplitDocumentAgeMillis());
-            
-            // TODO check if the new main document is actually smaller;
-            // otherwise, splitting doesn't make sense
-            
-            // the old version
-            UpdateOp old = split[0];
-            if (old != null) {
-                store.createOrUpdate(Collection.NODES, old);
-            }
-            
-            // the (shrunken) main document
-            UpdateOp main = split[1];
-            if (main != null) {
-                store.createOrUpdate(Collection.NODES, main);
-            }
+        if (doc != null && doc.getMemory() > SPLIT_CANDIDATE_THRESHOLD) {
+            mk.addSplitCandidate(doc.getId());
         }
     }
 
@@ -392,44 +365,7 @@ public class Commit {
             // or document did not exist before
             return false;
         }
-        // did existence of node change after baseRevision?
-        @SuppressWarnings("unchecked")
-        Map<String, String> deleted = (Map<String, String>) doc.get(NodeDocument.DELETED);
-        if (deleted != null) {
-            for (Map.Entry<String, String> entry : deleted.entrySet()) {
-                if (mk.isRevisionNewer(Revision.fromString(entry.getKey()), baseRevision)) {
-                    return true;
-                }
-            }
-        }
-
-        for (Map.Entry<String, UpdateOp.Operation> entry : op.changes.entrySet()) {
-            if (entry.getValue().type != UpdateOp.Operation.Type.SET_MAP_ENTRY) {
-                continue;
-            }
-            int idx = entry.getKey().indexOf('.');
-            String name = entry.getKey().substring(0, idx);
-            if (NodeDocument.DELETED.equals(name)) {
-                // existence of node changed, this always conflicts with
-                // any other concurrent change
-                return true;
-            }
-            if (!Utils.isPropertyName(name)) {
-                continue;
-            }
-            // was this property touched after baseRevision?
-            @SuppressWarnings("unchecked")
-            Map<String, Object> changes = (Map<String, Object>) doc.get(name);
-            if (changes == null) {
-                continue;
-            }
-            for (String rev : changes.keySet()) {
-                if (mk.isRevisionNewer(Revision.fromString(rev), baseRevision)) {
-                    return true;
-                }
-            }
-        }
-        return false;
+        return doc.isConflicting(op, baseRevision, mk);
     }
 
     /**
@@ -465,9 +401,9 @@ public class Commit {
                 }
             }
             UpdateOp op = operations.get(path);
-            boolean isNew = op != null && op.isNew;
+            boolean isNew = op != null && op.isNew();
             boolean isWritten = op != null;
-            boolean isDelete = op != null && op.isDelete;
+            boolean isDelete = op != null && op.isDelete();
             mk.applyChanges(revision, path, 
                     isNew, isDelete, isWritten, isBranchCommit,
                     added, removed);
@@ -507,7 +443,7 @@ public class Commit {
         removedNodes.add(path);
         UpdateOp op = getUpdateOperationForNode(path);
         op.setDelete(true);
-        op.setMapEntry(NodeDocument.DELETED, revision.toString(), "true");
+        NodeDocument.setDeleted(op, revision, true);
     }
 
 }

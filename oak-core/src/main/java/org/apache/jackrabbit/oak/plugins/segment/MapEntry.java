@@ -24,7 +24,6 @@ import java.util.Map;
 import javax.annotation.Nonnull;
 
 import org.apache.jackrabbit.oak.spi.state.AbstractChildNodeEntry;
-import org.apache.jackrabbit.oak.spi.state.NodeState;
 
 import com.google.common.collect.ComparisonChain;
 
@@ -34,19 +33,23 @@ import com.google.common.collect.ComparisonChain;
 class MapEntry extends AbstractChildNodeEntry
         implements Map.Entry<RecordId, RecordId>, Comparable<MapEntry> {
 
-    private final SegmentStore store;
+    private final Segment segment;
 
     private final String name;
 
     private final RecordId key;
 
-    private RecordId value;
+    private final RecordId value;
 
-    MapEntry(SegmentStore store, String name, RecordId key, RecordId value) {
-        this.store = checkNotNull(store);
+    MapEntry(Segment segment, String name, RecordId key, RecordId value) {
+        this.segment = checkNotNull(segment);
         this.name = checkNotNull(name);
         this.key = checkNotNull(key);
         this.value = value;
+    }
+
+    public int getHash() {
+        return MapRecord.getHash(name);
     }
 
     //----------------------------------------------------< ChildNodeEntry >--
@@ -57,9 +60,9 @@ class MapEntry extends AbstractChildNodeEntry
     }
 
     @Override @Nonnull
-    public NodeState getNodeState() {
+    public SegmentNodeState getNodeState() {
         checkState(value != null);
-        return new SegmentNodeState(store, value);
+        return new SegmentNodeState(segment, value);
     }
 
     //---------------------------------------------------------< Map.Entry >--
@@ -76,9 +79,7 @@ class MapEntry extends AbstractChildNodeEntry
 
     @Override
     public RecordId setValue(RecordId value) {
-        RecordId old = this.value;
-        this.value = value;
-        return old;
+        throw new UnsupportedOperationException();
     }
 
     //--------------------------------------------------------< Comparable >--
@@ -86,7 +87,7 @@ class MapEntry extends AbstractChildNodeEntry
     @Override
     public int compareTo(MapEntry that) {
         return ComparisonChain.start()
-                .compare(name.hashCode(), that.name.hashCode())
+                .compare(getHash(), that.getHash())
                 .compare(name, that.name)
                 .compare(value, that.value)
                 .result();

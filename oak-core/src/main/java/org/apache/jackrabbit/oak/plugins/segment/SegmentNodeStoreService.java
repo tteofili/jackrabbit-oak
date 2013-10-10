@@ -16,6 +16,7 @@
  */
 package org.apache.jackrabbit.oak.plugins.segment;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Dictionary;
@@ -23,6 +24,7 @@ import java.util.Dictionary;
 import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
 
+import com.mongodb.Mongo;
 import org.apache.felix.scr.annotations.Activate;
 import org.apache.felix.scr.annotations.Component;
 import org.apache.felix.scr.annotations.ConfigurationPolicy;
@@ -30,32 +32,33 @@ import org.apache.felix.scr.annotations.Deactivate;
 import org.apache.felix.scr.annotations.Property;
 import org.apache.felix.scr.annotations.Service;
 import org.apache.jackrabbit.oak.api.Blob;
-import org.apache.jackrabbit.oak.api.jmx.CacheStatsMBean;
+import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.plugins.segment.file.FileStore;
 import org.apache.jackrabbit.oak.plugins.segment.mongo.MongoStore;
-import org.apache.jackrabbit.oak.spi.state.AbstractNodeStore;
+import org.apache.jackrabbit.oak.spi.commit.CommitHook;
+import org.apache.jackrabbit.oak.spi.commit.PostCommitHook;
+import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.apache.jackrabbit.oak.spi.state.NodeStore;
-import org.apache.jackrabbit.oak.spi.state.NodeStoreBranch;
-import org.apache.jackrabbit.oak.spi.whiteboard.OsgiWhiteboard;
-import org.apache.jackrabbit.oak.spi.whiteboard.Registration;
 import org.osgi.service.component.ComponentContext;
-
-import com.mongodb.Mongo;
-
-import static org.apache.jackrabbit.oak.spi.whiteboard.WhiteboardUtils.registerMBean;
 
 @Component(policy = ConfigurationPolicy.REQUIRE)
 @Service(NodeStore.class)
-public class SegmentNodeStoreService extends AbstractNodeStore {
+public class SegmentNodeStoreService implements NodeStore {
 
     @Property(description="The unique name of this instance")
     public static final String NAME = "name";
 
     @Property(description="TarMK directory (if unset, use MongoDB)")
-    public static final String DIRECTORY = "directory";
+    public static final String DIRECTORY = "repository.home";
 
-    @Property(description="MongoDB host", value="localhost")
+    @Property(description="TarMK mode (64 for memory mapping, 32 for normal file access)")
+    public static final String MODE = "tarmk.mode";
+
+    @Property(description="TarMK maximum file size")
+    public static final String SIZE = "tarmk.size";
+
+    @Property(description="MongoDB host")
     public static final String HOST = "host";
 
     @Property(description="MongoDB host", intValue=27017)
@@ -67,7 +70,7 @@ public class SegmentNodeStoreService extends AbstractNodeStore {
     @Property(description="Cache size (MB)", intValue=200)
     public static final String CACHE = "cache";
 
-    private static final long MB = 1024 * 1024;
+    private static final int MB = 1024 * 1024;
 
     private String name;
 
@@ -76,8 +79,6 @@ public class SegmentNodeStoreService extends AbstractNodeStore {
     private SegmentStore store;
 
     private NodeStore delegate;
-
-    private Registration cacheStatsReg;
 
     private synchronized NodeStore getDelegate() {
         assert delegate != null : "service must be activated when used";
@@ -90,35 +91,53 @@ public class SegmentNodeStoreService extends AbstractNodeStore {
         Dictionary<?, ?> properties = context.getProperties();
         name = "" + properties.get(NAME);
 
-        if (properties.get(DIRECTORY) != null) {
-            String directory = properties.get(DIRECTORY).toString();
+        String host = lookup(context, HOST);
+        if (host == null) {
+            String directory = lookup(context, DIRECTORY);
+            if (directory == null) {
+                directory = "tarmk";
+            }
+
+            String mode = lookup(context, MODE);
+            if (mode == null) {
+                mode = System.getProperty(MODE,
+                        System.getProperty("sun.arch.data.model", "32"));
+            }
+
+            String size = lookup(context, SIZE);
+            if (size == null) {
+                size = System.getProperty(SIZE, "268435456"); // 256MB
+            }
 
             mongo = null;
-            store = new FileStore(directory);
+            store = new FileStore(
+                    new File(directory),
+                    Integer.parseInt(size), "64".equals(mode));
         } else {
-            String host = String.valueOf(properties.get(HOST));
             int port = Integer.parseInt(String.valueOf(properties.get(PORT)));
             String db = String.valueOf(properties.get(DB));
             int cache = Integer.parseInt(String.valueOf(properties.get(CACHE)));
 
             mongo = new Mongo(host, port);
-            SegmentCache sc = new SegmentCache(cache * MB);
-            store = new MongoStore(mongo.getDB(db), sc);
-
-            cacheStatsReg = registerMBean(new OsgiWhiteboard(context.getBundleContext()), CacheStatsMBean.class,
-                    sc.getCacheStats(), CacheStatsMBean.TYPE, sc.getCacheStats().getName());
+            store = new MongoStore(mongo.getDB(db), cache * MB);
         }
 
         delegate = new SegmentNodeStore(store);
     }
 
+    private static String lookup(ComponentContext context, String property) {
+        if (context.getProperties().get(property) != null) {
+            return context.getProperties().get(property).toString();
+        }
+        if (context.getBundleContext().getProperty(property) != null) {
+            return context.getBundleContext().getProperty(property).toString();
+        }
+        return null;
+    }
+
     @Deactivate
     public synchronized void deactivate() {
         delegate = null;
-
-        if(cacheStatsReg != null){
-            cacheStatsReg.unregister();
-        }
 
         store.close();
         if (mongo != null) {
@@ -133,9 +152,21 @@ public class SegmentNodeStoreService extends AbstractNodeStore {
         return getDelegate().getRoot();
     }
 
-    @Override @Nonnull
-    public NodeStoreBranch branch() {
-        return getDelegate().branch();
+    @Nonnull
+    @Override
+    public NodeState merge(@Nonnull NodeBuilder builder, @Nonnull CommitHook commitHook,
+            PostCommitHook committed) throws CommitFailedException {
+        return getDelegate().merge(builder, commitHook, committed);
+    }
+
+    @Override
+    public NodeState rebase(@Nonnull NodeBuilder builder) {
+        return getDelegate().rebase(builder);
+    }
+
+    @Override
+    public NodeState reset(@Nonnull NodeBuilder builder) {
+        return getDelegate().reset(builder);
     }
 
     @Override

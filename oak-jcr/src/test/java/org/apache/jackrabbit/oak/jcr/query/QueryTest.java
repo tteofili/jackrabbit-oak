@@ -55,6 +55,80 @@ public class QueryTest extends AbstractRepositoryTest {
     public QueryTest(NodeStoreFixture fixture) {
         super(fixture);
     }
+    
+    @Test
+    public void relativeNotExistsProperty() throws Exception {
+        Session session = getAdminSession();
+        Node content = session.getRootNode().addNode("test");
+        content.addNode("one").addNode("child").setProperty("prop", "hello");
+        content.addNode("two").addNode("child");
+        session.save();
+        String query = "//*[not(child/@prop)]";
+        QueryResult r = session.getWorkspace().getQueryManager().createQuery(
+                query, "xpath").execute();
+        NodeIterator it = r.getNodes();
+        assertTrue(it.hasNext());
+        String path = it.nextNode().getPath();
+        assertEquals("/test/two", path);
+        assertFalse(it.hasNext());
+    }
+
+    @SuppressWarnings("deprecation")
+    @Test
+    public void or() throws RepositoryException {
+        Session session = getAdminSession();
+        Node hello = session.getRootNode().addNode("hello");
+        hello.setProperty("x", 1);
+        Node world = hello.addNode("world");
+        world.setProperty("x", 2);
+        session.save();
+        QueryManager qm = session.getWorkspace().getQueryManager();
+        Query q;
+        
+        q = qm.createQuery("select a.[jcr:path] from [nt:base] as a " + 
+                    "inner join [nt:base] as b " +
+                    "on ischildnode(a, b) " + 
+                    "where a.x = 1 or a.x = 2 or b.x = 3 or b.x = 4", Query.JCR_SQL2);
+        assertEquals("/hello", getPaths(q));
+
+        q = qm.createQuery("//hello[@x=1]/*[@x=2]", Query.XPATH);
+        assertEquals("/hello/world", getPaths(q));
+
+    }
+
+    @SuppressWarnings("deprecation")
+    @Test
+    public void encodedPath() throws RepositoryException {
+        Session session = getAdminSession();
+        session.getRootNode().addNode("hello").addNode("world");
+        session.save();
+        QueryManager qm = session.getWorkspace().getQueryManager();
+        Query q;
+        
+        q = qm.createQuery("/jcr:root/hel_x006c_o/*", Query.XPATH);
+        assertEquals("/hello/world", getPaths(q));
+        
+        q = qm.createQuery("//hel_x006c_o", Query.XPATH);
+        assertEquals("/hello", getPaths(q));
+        
+        q = qm.createQuery("//element(hel_x006c_o, nt:base)", Query.XPATH);
+        assertEquals("/hello", getPaths(q));
+
+    }
+    
+    private static String getPaths(Query q) throws RepositoryException {
+        QueryResult r = q.execute();
+        RowIterator it = r.getRows();
+        StringBuilder buff = new StringBuilder();
+        if (it.hasNext()) {
+            Row row = it.nextRow();
+            if (buff.length() > 0) {
+                buff.append(", ");
+            }
+            buff.append(row.getPath());
+        }
+        return buff.toString();
+    }
 
     @SuppressWarnings("deprecation")
     @Test
@@ -256,6 +330,23 @@ public class QueryTest extends AbstractRepositoryTest {
                 Query.JCR_SQL2 + "-noLiterals");
         q.bindValue("p", vf.createValue("x"));
         q.execute();
+    }
+
+    @SuppressWarnings("deprecation")
+    @Test
+    public void fnNameEncoding() throws Exception {
+        Session session = getAdminSession();
+        session.getRootNode().addNode("123456_test_name");
+        session.save();
+
+        QueryManager qm = session.getWorkspace().getQueryManager();
+        Query q;
+
+        q = qm.createQuery("//*[jcr:like(fn:name(), '%123456%')]", Query.XPATH);
+        assertEquals("/123456_test_name", getPaths(q));
+
+        q = qm.createQuery("//*[fn:name() = '123456_test_name']", Query.XPATH);
+        assertEquals("", getPaths(q));
     }
 
 }

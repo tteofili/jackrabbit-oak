@@ -19,6 +19,15 @@ package org.apache.jackrabbit.oak.query;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.collect.Maps.newHashMap;
 
+import java.math.BigDecimal;
+import java.text.ParseException;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.Map;
+
+import javax.jcr.PropertyType;
+
 import org.apache.jackrabbit.oak.api.PropertyValue;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.commons.PathUtils;
@@ -33,23 +42,15 @@ import org.apache.jackrabbit.oak.query.ast.LiteralImpl;
 import org.apache.jackrabbit.oak.query.ast.Operator;
 import org.apache.jackrabbit.oak.query.ast.OrderingImpl;
 import org.apache.jackrabbit.oak.query.ast.PropertyExistenceImpl;
+import org.apache.jackrabbit.oak.query.ast.PropertyInexistenceImpl;
 import org.apache.jackrabbit.oak.query.ast.PropertyValueImpl;
 import org.apache.jackrabbit.oak.query.ast.SelectorImpl;
 import org.apache.jackrabbit.oak.query.ast.SourceImpl;
 import org.apache.jackrabbit.oak.query.ast.StaticOperandImpl;
 import org.apache.jackrabbit.oak.spi.query.PropertyValues;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
-import org.apache.jackrabbit.util.ISO9075;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import javax.jcr.PropertyType;
-import java.math.BigDecimal;
-import java.text.ParseException;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.Map;
 
 /**
  * The SQL2 parser can convert a JCR-SQL2 query to a query. The 'old' SQL query
@@ -399,9 +400,10 @@ public class SQL2Parser {
                 throw getSyntaxError("propertyName (NOT NULL is only supported for properties)");
             }
             PropertyValueImpl p = (PropertyValueImpl) left;
-            c = getPropertyExistence(p);
-            if (!not) {
-                c = factory.not(c);
+            if (not) {
+                c = getPropertyExistence(p);
+            } else {
+                c = getPropertyInexistence(p);
             }
         } else if (readIf("NOT")) {
             if (readIf("IS")) {
@@ -426,6 +428,10 @@ public class SQL2Parser {
 
     private PropertyExistenceImpl getPropertyExistence(PropertyValueImpl p) throws ParseException {
         return factory.propertyExistence(p.getSelectorName(), p.getPropertyName());
+    }
+    
+    private PropertyInexistenceImpl getPropertyInexistence(PropertyValueImpl p) throws ParseException {
+        return factory.propertyInexistence(p.getSelectorName(), p.getPropertyName());
     }
 
     private ConstraintImpl parseConditionFunctionIf(String functionName) throws ParseException {
@@ -506,7 +512,7 @@ public class SQL2Parser {
     }
 
     private String readPath() throws ParseException {
-        return ISO9075.decode(readName());
+        return readName();
     }
 
     private DynamicOperandImpl parseDynamicOperand() throws ParseException {

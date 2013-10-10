@@ -68,11 +68,6 @@ public class ReadOnlyBuilder implements NodeBuilder {
     }
 
     @Override
-    public void reset(NodeState state) {
-        throw unsupported();
-    }
-
-    @Override
     public long getChildNodeCount(long max) {
         return state.getChildNodeCount(max);
     }
@@ -94,6 +89,16 @@ public class ReadOnlyBuilder implements NodeBuilder {
 
     @Override
     public boolean remove() {
+        throw unsupported();
+    }
+
+    @Override
+    public boolean moveTo(NodeBuilder newParent, String newName) {
+        throw unsupported();
+    }
+
+    @Override
+    public boolean copyTo(NodeBuilder newParent, String newName) {
         throw unsupported();
     }
 

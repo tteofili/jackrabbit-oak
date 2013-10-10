@@ -16,6 +16,8 @@
  */
 package org.apache.jackrabbit.oak.plugins.mongomk;
 
+import java.util.Comparator;
+
 /**
  * Provides revision related context.
  */
@@ -25,17 +27,17 @@ public interface RevisionContext {
      * @return the branches of the local MongoMK instance, which are not yet
      *         merged.
      */
-    public UnmergedBranches getBranches();
+    UnmergedBranches getBranches();
 
     /**
      * @return the pending modifications.
      */
-    public UnsavedModifications getPendingModifications();
+    UnsavedModifications getPendingModifications();
 
     /**
      * @return the revision comparator.
      */
-    public Revision.RevisionComparator getRevisionComparator();
+    Comparator<Revision> getRevisionComparator();
 
     /**
      * Ensure the revision visible from now on, possibly by updating the head
@@ -44,10 +46,11 @@ public interface RevisionContext {
      * @param foreignRevision the revision from another cluster node
      * @param changeRevision the local revision that is sorted after the foreign revision
      */
-    public void publishRevision(Revision foreignRevision, Revision changeRevision);
+    void publishRevision(Revision foreignRevision, Revision changeRevision);
 
     /**
      * @return the cluster id of the local MongoMK instance.
      */
-    public int getClusterId();
+    int getClusterId();
+    
 }

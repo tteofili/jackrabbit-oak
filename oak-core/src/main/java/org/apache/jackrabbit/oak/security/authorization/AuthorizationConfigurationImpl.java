@@ -20,10 +20,15 @@ import java.security.Principal;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
+
 import javax.annotation.Nonnull;
 import javax.jcr.security.AccessControlManager;
+import javax.security.auth.Subject;
 
 import com.google.common.collect.ImmutableList;
+
+import org.apache.felix.scr.annotations.Component;
+import org.apache.felix.scr.annotations.Service;
 import org.apache.jackrabbit.oak.api.Root;
 import org.apache.jackrabbit.oak.namepath.NamePathMapper;
 import org.apache.jackrabbit.oak.plugins.version.VersionablePathHook;
@@ -40,8 +45,10 @@ import org.apache.jackrabbit.oak.spi.commit.ValidatorProvider;
 import org.apache.jackrabbit.oak.spi.lifecycle.WorkspaceInitializer;
 import org.apache.jackrabbit.oak.spi.security.ConfigurationBase;
 import org.apache.jackrabbit.oak.spi.security.Context;
+import org.apache.jackrabbit.oak.spi.security.SecurityConfiguration;
 import org.apache.jackrabbit.oak.spi.security.SecurityProvider;
 import org.apache.jackrabbit.oak.spi.security.authorization.AuthorizationConfiguration;
+import org.apache.jackrabbit.oak.spi.security.authorization.accesscontrol.AccessControlConstants;
 import org.apache.jackrabbit.oak.spi.security.authorization.permission.PermissionProvider;
 import org.apache.jackrabbit.oak.spi.security.authorization.restriction.RestrictionProvider;
 import org.apache.jackrabbit.oak.spi.xml.ProtectedItemImporter;
@@ -49,7 +56,13 @@ import org.apache.jackrabbit.oak.spi.xml.ProtectedItemImporter;
 /**
  * Default implementation of the {@code AccessControlConfiguration}.
  */
+@Component()
+@Service({AuthorizationConfiguration.class, SecurityConfiguration.class})
 public class AuthorizationConfigurationImpl extends ConfigurationBase implements AuthorizationConfiguration {
+
+    public AuthorizationConfigurationImpl() {
+        super();
+    }
 
     public AuthorizationConfigurationImpl(SecurityProvider securityProvider) {
         super(securityProvider);
@@ -82,10 +95,11 @@ public class AuthorizationConfigurationImpl extends ConfigurationBase implements
     }
 
     @Override
-    public List<ValidatorProvider> getValidators(String workspaceName) {
+    public List<ValidatorProvider> getValidators(
+            String workspaceName, Subject subject) {
         return ImmutableList.of(
                 new PermissionStoreValidatorProvider(),
-                new PermissionValidatorProvider(getSecurityProvider()),
+                new PermissionValidatorProvider(getSecurityProvider(), subject),
                 new AccessControlValidatorProvider(getSecurityProvider()));
     }
 
@@ -104,7 +118,12 @@ public class AuthorizationConfigurationImpl extends ConfigurationBase implements
     @Nonnull
     @Override
     public RestrictionProvider getRestrictionProvider() {
-        return new RestrictionProviderImpl();
+        RestrictionProvider restrictionProvider = getParameters().getConfigValue(AccessControlConstants.PARAM_RESTRICTION_PROVIDER, null, RestrictionProvider.class);
+        if (restrictionProvider == null) {
+            // default
+            restrictionProvider = new RestrictionProviderImpl();
+        }
+        return restrictionProvider;
     }
 
     @Nonnull

@@ -38,11 +38,10 @@ import static org.apache.jackrabbit.oak.plugins.memory.BinaryPropertyState.binar
 import org.apache.jackrabbit.oak.plugins.nodetype.write.InitialContent;
 import org.apache.jackrabbit.oak.query.AbstractQueryTest;
 import org.apache.jackrabbit.oak.spi.security.OpenSecurityProvider;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Sets;
 
 public class LuceneIndexAggregationTest extends AbstractQueryTest {
 
@@ -248,11 +247,91 @@ public class LuceneIndexAggregationTest extends AbstractQueryTest {
 
         root.commit();
 
-        String matchContentSimple = "//*[(jcr:contains(., 'dog')) and @jcr:primaryType = 'nt:file']";
+        String matchContentSimple = "//*[( jcr:contains(., 'dog') and @jcr:primaryType = 'nt:file' )]";
         assertQuery(matchContentSimple, "xpath", ImmutableList.of("/myFolder/myFile"));
 
-        String matchContentDouble = "//*[(jcr:contains(., 'dog')) and (@jcr:primaryType = 'nt:file' or @jcr:primaryType = 'nt:folder')]";
+        String matchContentDouble = "//*[( jcr:contains(., 'dog') and (@jcr:primaryType = 'nt:file' or @jcr:primaryType = 'nt:folder') )]";
         assertQuery(matchContentDouble, "xpath", ImmutableList.of("/myFolder", "/myFolder/myFile"));
+    }
+
+    @Test
+    public void testChildNodeProperty() throws Exception {
+        Tree file = root.getTree("/").addChild("myFile");
+        file.setProperty(JCR_PRIMARYTYPE, NT_FILE, Type.NAME);
+        Tree resource = file.addChild(JCR_CONTENT);
+        resource.setProperty(JCR_PRIMARYTYPE, "nt:resource", Type.NAME);
+        resource.setProperty("jcr:lastModified", Calendar.getInstance());
+        resource.setProperty("jcr:encoding", "UTF-8");
+        resource.setProperty("jcr:mimeType", "text/plain");
+        resource.setProperty(binaryProperty(JCR_DATA,
+                "the quick brown fox jumps over the lazy dog."));
+
+        resource.setProperty("jcr:title", "title");
+        resource.setProperty("jcr:description", "description");
+
+        root.commit();
+
+        String matchChildSimple = "//*[( jcr:contains(@jcr:title, 'title') )]";
+        assertQuery(matchChildSimple, "xpath", ImmutableList.of("/myFile/jcr:content"));
+
+        String matchChildWithStar = "//*[( jcr:contains(., 'dog') and jcr:contains(@jcr:title, 'title') )]";
+        assertQuery(matchChildWithStar, "xpath", ImmutableList.of("/myFile/jcr:content"));
+
+    }
+
+    @Test
+    public void testPreventDoubleAggregation() throws Exception {
+        Tree file = root.getTree("/").addChild("myFile");
+        file.setProperty(JCR_PRIMARYTYPE, NT_FILE, Type.NAME);
+        file.setProperty("jcr:title", "fox");
+
+        Tree resource = file.addChild(JCR_CONTENT);
+        resource.setProperty(JCR_PRIMARYTYPE, "nt:resource", Type.NAME);
+        resource.setProperty("jcr:lastModified", Calendar.getInstance());
+        resource.setProperty("jcr:encoding", "UTF-8");
+        resource.setProperty("jcr:mimeType", "text/plain");
+        resource.setProperty(binaryProperty(JCR_DATA,
+                "the quick brown fox jumps over the lazy dog."));
+        root.commit();
+
+        String matchChildSimple = "//element(*, nt:file)[( jcr:contains(., 'fox') )]";
+        assertQuery(matchChildSimple, "xpath",
+                ImmutableList.of("/myFile"));
+    }
+
+    @Test
+     @Ignore("OAK-828")
+    public void testDifferentNodes() throws Exception {
+
+        Tree folder = root.getTree("/").addChild("myFolder");
+        folder.setProperty(JCR_PRIMARYTYPE, NT_FOLDER, Type.NAME);
+        Tree file = folder.addChild("myFile");
+        file.setProperty(JCR_PRIMARYTYPE, NT_FILE, Type.NAME);
+        file.setProperty("jcr:title", "title");
+        file.setProperty("jcr:description", "description");
+
+        Tree resource = file.addChild(JCR_CONTENT);
+        resource.setProperty(JCR_PRIMARYTYPE, "nt:resource", Type.NAME);
+        resource.setProperty("jcr:lastModified", Calendar.getInstance());
+        resource.setProperty("jcr:encoding", "UTF-8");
+        resource.setProperty("jcr:mimeType", "text/plain");
+        resource.setProperty(binaryProperty(JCR_DATA,
+                "the quick brown fox jumps over the lazy dog."));
+
+        root.commit();
+
+        assertQuery(
+                "//element(*, nt:file)[jcr:contains(., 'dog')]", 
+                "xpath", ImmutableList.of("/myFolder/myFile"));
+
+        assertQuery(
+                "//element(*, nt:file)[jcr:contains(., 'title')]", 
+                "xpath", ImmutableList.of("/myFolder/myFile"));
+
+        assertQuery(
+                "//element(*, nt:file)[jcr:contains(., 'dog') and jcr:contains(., 'title')]", 
+                "xpath", ImmutableList.of("/myFolder/myFile"));
+
     }
 
 }

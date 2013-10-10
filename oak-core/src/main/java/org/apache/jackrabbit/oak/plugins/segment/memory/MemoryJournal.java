@@ -21,6 +21,7 @@ import static com.google.common.base.Preconditions.checkNotNull;
 import org.apache.jackrabbit.oak.plugins.segment.Journal;
 import org.apache.jackrabbit.oak.plugins.segment.MergeDiff;
 import org.apache.jackrabbit.oak.plugins.segment.RecordId;
+import org.apache.jackrabbit.oak.plugins.segment.Segment;
 import org.apache.jackrabbit.oak.plugins.segment.SegmentNodeState;
 import org.apache.jackrabbit.oak.plugins.segment.SegmentStore;
 import org.apache.jackrabbit.oak.plugins.segment.SegmentWriter;
@@ -41,7 +42,7 @@ public class MemoryJournal implements Journal {
         this.store = checkNotNull(store);
         this.parent = null;
 
-        SegmentWriter writer = new SegmentWriter(store);
+        SegmentWriter writer = store.getWriter();
         RecordId id = writer.writeNode(head).getRecordId();
         writer.flush();
 
@@ -64,6 +65,10 @@ public class MemoryJournal implements Journal {
     @Override
     public synchronized boolean setHead(RecordId base, RecordId head) {
         if (checkNotNull(base).equals(this.head)) {
+            SegmentWriter writer = store.getWriter();
+            if (writer.getCurrentSegment(head.getSegmentId()) != null) {
+                writer.flush();
+            }
             this.head = checkNotNull(head);
             return true;
         } else {
@@ -74,18 +79,20 @@ public class MemoryJournal implements Journal {
     @Override
     public synchronized void merge() {
         if (parent != null) {
-            NodeState before = new SegmentNodeState(store, base);
-            NodeState after = new SegmentNodeState(store, head);
+            SegmentWriter writer = store.getWriter();
 
-            SegmentWriter writer = new SegmentWriter(store);
+            Segment segment = writer.getDummySegment();
+            NodeState before = new SegmentNodeState(segment, base);
+            NodeState after = new SegmentNodeState(segment, head);
+
             while (!parent.setHead(base, head)) {
                 RecordId newBase = parent.getHead();
                 NodeBuilder builder =
-                        new SegmentNodeState(store, newBase).builder();
+                        new SegmentNodeState(segment, newBase).builder();
                 after.compareAgainstBaseState(before, new MergeDiff(builder));
                 NodeState state = builder.getNodeState();
+
                 RecordId newHead = writer.writeNode(state).getRecordId();
-                writer.flush();
 
                 base = newBase;
                 head = newHead;

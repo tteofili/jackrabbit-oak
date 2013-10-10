@@ -44,18 +44,21 @@ class Collision {
     private static final Logger LOG = LoggerFactory.getLogger(Collision.class);
 
     private final NodeDocument document;
-    private final String theirRev;
+    private final Revision theirRev;
     private final UpdateOp ourOp;
-    private final String ourRev;
+    private final Revision ourRev;
+    private final RevisionContext context;
 
     Collision(@Nonnull NodeDocument document,
               @Nonnull Revision theirRev,
               @Nonnull UpdateOp ourOp,
-              @Nonnull Revision ourRev) {
+              @Nonnull Revision ourRev,
+              @Nonnull RevisionContext context) {
         this.document = checkNotNull(document);
-        this.theirRev = checkNotNull(theirRev).toString();
+        this.theirRev = checkNotNull(theirRev);
         this.ourOp = checkNotNull(ourOp);
-        this.ourRev = checkNotNull(ourRev).toString();
+        this.ourRev = checkNotNull(ourRev);
+        this.context = checkNotNull(context);
     }
 
     /**
@@ -72,9 +75,9 @@ class Collision {
             return;
         }
         // their commit wins, we have to mark ourRev
-        NodeDocument newDoc = Collection.NODES.newDocument();
+        NodeDocument newDoc = Collection.NODES.newDocument(store);
         document.deepCopy(newDoc);
-        MemoryDocumentStore.applyChanges(newDoc, ourOp);
+        MemoryDocumentStore.applyChanges(newDoc, ourOp, context.getRevisionComparator());
         if (!markCommitRoot(newDoc, ourRev, store)) {
             throw new MicroKernelException("Unable to annotate our revision "
                     + "with collision marker. Our revision: " + ourRev
@@ -94,7 +97,7 @@ class Collision {
      *         successfully; <code>false</code> otherwise.
      */
     private static boolean markCommitRoot(@Nonnull NodeDocument document,
-                                          @Nonnull String revision,
+                                          @Nonnull Revision revision,
                                           @Nonnull DocumentStore store) {
         String p = Utils.getPathFromId(document.getId());
         String commitRootPath = null;
@@ -116,15 +119,15 @@ class Collision {
         }
         // at this point we have a commitRootPath
         UpdateOp op = new UpdateOp(Utils.getIdFromPath(commitRootPath), false);
-        document = store.find(Collection.NODES, op.getKey());
+        NodeDocument commitRoot = store.find(Collection.NODES, op.getId());
         // check commit status of revision
-        if (document.isCommitted(revision)) {
+        if (commitRoot.isCommitted(revision)) {
             return false;
         }
         op.setMapEntry(NodeDocument.COLLISIONS, revision, true);
-        document = store.createOrUpdate(Collection.NODES, op);
+        commitRoot = store.createOrUpdate(Collection.NODES, op);
         // check again on old document right before our update was applied
-        if (document.isCommitted(revision)) {
+        if (commitRoot.isCommitted(revision)) {
             return false;
         }
         // otherwise collision marker was set successfully
@@ -133,7 +136,7 @@ class Collision {
         return true;
     }
     
-    private static void throwNoCommitRootException(@Nonnull String revision,
+    private static void throwNoCommitRootException(@Nonnull Revision revision,
                                                    @Nonnull Document document)
                                                            throws MicroKernelException {
         throw new MicroKernelException("No commit root for revision: "

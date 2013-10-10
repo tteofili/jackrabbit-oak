@@ -16,10 +16,17 @@ It can be invoked like this:
 
 The following benchmark options (with default values) are currently supported:
 
-    --host localhost   - MongoDB host
-    --port 27101       - MongoDB port
-    --cache 100        - cache size (in MB)
-    --wikipedia <file> - Wikipedia dump
+    --host localhost       - MongoDB host
+    --port 27101           - MongoDB port
+    --db <name>            - MongoDB database (default is a generated name)
+    --dropDBAfterTest true - Whether to drop the MongoDB database after the test
+    --mmap <64bit?>        - TarMK memory mapping (the default on 64 bit JVMs)
+    --cache 100            - cache size (in MB)
+    --wikipedia <file>     - Wikipedia dump
+    --runAsAdmin false     - Run test as admin session
+    --itemsToRead 1000     - Number of items to read
+    --bgReaders 20         - Number of background readers
+    --report false         - Whether to output intermediate results
 
 These options are passed to the test cases and repository fixtures
 that need them. For example the Wikipedia dump option is needed by the
@@ -40,8 +47,9 @@ the benchmarked codebase.
 
 Some system properties are also used to control the benchmarks. For example:
 
-    -Dwarmup=5         - number of warmup iterations
+    -Dwarmup=5         - warmup time (in seconds)
     -Druntime=60       - how long a single benchmark should run (in seconds)
+    -Dprofile=true     - to collect and print profiling data
 
 The test case names like `ReadPropertyTest`, `SmallFileReadTest` and
 `SmallFileWriteTest` indicate the specific test case being run. You can
@@ -69,8 +77,8 @@ Once started, the benchmark runner will execute each listed test case
 against all the listed repository fixtures. After starting up the
 repository and preparing the test environment, the test case is first
 executed a few times to warm up caches before measurements are
-started. Then the test case is run repeatedly for one minute (or at
-least 10 times) and the number of milliseconds used by each execution
+started. Then the test case is run repeatedly for one minute 
+and the number of milliseconds used by each execution
 is recorded. Once done, the following statistics are computed and
 reported:
 
@@ -97,3 +105,77 @@ They DO NOT directly indicate the kind of application performance you
 could expect with (the current state of) Oak. Instead they are
 designed to isolate implementation-level bottlenecks and to help
 measure and profile the performance of specific, isolated features.
+
+How to add a new benchmark
+--------------------------
+
+To add a new test case to this benchmark suite, you'll need to implement
+the `Benchmark` interface and add an instance of the new test to the
+`allBenchmarks` array in the `BenchmarkRunner` class in the
+`org.apache.jackrabbit.oak.benchmark` package.
+
+The best way to implement the `Benchmark` interface is to extend the
+`AbstractTest` base class that takes care of most of the benchmarking
+details. The outline of such a benchmark is:
+
+    class MyTest extends AbstracTest {
+        @Override
+        protected void beforeSuite() throws Exception {
+            // optional, run once before all the iterations,
+            // not included in the performance measurements
+        }
+        @Override
+        protected void beforeTest() throws Exception {
+            // optional, run before runTest() on each iteration,
+            // but not included in the performance measurements
+        }
+        @Override
+        protected void runTest() throws Exception {
+            // required, run repeatedly during the benchmark,
+            // and the time of each iteration is measured.
+            // The ideal execution time of this method is
+            // from a few hundred to a few thousand milliseconds.
+            // Use a loop if the operation you're hoping to measure
+            // is faster than that.
+        }
+        @Override
+        protected void afterTest() throws Exception {
+            // optional, run after runTest() on each iteration,
+            // but not included in the performance measurements
+        }
+        @Override
+        protected void afterSuite() throws Exception {
+            // optional, run once after all the iterations,
+            // not included in the performance measurements
+        }
+    }
+
+The rough outline of how the benchmark will be run is:
+
+    test.beforeSuite();
+    for (...) {
+        test.beforeTest();
+        recordStartTime();
+        test.runTest();
+        recordEndTime();
+        test.afterTest();
+    }
+    test.afterSuite();
+
+You can use the `loginWriter()` and `loginReader()` methods to create admin
+and anonymous sessions. There's no need to logout those sessions (unless doing
+so is relevant to the benchmark) as they will automatically be closed after
+the benchmark is completed and the `afterSuite()` method has been called.
+
+Similarly, you can use the `addBackgroundJob(Runnable)` method to add
+background tasks that will be run concurrently while the main benchmark is
+executing. The relevant background thread works like this:
+
+    while (running) {
+        runnable.run();
+        Thread.yield();
+    }
+
+As you can see, the `run()` method of the background task gets invoked
+repeatedly. Such threads will automatically close once all test iterations
+are done, before the `afterSuite()` method is called.

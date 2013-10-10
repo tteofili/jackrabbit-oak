@@ -45,12 +45,12 @@ public class AccessControlActionTest extends AbstractSecurityTest {
 
     @Override
     protected ConfigurationParameters getSecurityConfigParameters() {
-        Map<String, String> map = new HashMap<String, String>();
-        map.put(AccessControlAction.GROUP_PRIVILEGE_NAMES, PrivilegeConstants.JCR_READ);
-        map.put(AccessControlAction.USER_PRIVILEGE_NAMES, PrivilegeConstants.JCR_ALL);
+        Map<String, String[]> map = new HashMap<String, String[]>();
+        map.put(AccessControlAction.GROUP_PRIVILEGE_NAMES, new String[] {PrivilegeConstants.JCR_READ});
+        map.put(AccessControlAction.USER_PRIVILEGE_NAMES, new String[] {PrivilegeConstants.JCR_ALL});
 
-        ConfigurationParameters userConfig = new ConfigurationParameters(map);
-        return new ConfigurationParameters(ImmutableMap.of(UserConfiguration.NAME, userConfig));
+        ConfigurationParameters userConfig = ConfigurationParameters.of(map);
+        return ConfigurationParameters.of(ImmutableMap.of(UserConfiguration.NAME, userConfig));
     }
 
     @Test

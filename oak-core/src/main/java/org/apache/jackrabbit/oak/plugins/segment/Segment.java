@@ -16,15 +16,16 @@
  */
 package org.apache.jackrabbit.oak.plugins.segment;
 
+import static com.google.common.base.Objects.equal;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.base.Preconditions.checkPositionIndexes;
 import static org.apache.jackrabbit.oak.plugins.segment.SegmentWriter.BLOCK_SIZE;
 
 import java.nio.ByteBuffer;
 import java.util.Arrays;
-import java.util.Collection;
-import java.util.Map;
+import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.Callable;
 
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Type;
@@ -79,7 +80,7 @@ public class Segment {
      * value. And since small values are never stored as medium ones, we can
      * extend the size range to cover that many longer values.
      */
-    static final int MEDIUM_LIMIT = 1 << (16-2) + SMALL_LIMIT;
+    static final int MEDIUM_LIMIT = (1 << (16 - 2)) + SMALL_LIMIT;
 
     static final Weigher<UUID, Segment> WEIGHER =
             new Weigher<UUID, Segment>() {
@@ -89,39 +90,20 @@ public class Segment {
                 }
             };
 
-    private static final UUID[] NO_UUIDS = new UUID[0];
-
-    private final SegmentStore store;
+    final SegmentStore store; // TODO: should be private
 
     private final UUID uuid;
 
     private final ByteBuffer data;
 
-    private final UUID[] uuids;
+    private final List<UUID> uuids;
 
-    private final OffsetCache<String> strings;
-
-    private final OffsetCache<Template> templates;
-
-    public Segment(SegmentStore store,
-            UUID uuid, ByteBuffer data, Collection<UUID> uuids,
-            Map<String, RecordId> strings, Map<Template, RecordId> templates) {
+    public Segment(
+            SegmentStore store, UUID uuid, ByteBuffer data, List<UUID> uuids) {
         this.store = checkNotNull(store);
         this.uuid = checkNotNull(uuid);
         this.data = checkNotNull(data);
-        this.uuids = checkNotNull(uuids).toArray(NO_UUIDS);
-        this.strings = new OffsetCache<String>(strings) {
-            @Override
-            protected String load(int offset) {
-                return loadString(offset);
-            }
-        };
-        this.templates = new OffsetCache<Template>(templates) {
-            @Override
-            protected Template load(int offset) {
-                return loadTemplate(offset);
-            }
-        };
+        this.uuids = checkNotNull(uuids);
     }
 
     /**
@@ -136,7 +118,7 @@ public class Segment {
     private int pos(int offset, int length) {
         int pos = offset - (MAX_SEGMENT_SIZE - size());
         checkPositionIndexes(pos, pos + length, size());
-        return pos;
+        return data.position() + pos;
     }
 
     public UUID getSegmentId() {
@@ -147,17 +129,38 @@ public class Segment {
         return data;
     }
 
-    public UUID[] getUUIDs() {
-        return uuids;
-    }
-
     public int size() {
-        return data.limit();
+        return data.remaining();
     }
 
     byte readByte(int offset) {
         return data.get(pos(offset, 1));
     }
+
+    /**
+     * Returns the identified segment.
+     *
+     * @param uuid segment identifier
+     * @return identified segment
+     */
+    Segment getSegment(UUID uuid) {
+        if (equal(uuid, this.uuid)) {
+            return this; // optimization for the common case (OAK-1031)
+        } else {
+            return store.readSegment(uuid);
+        }
+    }
+
+    /**
+     * Returns the segment that contains the identified record.
+     *
+     * @param id record identifier
+     * @return segment that contains the identified record
+     */
+    Segment getSegment(RecordId id) {
+        return getSegment(checkNotNull(id).getSegmentId());
+    }
+
 
     /**
      * Reads the given number of bytes starting from the given position
@@ -183,7 +186,7 @@ public class Segment {
 
     private RecordId internalReadRecordId(int pos) {
         return new RecordId(
-                uuids[data.get(pos) & 0xff],
+                uuids.get(data.get(pos) & 0xff),
                 (data.get(pos + 1) & 0xff) << (8 + Segment.RECORD_ALIGN_BITS)
                 | (data.get(pos + 2) & 0xff) << Segment.RECORD_ALIGN_BITS);
     }
@@ -196,20 +199,16 @@ public class Segment {
                 | (data.get(pos + 3) & 0xff);
     }
 
+    String readString(final RecordId id) {
+        return store.getRecord(id, new Callable<String>() {
+            @Override
+            public String call() {
+                return getSegment(id).readString(id.getOffset());
+            }
+        });
+    }
+
     String readString(int offset) {
-        return strings.get(offset);
-    }
-
-    String readString(RecordId id) {
-        checkNotNull(id);
-        Segment segment = this;
-        if (!uuid.equals(id.getSegmentId())) {
-            segment = store.readSegment(id.getSegmentId());
-        }
-        return segment.readString(id.getOffset());
-    }
-
-    private String loadString(int offset) {
         int pos = pos(offset, 1);
         long length = internalReadLength(pos);
         if (length < SMALL_LIMIT) {
@@ -227,7 +226,7 @@ public class Segment {
         } else if (length < Integer.MAX_VALUE) {
             int size = (int) ((length + BLOCK_SIZE - 1) / BLOCK_SIZE);
             ListRecord list =
-                    new ListRecord(internalReadRecordId(pos + 8), size);
+                    new ListRecord(this, internalReadRecordId(pos + 8), size);
             SegmentStream stream = new SegmentStream(
                     store, new RecordId(uuid, offset), list, length);
             try {
@@ -240,20 +239,20 @@ public class Segment {
         }
     }
 
+    MapRecord readMap(RecordId id) {
+        return new MapRecord(this, id);
+    }
+
+    Template readTemplate(final RecordId id) {
+        return store.getRecord(id, new Callable<Template>() {
+            @Override
+            public Template call() {
+                return getSegment(id).readTemplate(id.getOffset());
+            }
+        });
+    }
+
     Template readTemplate(int offset) {
-        return templates.get(offset);
-    }
-
-    Template readTemplate(RecordId id) {
-        checkNotNull(id);
-        Segment segment = this;
-        if (!uuid.equals(id.getSegmentId())) {
-            segment = store.readSegment(id.getSegmentId());
-        }
-        return segment.readTemplate(id.getOffset());
-    }
-
-    private Template loadTemplate(int offset) {
         int head = readInt(offset);
         boolean hasPrimaryType = (head & (1 << 31)) != 0;
         boolean hasMixinTypes = (head & (1 << 30)) != 0;
@@ -299,12 +298,16 @@ public class Segment {
             offset += Segment.RECORD_ID_BYTES;
             byte type = readByte(offset++);
             properties[i] = new PropertyTemplate(
-                    readString(propertyNameId),
+                    i, readString(propertyNameId),
                     Type.fromTag(Math.abs(type), type < 0));
         }
 
         return new Template(
                 primaryType, mixinTypes, properties, childName);
+    }
+
+    long readLength(RecordId id) {
+        return getSegment(id).readLength(id.getOffset());
     }
 
     long readLength(int offset) {
@@ -348,7 +351,8 @@ public class Segment {
             return new SegmentStream(id, inline);
         } else {
             int size = (int) ((length + BLOCK_SIZE - 1) / BLOCK_SIZE);
-            ListRecord list = new ListRecord(internalReadRecordId(pos + 8), size);
+            ListRecord list =
+                    new ListRecord(this, internalReadRecordId(pos + 8), size);
             return new SegmentStream(store, id, list, length);
         }
     }

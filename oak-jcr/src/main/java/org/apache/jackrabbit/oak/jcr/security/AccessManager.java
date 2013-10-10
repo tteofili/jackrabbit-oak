@@ -24,25 +24,27 @@ import javax.jcr.RepositoryException;
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.jcr.delegate.SessionDelegate;
-import org.apache.jackrabbit.oak.jcr.operation.SessionOperation;
+import org.apache.jackrabbit.oak.jcr.session.operation.SessionOperation;
 import org.apache.jackrabbit.oak.spi.security.authorization.permission.PermissionProvider;
 
 /**
  * AccessManager
  */
 public class AccessManager {
+
     private final SessionDelegate delegate;
     private final PermissionProvider permissionProvider;
 
-    public AccessManager(SessionDelegate delegate) {
+    public AccessManager(SessionDelegate delegate, PermissionProvider permissionProvider) {
         this.delegate = delegate;
-        this.permissionProvider = delegate.getPermissionProvider();
+        this.permissionProvider = permissionProvider;
     }
 
     public boolean hasPermissions(@Nonnull final String oakPath, @Nonnull final String actions) {
         return delegate.safePerform(new SessionOperation<Boolean>() {
             @Override
             public Boolean perform() {
+                permissionProvider.refresh();
                 return permissionProvider.isGranted(oakPath, actions);
             }
         });
@@ -52,6 +54,7 @@ public class AccessManager {
         return delegate.safePerform(new SessionOperation<Boolean>() {
             @Override
             public Boolean perform() {
+                permissionProvider.refresh();
                 return permissionProvider.isGranted(tree, property, permissions);
             }
         });

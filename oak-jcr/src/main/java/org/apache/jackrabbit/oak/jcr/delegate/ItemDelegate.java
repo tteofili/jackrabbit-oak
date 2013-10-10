@@ -59,7 +59,7 @@ public abstract class ItemDelegate {
         if (updateCount != sessionCount) {
             if (!exists()) {
                 throw new InvalidItemStateException(
-                        "This item does not exist anymore");
+                        "This item does not exist anymore : " + getPath());
             }
             updateCount = sessionCount;
         }
@@ -110,4 +110,12 @@ public abstract class ItemDelegate {
      */
     public abstract boolean remove() throws InvalidItemStateException;
 
+    /**
+     * Save the subtree rooted at this item.
+     *
+     * @throws RepositoryException
+     */
+    public void save() throws RepositoryException {
+        sessionDelegate.save(getPath());
+    }
 }

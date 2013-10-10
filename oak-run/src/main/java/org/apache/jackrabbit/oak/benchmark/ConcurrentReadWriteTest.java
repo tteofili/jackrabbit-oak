@@ -16,53 +16,14 @@
  */
 package org.apache.jackrabbit.oak.benchmark;
 
-import java.util.Random;
-
-import javax.jcr.Node;
-import javax.jcr.RepositoryException;
-import javax.jcr.Session;
-import javax.jcr.SimpleCredentials;
-
 /**
  * A {@link ConcurrentReadTest} with a single writer thread that continuously
  * updates the nodes being accessed by the readers.
  */
 public class ConcurrentReadWriteTest extends ConcurrentReadTest {
 
-    @Override
-    public void beforeSuite() throws Exception {
-        super.beforeSuite();
-
-        addBackgroundJob(new Writer());
-    }
-
-    class Writer implements Runnable {
-
-        private Session session;
-
-        private final Random random = new Random();
-
-        private long count;
-
-        public void run() {
-            try {
-                session = getRepository().login(
-                        new SimpleCredentials("admin", "admin".toCharArray()));
-                try {
-                    int i = random.nextInt(NODE_COUNT);
-                    int j = random.nextInt(NODE_COUNT);
-                    Node node = session.getRootNode().getNode(
-                            "testroot/node" + i + "/node" + j);
-                    node.setProperty("count", count++);
-                    session.save();
-                } finally {
-                    session.logout();
-                }
-            } catch (RepositoryException e) {
-                throw new RuntimeException(e);
-            }
-        }
-
+    public ConcurrentReadWriteTest() {
+        super(getScale(20), 1, true);
     }
 
 }

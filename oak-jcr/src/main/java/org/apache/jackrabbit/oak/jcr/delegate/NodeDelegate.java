@@ -16,6 +16,34 @@
  */
 package org.apache.jackrabbit.oak.jcr.delegate;
 
+import java.util.Iterator;
+import java.util.List;
+import java.util.Set;
+import javax.annotation.CheckForNull;
+import javax.annotation.Nonnull;
+import javax.jcr.InvalidItemStateException;
+import javax.jcr.ItemNotFoundException;
+import javax.jcr.RepositoryException;
+import javax.jcr.ValueFormatException;
+import javax.jcr.lock.LockException;
+import javax.jcr.nodetype.ConstraintViolationException;
+import javax.jcr.nodetype.NoSuchNodeTypeException;
+import javax.jcr.security.AccessControlException;
+
+import com.google.common.base.Function;
+import com.google.common.base.Predicate;
+import org.apache.jackrabbit.oak.api.CommitFailedException;
+import org.apache.jackrabbit.oak.api.PropertyState;
+import org.apache.jackrabbit.oak.api.Root;
+import org.apache.jackrabbit.oak.api.Tree;
+import org.apache.jackrabbit.oak.api.Tree.Status;
+import org.apache.jackrabbit.oak.api.Type;
+import org.apache.jackrabbit.oak.commons.PathUtils;
+import org.apache.jackrabbit.oak.plugins.identifier.IdentifierManager;
+import org.apache.jackrabbit.oak.plugins.memory.PropertyStates;
+import org.apache.jackrabbit.oak.spi.state.NodeStateUtils;
+import org.apache.jackrabbit.oak.util.TreeUtil;
+
 import static com.google.common.base.Objects.toStringHelper;
 import static com.google.common.collect.Iterables.addAll;
 import static com.google.common.collect.Iterables.contains;
@@ -57,36 +85,6 @@ import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.OAK_S
 import static org.apache.jackrabbit.oak.util.TreeUtil.getBoolean;
 import static org.apache.jackrabbit.oak.util.TreeUtil.getNames;
 
-import java.util.Iterator;
-import java.util.List;
-import java.util.Set;
-
-import javax.annotation.CheckForNull;
-import javax.annotation.Nonnull;
-import javax.jcr.InvalidItemStateException;
-import javax.jcr.ItemNotFoundException;
-import javax.jcr.RepositoryException;
-import javax.jcr.ValueFormatException;
-import javax.jcr.lock.LockException;
-import javax.jcr.nodetype.ConstraintViolationException;
-import javax.jcr.nodetype.NoSuchNodeTypeException;
-import javax.jcr.security.AccessControlException;
-
-import org.apache.jackrabbit.oak.api.CommitFailedException;
-import org.apache.jackrabbit.oak.api.PropertyState;
-import org.apache.jackrabbit.oak.api.Root;
-import org.apache.jackrabbit.oak.api.Tree;
-import org.apache.jackrabbit.oak.api.Tree.Status;
-import org.apache.jackrabbit.oak.api.Type;
-import org.apache.jackrabbit.oak.commons.PathUtils;
-import org.apache.jackrabbit.oak.core.IdentifierManager;
-import org.apache.jackrabbit.oak.plugins.memory.PropertyStates;
-import org.apache.jackrabbit.oak.spi.state.NodeStateUtils;
-import org.apache.jackrabbit.oak.util.TreeUtil;
-
-import com.google.common.base.Function;
-import com.google.common.base.Predicate;
-
 /**
  * {@code NodeDelegate} serve as internal representations of {@code Node}s.
  * Most methods of this class throw an {@code InvalidItemStateException}
@@ -97,19 +95,6 @@ public class NodeDelegate extends ItemDelegate {
 
     /** The underlying {@link org.apache.jackrabbit.oak.api.Tree} of this node. */
     private final Tree tree;
-
-    /**
-     * Create a new {@code NodeDelegate} instance for an existing {@code Tree}. That
-     * is for one where {@code exists() == true}.
-     *
-     * @param sessionDelegate
-     * @param tree
-     * @return  A new {@code NodeDelegate} instance or {@code null} if {@code tree}
-     *          doesn't exist.
-     */
-    static NodeDelegate create(SessionDelegate sessionDelegate, Tree tree) {
-        return tree.exists() ? new NodeDelegate(sessionDelegate, tree) : null;
-    }
 
     protected NodeDelegate(SessionDelegate sessionDelegate, Tree tree) {
         super(sessionDelegate);
@@ -131,9 +116,9 @@ public class NodeDelegate extends ItemDelegate {
     @Override
     @CheckForNull
     public NodeDelegate getParent() {
-        return tree.isRoot()
+        return tree.isRoot() || !tree.getParent().exists() 
             ? null
-            : create(sessionDelegate, tree.getParent());
+            : new NodeDelegate(sessionDelegate, tree.getParent());
     }
 
     @Override
@@ -264,9 +249,9 @@ public class NodeDelegate extends ItemDelegate {
     @CheckForNull
     public PropertyDelegate getPropertyOrNull(String relPath) throws RepositoryException {
         Tree parent = getTree(PathUtils.getParentPath(relPath));
-        if (parent != null) {
-            String name = PathUtils.getName(relPath);
-            return PropertyDelegate.create(sessionDelegate, parent, name);
+        String name = PathUtils.getName(relPath);
+        if (parent != null && parent.hasProperty(name)) {
+            return new PropertyDelegate(sessionDelegate, parent, name);
         } else {
             return null;
         }
@@ -336,7 +321,7 @@ public class NodeDelegate extends ItemDelegate {
     @CheckForNull
     public NodeDelegate getChild(String relPath) throws RepositoryException {
         Tree tree = getTree(relPath);
-        return tree == null ? null : create(sessionDelegate, tree);
+        return tree == null || !tree.exists() ? null : new NodeDelegate(sessionDelegate, tree);
     }
 
     /**
@@ -353,7 +338,7 @@ public class NodeDelegate extends ItemDelegate {
                 filter(iterator, new Predicate<Tree>() {
                     @Override
                     public boolean apply(Tree tree) {
-                        return !tree.getName().startsWith(":");
+                        return tree.exists();
                     }
                 }),
                 new Function<Tree, NodeDelegate>() {
@@ -462,7 +447,6 @@ public class NodeDelegate extends ItemDelegate {
     /**
      * Set a property
      *
-     * @param propertyState
      * @return the set property
      */
     @Nonnull
@@ -586,6 +570,7 @@ public class NodeDelegate extends ItemDelegate {
         }
 
         // First look for a matching named property definition
+        Tree fuzzyMatch = null;
         for (Tree type : types) {
             Tree definitions = type
                     .getChild(OAK_NAMED_PROPERTY_DEFINITIONS)
@@ -598,10 +583,12 @@ public class NodeDelegate extends ItemDelegate {
             if (definition.exists()) {
                 return definition;
             }
-            if (!exactTypeMatch) {
-                for (Tree def : definitions.getChildren()) {
-                    if (propertyType.isArray() == TreeUtil.getBoolean(def, JCR_MULTIPLE)) {
-                        return def;
+            for (Tree def : definitions.getChildren()) {
+                if (propertyType.isArray() == TreeUtil.getBoolean(def, JCR_MULTIPLE)) {
+                    if (getBoolean(def, JCR_PROTECTED)) {
+                        return null; // no fuzzy matches for protected items
+                    } else if (!exactTypeMatch && fuzzyMatch == null) {
+                        fuzzyMatch = def;
                     }
                 }
             }
@@ -618,16 +605,17 @@ public class NodeDelegate extends ItemDelegate {
             if (definition.exists()) {
                 return definition;
             }
-            if (!exactTypeMatch) {
+            if (!exactTypeMatch && fuzzyMatch == null) {
                 for (Tree def : definitions.getChildren()) {
                     if (propertyType.isArray() == TreeUtil.getBoolean(def, JCR_MULTIPLE)) {
-                        return def;
+                        fuzzyMatch = def;
+                        break;
                     }
                 }
             }
         }
 
-        return null;
+        return fuzzyMatch;
     }
 
     private Tree findMatchingChildNodeDefinition(
@@ -835,7 +823,7 @@ public class NodeDelegate extends ItemDelegate {
     @Nonnull // FIXME this should be package private. OAK-672
     public Tree getTree() throws InvalidItemStateException {
         if (!tree.exists()) {
-            throw new InvalidItemStateException("Item is stale");
+            throw new InvalidItemStateException("Item is stale " + tree.getPath());
         }
         return tree;
     }

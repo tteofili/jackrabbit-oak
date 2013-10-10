@@ -23,7 +23,7 @@ import javax.jcr.RepositoryException;
 
 import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.namepath.JcrPathParser.Listener;
-import org.apache.jackrabbit.oak.core.IdentifierManager;
+import org.apache.jackrabbit.oak.plugins.identifier.IdentifierManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -110,7 +110,7 @@ public class NamePathMapperImpl implements NamePathMapper {
                 if (index == 0) {
                     elements.add(p);
                 } else {
-                    elements.add(p + "[" + index + "]");
+                    elements.add(p + '[' + index + ']');
                 }
                 return true;
             }
@@ -150,19 +150,35 @@ public class NamePathMapperImpl implements NamePathMapper {
         // identifier path?
         if (length > 0 && jcrPath.charAt(0) == '[') {
             if (jcrPath.charAt(length - 1) != ']') {
-                // TODO error handling?
                 log.debug("Could not parse path " + jcrPath + ": unterminated identifier");
                 return null;
             }
             if (this.idManager == null) {
-                // TODO error handling?
                 log.debug("Could not parse path " + jcrPath + ": could not resolve identifier");
                 return null;
             }
             return this.idManager.getPath(jcrPath.substring(1, length - 1));
         }
 
+        // Shortcut iff the JCR path does not start with a dot, does not contain any of
+        // {}[]/ and if it contains a colon the session does not have local re-mappings.
+        boolean hasLocalMappings = hasSessionLocalMappings();
+        boolean shortcut = length > 0 && jcrPath.charAt(0) != '.';
+        for (int i = 0; shortcut && i < length; i++) {
+            char c = jcrPath.charAt(i);
+            if (c == '{' || c == '}' || c == '[' || c == ']' || c == '/') {
+                shortcut = false;
+            } else if (c == ':') {
+                shortcut = !hasLocalMappings;
+            }
+        }
+
+        if (shortcut) {
+            return jcrPath;
+        }
+
         final StringBuilder parseErrors = new StringBuilder();
+
         PathListener listener = new PathListener() {
             @Override
             public void error(String message) {

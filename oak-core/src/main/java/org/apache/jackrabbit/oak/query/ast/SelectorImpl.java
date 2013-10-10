@@ -43,7 +43,6 @@ import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.query.QueryImpl;
 import org.apache.jackrabbit.oak.query.fulltext.FullTextExpression;
-import org.apache.jackrabbit.oak.query.fulltext.SimpleExcerptProvider;
 import org.apache.jackrabbit.oak.query.index.FilterImpl;
 import org.apache.jackrabbit.oak.spi.query.Cursor;
 import org.apache.jackrabbit.oak.spi.query.Cursors;
@@ -53,6 +52,8 @@ import org.apache.jackrabbit.oak.spi.query.PropertyValues;
 import org.apache.jackrabbit.oak.spi.query.QueryIndex;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 
+import com.google.common.collect.ImmutableSet;
+
 /**
  * A selector within a query.
  */
@@ -61,6 +62,9 @@ public class SelectorImpl extends SourceImpl {
     // TODO possibly support using multiple indexes (using index intersection / index merge)
     protected QueryIndex index;
 
+    /**
+     * the node type associated with the {@link #nodeTypeName}
+     */
     private final NodeState nodeType;
 
     private final String selectorName;
@@ -69,10 +73,20 @@ public class SelectorImpl extends SourceImpl {
 
     private final boolean matchesAllTypes;
 
+    /**
+     * all of the matching supertypes, or empty if the {@link #matchesAllTypes} flag is set
+     */
     private final Set<String> supertypes;
 
+    /**
+     * all of the matching primary subtypes, or empty if the {@link #matchesAllTypes} flag is set
+     */
     private final Set<String> primaryTypes;
 
+    /**
+     * all of the matching mixin types, or empty if the {@link #matchesAllTypes}
+     * flag is set
+     */
     private final Set<String> mixinTypes;
 
     private Cursor cursor;
@@ -95,15 +109,22 @@ public class SelectorImpl extends SourceImpl {
         this.nodeTypeName = nodeType.getName(JCR_NODETYPENAME);
         this.matchesAllTypes = NT_BASE.equals(nodeTypeName);
 
-        this.supertypes = newHashSet(nodeType.getNames(OAK_SUPERTYPES));
-        supertypes.add(nodeTypeName);
+        if (!this.matchesAllTypes) {
+            this.supertypes = newHashSet(nodeType.getNames(OAK_SUPERTYPES));
+            supertypes.add(nodeTypeName);
 
-        this.primaryTypes = newHashSet(nodeType.getNames(OAK_PRIMARY_SUBTYPES));
-        this.mixinTypes = newHashSet(nodeType.getNames(OAK_MIXIN_SUBTYPES));
-        if (nodeType.getBoolean(JCR_ISMIXIN)) {
-            mixinTypes.add(nodeTypeName);
+            this.primaryTypes = newHashSet(nodeType
+                    .getNames(OAK_PRIMARY_SUBTYPES));
+            this.mixinTypes = newHashSet(nodeType.getNames(OAK_MIXIN_SUBTYPES));
+            if (nodeType.getBoolean(JCR_ISMIXIN)) {
+                mixinTypes.add(nodeTypeName);
+            } else {
+                primaryTypes.add(nodeTypeName);
+            }
         } else {
-            primaryTypes.add(nodeTypeName);
+            this.supertypes = ImmutableSet.of();
+            this.primaryTypes = ImmutableSet.of();
+            this.mixinTypes = ImmutableSet.of();
         }
     }
 
@@ -115,16 +136,28 @@ public class SelectorImpl extends SourceImpl {
         return matchesAllTypes;
     }
 
+    /**
+     * @return all of the matching supertypes, or empty if the
+     *         {@link #matchesAllTypes} flag is set
+     */
     @Nonnull
     public Set<String> getSupertypes() {
         return supertypes;
     }
 
+    /**
+     * @return all of the matching primary subtypes, or empty if the
+     *         {@link #matchesAllTypes} flag is set
+     */
     @Nonnull
     public Set<String> getPrimaryTypes() {
         return primaryTypes;
     }
 
+    /**
+     * @return all of the matching mixin types, or empty if the
+     *         {@link #matchesAllTypes} flag is set
+     */
     @Nonnull
     public Set<String> getMixinTypes() {
         return mixinTypes;
@@ -141,7 +174,6 @@ public class SelectorImpl extends SourceImpl {
 
     @Override
     public String toString() {
-        String nodeTypeName = nodeType.getName(JCR_NODETYPENAME);
         return quote(nodeTypeName) + " as " + quote(selectorName);
     }
 
@@ -283,21 +315,18 @@ public class SelectorImpl extends SourceImpl {
     public String currentPath() {
         return cursor == null ? null : currentRow.getPath();
     }
-
-    public PropertyValue currentProperty(String propertyName) {
-        boolean relative = propertyName.indexOf('/') >= 0;
-        if (cursor == null) {
-            return null;
-        }
-        IndexRow r = currentRow;
-        if (r == null) {
-            return null;
-        }
-        String path = r.getPath();
+    
+    public Tree currentTree() {
+        String path = currentPath();
         if (path == null) {
             return null;
         }
-        Tree t = getTree(path);
+        return getTree(path);
+    }
+
+    public PropertyValue currentProperty(String propertyName) {
+        boolean relative = propertyName.indexOf('/') >= 0;
+        Tree t = currentTree();
         if (relative) {
             for (String p : PathUtils.elements(PathUtils.getParentPath(propertyName))) {
                 if (t == null) {
@@ -317,6 +346,7 @@ public class SelectorImpl extends SourceImpl {
             return null;
         }
         if (propertyName.equals(QueryImpl.JCR_PATH)) {
+            String path = currentPath();
             String local = getLocalPath(path);
             if (local == null) {
                 // not a local path
@@ -326,15 +356,7 @@ public class SelectorImpl extends SourceImpl {
         } else if (propertyName.equals(QueryImpl.JCR_SCORE)) {
             return currentRow.getValue(QueryImpl.JCR_SCORE);
         } else if (propertyName.equals(QueryImpl.REP_EXCERPT)) {
-            // The excerpt itself is calculated at runtime (this is weird,
-            // but Jackrabbit 2.x supports that, see OAK-318).
-            // We store the search token (the full-text condition text) 
-            // in this column (which is also weird), as this is needed for highlighting
-            String searchToken = SimpleExcerptProvider.extractFulltext(query.getConstraint());
-            if (searchToken == null) {
-                return PropertyValues.newString(path);
-            }
-            return PropertyValues.newString(searchToken);
+            return currentRow.getValue(QueryImpl.REP_EXCERPT);
         }
         return PropertyValues.create(t.getProperty(propertyName));
     }

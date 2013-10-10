@@ -64,6 +64,12 @@ relying on one session seeing the other session's changes. Oak requires explicit
 On Oak `Item.refresh()` is deprecated and will always cause an `Session.refresh()`. The former call
 will result in a warning written to the log in order to facilitate locating trouble spots.
 
+On Oak `Item.save()` is deprecated and will per default log a warning and fall back to
+`Session.save()`. This behaviour can be tweaked with `-Ditem-save-does-session-save=false` in which
+case no fall back to `Session#save()` will happen but an `UnsupportedRepositoryException` is thrown
+if the sub-tree rooted at the respective item does not contain all transient changes. See
+[OAK-993](https://issues.apache.org/jira/browse/OAK-993) for details.
+
 Query
 -----
 
@@ -173,11 +179,6 @@ Changes with respect to Jackrabbit-core are collected in [OAK-14]
       the [TODO](https://issues.apache.org/jira/browse/OAK-193)-flag prevents the implementation from
       throwing UnsupportedOperationException, but the node *will not* be locked.
       See [OAK-150](https://issues.apache.org/jira/browse/OAK-150)
-
-
-* Nodetype Management:
-    * Removing mixins is not implemented yet
-      See [OAK-767](https://issues.apache.org/jira/browse/OAK-767)
 
 
 * Versioning [OAK-168](https://issues.apache.org/jira/browse/OAK-168):

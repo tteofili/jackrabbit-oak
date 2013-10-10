@@ -17,13 +17,16 @@
 package org.apache.jackrabbit.oak.plugins.mongomk.util;
 
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
 import org.apache.jackrabbit.mk.api.MicroKernelException;
 import org.apache.jackrabbit.oak.plugins.mongomk.Collection;
@@ -47,6 +50,9 @@ public class TimingDocumentStoreWrapper implements DocumentStore {
     private final Map<String, Count> counts = new HashMap<String, Count>();
     private long lastLogTime;
     private long totalLogTime;
+    private final Map<String, Integer> slowCalls = new ConcurrentHashMap<String, Integer>();
+    
+    private int callCount;
 
     /**
      * A class that keeps track of timing data and call counts.
@@ -74,13 +80,20 @@ public class TimingDocumentStoreWrapper implements DocumentStore {
         lastLogTime = now();
     }
     
+    private boolean logCommonCall() {
+        return callCount % 10 == 0;
+    }
+    
     @Override
     @CheckForNull
     public <T extends Document> T find(Collection<T> collection, String key) {
         try {
             long start = now();
             T result = base.find(collection, key);
-            updateAndLogTimes("find", start, 0, result.getMemory());
+            updateAndLogTimes("find", start, 0, size(result));
+            if (logCommonCall()) {
+                logCommonCall(start, "find " + collection + " " + key);
+            }
             return result;
         } catch (Exception e) {
             throw convert(e);
@@ -93,7 +106,10 @@ public class TimingDocumentStoreWrapper implements DocumentStore {
         try {
             long start = now();
             T result = base.find(collection, key, maxCacheAge);
-            updateAndLogTimes("find2", start, 0, result.getMemory());
+            updateAndLogTimes("find2", start, 0, size(result));
+            if (logCommonCall()) {
+                logCommonCall(start, "find2 " + collection + " " + key);
+            }
             return result;
         } catch (Exception e) {
             throw convert(e);
@@ -109,7 +125,16 @@ public class TimingDocumentStoreWrapper implements DocumentStore {
         try {
             long start = now();
             List<T> result = base.query(collection, fromKey, toKey, limit);
-            updateAndLogTimes("query", start, 0, size(result));
+            if (result.size() == 0) {
+                updateAndLogTimes("query, result=0", start, 0, size(result));
+            } else if (result.size() == 1) {
+                updateAndLogTimes("query, result=1", start, 0, size(result));
+            } else {
+                updateAndLogTimes("query, result>1", start, 0, size(result));
+            }
+            if (logCommonCall()) {
+                logCommonCall(start, "query " + collection + " " + fromKey + " " + toKey + " " + limit);
+            }
             return result;
         } catch (Exception e) {
             throw convert(e);
@@ -128,6 +153,9 @@ public class TimingDocumentStoreWrapper implements DocumentStore {
             long start = now();
             List<T> result = base.query(collection, fromKey, toKey, indexedProperty, startValue, limit);
             updateAndLogTimes("query2", start, 0, size(result));
+            if (logCommonCall()) {
+                logCommonCall(start, "query2 " + collection + " " + fromKey + " " + toKey + " " + indexedProperty + " " + startValue + " " + limit);
+            }
             return result;
         } catch (Exception e) {
             throw convert(e);
@@ -135,11 +163,14 @@ public class TimingDocumentStoreWrapper implements DocumentStore {
     }
 
     @Override
-    public void remove(Collection collection, String key) {
+    public <T extends Document> void remove(Collection<T> collection, String key) {
         try {
             long start = now();
             base.remove(collection, key);
             updateAndLogTimes("remove", start, 0, 0);
+            if (logCommonCall()) {
+                logCommonCall(start, "remove " + collection + " " + key);
+            }
         } catch (Exception e) {
             throw convert(e);
         }
@@ -151,6 +182,9 @@ public class TimingDocumentStoreWrapper implements DocumentStore {
             long start = now();
             boolean result = base.create(collection, updateOps);
             updateAndLogTimes("create", start, 0, 0);
+            if (logCommonCall()) {
+                logCommonCall(start, "create " + collection);
+            }
             return result;
         } catch (Exception e) {
             throw convert(e);
@@ -158,13 +192,32 @@ public class TimingDocumentStoreWrapper implements DocumentStore {
     }
 
     @Override
-    @Nonnull
+    public <T extends Document> void update(Collection<T> collection,
+                                            List<String> keys,
+                                            UpdateOp updateOp) {
+        try {
+            long start = now();
+            base.update(collection, keys, updateOp);
+            updateAndLogTimes("update", start, 0, 0);
+            if (logCommonCall()) {
+                logCommonCall(start, "update " + collection);
+            }
+        } catch (Exception e) {
+            throw convert(e);
+        }
+    }
+
+    @Override
+    @CheckForNull
     public <T extends Document> T createOrUpdate(Collection<T> collection, UpdateOp update)
             throws MicroKernelException {
         try {
             long start = now();
             T result = base.createOrUpdate(collection, update);
-            updateAndLogTimes("createOrUpdate", start, 0, result.getMemory());
+            updateAndLogTimes("createOrUpdate", start, 0, size(result));
+            if (logCommonCall()) {
+                logCommonCall(start, "createOrUpdate " + collection + " " + update.getId());
+            }
             return result;
         } catch (Exception e) {
             throw convert(e);
@@ -178,7 +231,10 @@ public class TimingDocumentStoreWrapper implements DocumentStore {
         try {
             long start = now();
             T result = base.findAndUpdate(collection, update);
-            updateAndLogTimes("findAndUpdate", start, 0, result.getMemory());
+            updateAndLogTimes("findAndUpdate", start, 0, size(result));
+            if (logCommonCall()) {
+                logCommonCall(start, "findAndUpdate " + collection + " " + update.getId());
+            }
             return result;
         } catch (Exception e) {
             throw convert(e);
@@ -197,7 +253,7 @@ public class TimingDocumentStoreWrapper implements DocumentStore {
     }
 
     @Override
-    public void invalidateCache(Collection collection, String key) {
+    public <T extends Document> void invalidateCache(Collection<T> collection, String key) {
         try {
             long start = now();
             base.invalidateCache(collection, key);
@@ -219,7 +275,7 @@ public class TimingDocumentStoreWrapper implements DocumentStore {
     }
 
     @Override
-    public boolean isCached(Collection collection, String key) {
+    public <T extends Document> boolean isCached(Collection<T> collection, String key) {
         try {
             long start = now();
             boolean result = base.isCached(collection, key);
@@ -227,6 +283,33 @@ public class TimingDocumentStoreWrapper implements DocumentStore {
             return result;
         } catch (Exception e) {
             throw convert(e);
+        }
+    }
+    
+    private void logCommonCall(long start, String key) {
+        int time = (int) (System.currentTimeMillis() - start);
+        if (time <= 0) {
+            return;
+        }
+        Map<String, Integer> map = slowCalls;
+        Integer oldCount = map.get(key);
+        if (oldCount == null) {
+            map.put(key, time);
+        } else {
+            map.put(key, oldCount + time);
+        }
+        int maxElements = 1000;
+        int minCount = 1;
+        while (map.size() > maxElements) {
+            for (Iterator<Map.Entry<String, Integer>> ei = map.entrySet().iterator(); ei.hasNext();) {
+                Map.Entry<String, Integer> e = ei.next();
+                if (e.getValue() <= minCount) {
+                    ei.remove();
+                }
+            }
+            if (map.size() > maxElements) {
+                minCount++;
+            }
         }
     }
 
@@ -250,6 +333,14 @@ public class TimingDocumentStoreWrapper implements DocumentStore {
         }
         return result;
     }
+
+    private static int size(@Nullable Document document) {
+        if (document == null) {
+            return 0;
+        } else {
+            return document.getMemory();
+        }
+    }
     
     private static long now() {
         return System.currentTimeMillis();
@@ -267,7 +358,7 @@ public class TimingDocumentStoreWrapper implements DocumentStore {
         }
         c.update(now - start, paramSize, resultSize);
         long t = now - lastLogTime;
-        if (t >= 2000) {
+        if (t >= 10000) {
             totalLogTime += t;
             lastLogTime = now;
             long totalCount = 0, totalTime = 0;
@@ -294,7 +385,35 @@ public class TimingDocumentStoreWrapper implements DocumentStore {
             }
             log("all count " + totalCount + " time " + totalTime + " " + 
                     (100 * totalTime / totalLogTime) + "%");
+
+            Map<String, Integer> map = slowCalls;
+            int top = 10;
+            int max = Integer.MAX_VALUE;
+            for (int i = 0; i < top;) {
+                int best = 0;
+                for (int x : map.values()) {
+                    if (x < max && x > best) {
+                        best = x;
+                    }
+                }
+                for (Entry<String, Integer> e : map.entrySet()) {
+                    if (e.getValue() >= best && e.getValue() < max) {
+                        log("slow call " + e.getValue() + " millis: " + e.getKey());
+                        i++;
+                        if (i >= top) {
+                            break;
+                        }
+                    }
+                }
+                if (i >= map.size()) {
+                    break;
+                }
+                max = best;
+            }
+            slowCalls.clear();
+            
             log("------");
+            
         }
     }
     

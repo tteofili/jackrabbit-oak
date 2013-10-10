@@ -19,7 +19,6 @@ package org.apache.jackrabbit.oak.benchmark;
 import javax.jcr.ItemVisitor;
 import javax.jcr.Node;
 import javax.jcr.RepositoryException;
-import javax.jcr.Session;
 import javax.jcr.security.AccessControlList;
 import javax.jcr.security.AccessControlManager;
 import javax.jcr.security.AccessControlPolicy;
@@ -35,10 +34,12 @@ import org.apache.jackrabbit.util.Text;
  * Concurrently reads random items from the deep tree where every 10th node is
  * access controlled.
  */
-public class ConcurrentReadAccessControlledTreeTest extends AbstractDeepTreeTest {
+public class ConcurrentReadAccessControlledTreeTest
+        extends ConcurrentReadDeepTreeTest {
 
-    public ConcurrentReadAccessControlledTreeTest(boolean runAsAdmin, int itemsToRead, int bgReaders) {
-        super(runAsAdmin, itemsToRead, bgReaders);
+    public ConcurrentReadAccessControlledTreeTest(
+            boolean runAsAdmin, int itemsToRead, int bgReaders, boolean doReport) {
+        super(runAsAdmin, itemsToRead, bgReaders, doReport);
     }
 
     @Override
@@ -89,35 +90,6 @@ public class ConcurrentReadAccessControlledTreeTest extends AbstractDeepTreeTest
         };
 
         visitor.visit(testRoot);
-
-        for (int i = 0; i < bgReaders; i++) {
-            addBackgroundJob(new RandomRead(getTestSession(), false));
-        }
     }
 
-    @Override
-    protected void runTest() throws Exception {
-        Session testSession = getTestSession();
-        RandomRead randomRead = new RandomRead(testSession, true);
-        randomRead.run();
-        testSession.logout();
-    }
-
-    private class RandomRead implements Runnable {
-
-        private final Session testSession;
-        private final boolean doReport;
-
-        private RandomRead(Session testSession, boolean doReport) {
-            this.testSession = testSession;
-            this.doReport = doReport;
-        }
-        public void run() {
-            try {
-                randomRead(testSession, allPaths, itemsToRead, doReport);
-            } catch (RepositoryException e) {
-                throw new RuntimeException(e);
-            }
-        }
-    }
 }

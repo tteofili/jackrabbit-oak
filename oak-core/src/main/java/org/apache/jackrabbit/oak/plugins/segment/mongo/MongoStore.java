@@ -24,18 +24,13 @@ import static org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState.EMPTY_NODE
 
 import java.nio.ByteBuffer;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.Callable;
 
+import org.apache.jackrabbit.oak.plugins.segment.AbstractStore;
 import org.apache.jackrabbit.oak.plugins.segment.Journal;
-import org.apache.jackrabbit.oak.plugins.segment.RecordId;
 import org.apache.jackrabbit.oak.plugins.segment.Segment;
-import org.apache.jackrabbit.oak.plugins.segment.SegmentCache;
-import org.apache.jackrabbit.oak.plugins.segment.SegmentStore;
-import org.apache.jackrabbit.oak.plugins.segment.Template;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 
 import com.google.common.collect.Lists;
@@ -47,7 +42,7 @@ import com.mongodb.DBObject;
 import com.mongodb.Mongo;
 import com.mongodb.WriteConcern;
 
-public class MongoStore implements SegmentStore {
+public class MongoStore extends AbstractStore {
 
     private final WriteConcern concern = WriteConcern.SAFE; // TODO: MAJORITY?
 
@@ -57,12 +52,10 @@ public class MongoStore implements SegmentStore {
 
     private final Map<String, Journal> journals = Maps.newHashMap();
 
-    private final SegmentCache cache;
-
-    public MongoStore(DB db, SegmentCache cache) {
+    public MongoStore(DB db, int cacheSize) {
+        super(cacheSize);
         this.db = checkNotNull(db);
         this.segments = db.getCollection("segments");
-        this.cache = cache;
         NodeBuilder builder = EMPTY_NODE.builder();
         builder.child("root");
         journals.put("root", new MongoJournal(
@@ -70,12 +63,7 @@ public class MongoStore implements SegmentStore {
                 concern, builder.getNodeState()));
     }
 
-    public MongoStore(DB db, long cacheSize) {
-        this(db, new SegmentCache(cacheSize));
-    }
-
-
-    public MongoStore(Mongo mongo, long cacheSize) {
+    public MongoStore(Mongo mongo, int cacheSize) {
         this(mongo.getDB("Oak"), cacheSize);
     }
 
@@ -95,32 +83,16 @@ public class MongoStore implements SegmentStore {
     }
 
     @Override
-    public Segment readSegment(final UUID segmentId) {
-        return cache.getSegment(segmentId, new Callable<Segment>() {
-            @Override
-            public Segment call() throws Exception {
-                return findSegment(segmentId);
-            }
-        });
-    }
-
-    @Override
-    public void createSegment(
+    public void writeSegment(
             UUID segmentId, byte[] data, int offset, int length,
-            Collection<UUID> referencedSegmentIds,
-            Map<String, RecordId> strings, Map<Template, RecordId> templates) {
+            List<UUID> referencedSegmentIds) {
         byte[] d = new byte[length];
         System.arraycopy(data, offset, d, 0, length);
-
-        cache.addSegment(new Segment(
-                this, segmentId, ByteBuffer.wrap(d), referencedSegmentIds,
-                Collections.<String, RecordId>emptyMap(),
-                Collections.<Template, RecordId>emptyMap()));
-
         insertSegment(segmentId, d, referencedSegmentIds);
     }
 
-    private Segment findSegment(UUID segmentId) {
+    @Override
+    protected Segment loadSegment(UUID segmentId) {
         DBObject id = new BasicDBObject("_id", segmentId.toString());
         DBObject fields = new BasicDBObject(of("data", 1, "uuids", 1));
 
@@ -139,10 +111,7 @@ public class MongoStore implements SegmentStore {
         for (Object object : list) {
             uuids.add(UUID.fromString(object.toString()));
         }
-        return new Segment(
-                this, segmentId, ByteBuffer.wrap(data), uuids,
-                Collections.<String, RecordId>emptyMap(),
-                Collections.<Template, RecordId>emptyMap());
+        return new Segment(this, segmentId, ByteBuffer.wrap(data), uuids);
     }
 
     private void insertSegment(
@@ -162,6 +131,7 @@ public class MongoStore implements SegmentStore {
     @Override
     public void deleteSegment(UUID segmentId) {
         segments.remove(new BasicDBObject("_id", segmentId.toString()));
-        cache.removeSegment(segmentId);
+        super.deleteSegment(segmentId);;
     }
+
 }

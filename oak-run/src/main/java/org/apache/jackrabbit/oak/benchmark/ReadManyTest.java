@@ -150,7 +150,7 @@ abstract class ReadManyTest extends AbstractTest {
     @Override
     protected void beforeSuite() throws Exception {
         session = getRepository().login(getCredentials());
-        root = session.getRootNode().addNode("content");
+        root = session.getRootNode().addNode("c" + TEST_ID);
         for (int i = 0; i < scale; i++) {
             Node top = root.addNode("node" + i);
             for (int j = 0; j < 1000; j++) {
@@ -159,13 +159,20 @@ abstract class ReadManyTest extends AbstractTest {
                     content.create(middle, "node" + k);
                 }
                 session.save(); // save once every 1k leaf entries
-                System.out.println(j);
             }
         }
     }
 
     @Override
     protected void afterSuite() throws Exception {
+        for (int i = 0; i < scale; i++) {
+            Node top = root.getNode("node" + i);
+            for (int j = 0; j < 1000; j++) {
+                top.getNode("node" + j).remove();
+                // save once every 1k leaf entries (OAK-1056)
+                session.save();
+            }
+        }
         root.remove();
         session.save();
         session.logout();

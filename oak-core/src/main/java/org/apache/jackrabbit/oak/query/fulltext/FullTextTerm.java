@@ -29,6 +29,15 @@ public class FullTextTerm extends FullTextExpression {
     private final String boost;
     private final LikePattern like;
 
+    public FullTextTerm(String propertyName, FullTextTerm copy) {
+        this.propertyName = propertyName;
+        this.not = copy.not;
+        this.text = copy.text;
+        this.filteredText = copy.filteredText;
+        this.boost = copy.boost;
+        this.like = copy.like;
+    }    
+
     public FullTextTerm(String propertyName, String text, boolean not, boolean escaped, String boost) {
         this.propertyName = propertyName;
         this.text = text;
@@ -58,7 +67,7 @@ public class FullTextTerm extends FullTextExpression {
                 } else if (c == '_') {
                     buff.append("\\_");
                     pattern = true;
-                } else if (Character.isLetterOrDigit(c) || " +-:&".indexOf(c) >= 0) {
+                } else if (Character.isLetterOrDigit(c) || " +-:&/.".indexOf(c) >= 0) {
                     buff.append(c);
                 }
             }

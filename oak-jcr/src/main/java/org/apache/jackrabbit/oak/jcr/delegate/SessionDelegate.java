@@ -17,8 +17,12 @@
 package org.apache.jackrabbit.oak.jcr.delegate;
 
 import static com.google.common.base.Preconditions.checkNotNull;
+import static com.google.common.collect.Lists.newArrayList;
+import static org.apache.jackrabbit.oak.commons.PathUtils.denotesRoot;
+import static org.apache.jackrabbit.oak.commons.PathUtils.elements;
 
 import java.io.IOException;
+import java.util.List;
 
 import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
@@ -30,33 +34,41 @@ import javax.jcr.nodetype.ConstraintViolationException;
 import org.apache.jackrabbit.oak.api.AuthInfo;
 import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.api.ContentSession;
+import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.QueryEngine;
 import org.apache.jackrabbit.oak.api.Root;
 import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.commons.PathUtils;
-import org.apache.jackrabbit.oak.core.IdentifierManager;
-import org.apache.jackrabbit.oak.jcr.RefreshStrategy;
-import org.apache.jackrabbit.oak.jcr.operation.SessionOperation;
 import org.apache.jackrabbit.oak.jcr.security.AccessManager;
-import org.apache.jackrabbit.oak.spi.security.SecurityProvider;
-import org.apache.jackrabbit.oak.spi.security.authorization.AuthorizationConfiguration;
-import org.apache.jackrabbit.oak.spi.security.authorization.permission.PermissionProvider;
+import org.apache.jackrabbit.oak.jcr.session.RefreshStrategy;
+import org.apache.jackrabbit.oak.jcr.session.operation.SessionOperation;
+import org.apache.jackrabbit.oak.plugins.identifier.IdentifierManager;
+import org.apache.jackrabbit.oak.spi.commit.Editor;
+import org.apache.jackrabbit.oak.spi.commit.EditorHook;
+import org.apache.jackrabbit.oak.spi.commit.EditorProvider;
+import org.apache.jackrabbit.oak.spi.commit.FailingValidator;
+import org.apache.jackrabbit.oak.spi.commit.SubtreeExcludingValidator;
+import org.apache.jackrabbit.oak.spi.commit.Validator;
 import org.apache.jackrabbit.oak.spi.security.authorization.permission.Permissions;
+import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
+import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.Marker;
+import org.slf4j.MarkerFactory;
 
 /**
  * TODO document
  */
 public class SessionDelegate {
     static final Logger log = LoggerFactory.getLogger(SessionDelegate.class);
+    static final Logger operationLogger = LoggerFactory.getLogger("org.apache.jackrabbit.oak.jcr.operations");
 
     private final ContentSession contentSession;
     private final RefreshStrategy refreshStrategy;
 
     private final Root root;
     private final IdentifierManager idManager;
-    private final PermissionProvider permissionProvider;
 
     private boolean isAlive = true;
     private int sessionOpCount;
@@ -72,21 +84,16 @@ public class SessionDelegate {
      *
      * @param contentSession  the content session
      * @param refreshStrategy  the refresh strategy used for auto refreshing this session
-     * @param securityProvider the security provider
      */
-    public SessionDelegate(@Nonnull ContentSession contentSession, RefreshStrategy refreshStrategy,
-            SecurityProvider securityProvider) {
+    public SessionDelegate(@Nonnull ContentSession contentSession, RefreshStrategy refreshStrategy) {
         this.contentSession = checkNotNull(contentSession);
         this.refreshStrategy = checkNotNull(refreshStrategy);
         this.root = contentSession.getLatestRoot();
         this.idManager = new IdentifierManager(root);
-        this.permissionProvider = checkNotNull(securityProvider)
-                .getConfiguration(AuthorizationConfiguration.class)
-                .getPermissionProvider(root, contentSession.getAuthInfo().getPrincipals());
     }
 
-    public synchronized void refreshAtNextAccess() {
-        refreshStrategy.accept(RefreshStrategy.Once.RESETTING_VISITOR);
+    public void refreshAtNextAccess() {
+        refreshStrategy.refreshAtNextAccess();
     }
 
     /**
@@ -115,7 +122,9 @@ public class SessionDelegate {
         }
         try {
             sessionOpCount++;
-            return sessionOperation.perform();
+            T result =  sessionOperation.perform();
+            logOperationDetails(sessionOperation);
+            return result;
         } finally {
             sessionOpCount--;
             if (sessionOperation.isUpdate()) {
@@ -231,7 +240,8 @@ public class SessionDelegate {
      */
     @CheckForNull
     public NodeDelegate getNode(String path) {
-        return NodeDelegate.create(this, root.getTree(path));
+        Tree tree = root.getTree(path);
+        return tree.exists() ? new NodeDelegate(this, tree) : null;
     }
 
     /**
@@ -248,11 +258,11 @@ public class SessionDelegate {
         } else {
             Tree parent = root.getTree(PathUtils.getParentPath(path));
             if (parent.hasProperty(name)) {
-                return PropertyDelegate.create(this, parent, name);
+                return new PropertyDelegate(this, parent, name);
             }
             Tree child = parent.getChild(name);
             if (child.exists()) {
-                return NodeDelegate.create(this, child);
+                return new NodeDelegate(this, child);
             } else {
                 return null;
             }
@@ -275,7 +285,8 @@ public class SessionDelegate {
     public PropertyDelegate getProperty(String path) {
         Tree parent = root.getTree(PathUtils.getParentPath(path));
         String name = PathUtils.getName(path);
-        return PropertyDelegate.create(this, parent, name);
+        return parent.hasProperty(name) ? new PropertyDelegate(this, parent,
+                name) : null;
     }
 
     public boolean hasPendingChanges() {
@@ -288,7 +299,33 @@ public class SessionDelegate {
         } catch (CommitFailedException e) {
             throw newRepositoryException(e);
         }
-        permissionProvider.refresh();
+    }
+
+    /**
+     * Save the subtree rooted at the given {@code path}.
+     * <p>
+     * This implementation only performs the save if the subtree rooted at {@code path} contains
+     * all transient changes and will throw an
+     * {@link javax.jcr.UnsupportedRepositoryOperationException} otherwise.
+     *
+     * @param path
+     * @throws RepositoryException
+     */
+    public void save(final String path) throws RepositoryException {
+        if (denotesRoot(path)) {
+            save();
+        } else {
+            try {
+                root.commit(new EditorHook(new EditorProvider() {
+                    @Override
+                    public Editor getRootEditor(NodeState before, NodeState after, NodeBuilder builder) {
+                        return new ItemSaveValidator(path);
+                    }
+                }));
+            } catch (CommitFailedException e) {
+                throw newRepositoryException(e);
+            }
+        }
     }
 
     public void refresh(boolean keepChanges) {
@@ -297,7 +334,6 @@ public class SessionDelegate {
         } else {
             root.refresh();
         }
-        permissionProvider.refresh();
     }
 
     //----------------------------------------------------------< Workspace >---
@@ -305,46 +341,6 @@ public class SessionDelegate {
     @Nonnull
     public String getWorkspaceName() {
         return contentSession.getWorkspaceName();
-    }
-
-    /**
-     * Copy a node
-     * @param srcPath  oak path to the source node to copy
-     * @param destPath  oak path to the destination
-     * @throws RepositoryException
-     */
-    public void copy(String srcPath, String destPath, AccessManager accessManager) throws RepositoryException {
-        // check destination
-        Tree dest = root.getTree(destPath);
-        if (dest.exists()) {
-            throw new ItemExistsException(destPath);
-        }
-
-        // check parent of destination
-        String destParentPath = PathUtils.getParentPath(destPath);
-        Tree destParent = root.getTree(destParentPath);
-        if (!destParent.exists()) {
-            throw new PathNotFoundException(PathUtils.getParentPath(destPath));
-        }
-
-        // check source exists
-        Tree src = root.getTree(srcPath);
-        if (!src.exists()) {
-            throw new PathNotFoundException(srcPath);
-        }
-
-        accessManager.checkPermissions(destPath, Permissions.getString(Permissions.NODE_TYPE_MANAGEMENT));
-
-        try {
-            Root currentRoot = contentSession.getLatestRoot();
-            if (!currentRoot.copy(srcPath, destPath)) {
-                throw new RepositoryException("Cannot copy node at " + srcPath + " to " + destPath);
-            }
-            currentRoot.commit();
-            refresh(false);
-        } catch (CommitFailedException e) {
-            throw newRepositoryException(e);
-        }
     }
 
     /**
@@ -398,11 +394,6 @@ public class SessionDelegate {
         return root.getQueryEngine();
     }
 
-    @Nonnull
-    public PermissionProvider getPermissionProvider() {
-        return permissionProvider;
-    }
-
     /**
      * The current {@code Root} instance this session delegate instance operates on.
      * To ensure the returned root reflects the correct repository revision access
@@ -423,6 +414,17 @@ public class SessionDelegate {
 
     //------------------------------------------------------------< internal >---
 
+    private <T> void logOperationDetails(SessionOperation<T> ops)  throws RepositoryException {
+        if(operationLogger.isDebugEnabled()){
+            String desc = ops.description();
+            if(desc != null){
+                Marker sessionMarker = MarkerFactory.getMarker(this.toString());
+                operationLogger.debug(sessionMarker,desc);
+            }
+        }
+    }
+
+
     /**
      * Wraps the given {@link CommitFailedException} instance using the
      * appropriate {@link RepositoryException} subclass based on the
@@ -433,5 +435,51 @@ public class SessionDelegate {
      */
     private static RepositoryException newRepositoryException(CommitFailedException exception) {
         return exception.asRepositoryException();
+    }
+
+    /**
+     * This validator checks that all changes are contained within the subtree
+     * rooted at a given path.
+     */
+    private static class ItemSaveValidator extends SubtreeExcludingValidator {
+
+        /**
+         * Name of the property whose {@link #propertyChanged(PropertyState, PropertyState)} to
+         * ignore or {@code null} if no property should be ignored.
+         */
+        private final String ignorePropertyChange;
+
+        /**
+         * Create a new validator that only throws a {@link CommitFailedException} whenever
+         * there are changes not contained in the subtree rooted at {@code path}.
+         * @param path
+         */
+        public ItemSaveValidator(String path) {
+            this(new FailingValidator(CommitFailedException.UNSUPPORTED, 0,
+                    "Failed to save subtree at " + path + ". There are " +
+                            "transient modifications outside that subtree."),
+                    newArrayList(elements(path)));
+        }
+
+        private ItemSaveValidator(Validator validator, List<String> path) {
+            super(validator, path);
+            // Ignore property changes if this is the head of the path.
+            // This allows for calling save on a changed property.
+            ignorePropertyChange = path.size() == 1 ? path.get(0) : null;
+        }
+
+        @Override
+        public void propertyChanged(PropertyState before, PropertyState after)
+                throws CommitFailedException {
+            if (!before.getName().equals(ignorePropertyChange)) {
+                super.propertyChanged(before, after);
+            }
+        }
+
+        @Override
+        protected SubtreeExcludingValidator createValidator(
+                Validator validator, final List<String> path) {
+            return new ItemSaveValidator(validator, path);
+        }
     }
 }

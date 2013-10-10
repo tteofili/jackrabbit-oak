@@ -17,15 +17,13 @@
    limitations under the License.
   -->
 
-<project xmlns="http://maven.apache.org/POM/4.0.0"
-         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd ">
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd ">
   <modelVersion>4.0.0</modelVersion>
 
   <parent>
     <groupId>org.apache.jackrabbit</groupId>
     <artifactId>oak-parent</artifactId>
-    <version>0.9-SNAPSHOT</version>
+    <version>0.11-SNAPSHOT</version>
     <relativePath>../oak-parent/pom.xml</relativePath>
   </parent>
 
@@ -40,31 +38,19 @@
       org.apache.jackrabbit.test.api.SessionTest#testMoveConstraintViolationExceptionDest              <!-- OAK-132 -->
       org.apache.jackrabbit.test.api.SessionTest#testMoveLockException
       org.apache.jackrabbit.test.api.SessionUUIDTest#testSaveReferentialIntegrityException             <!-- OAK-66 -->
-      org.apache.jackrabbit.test.api.NodeTest#testRefreshInvalidItemStateException                     <!-- OAK-141 -->
-      org.apache.jackrabbit.test.api.NodeTest#testRemoveNodeLockedItself
       org.apache.jackrabbit.test.api.NodeTest#testRemoveNodeParentLocked
       org.apache.jackrabbit.test.api.NodeUUIDTest#testSaveReferentialIntegrityException                <!-- OAK-66 -->
-      org.apache.jackrabbit.test.api.NodeUUIDTest#testSaveMovedRefNode                                 <!-- OAK-66 -->
-      org.apache.jackrabbit.test.api.SetValueValueFormatExceptionTest#testNodeNotReferenceable
       org.apache.jackrabbit.test.api.NodeSetPrimaryTypeTest#testLocked
-      org.apache.jackrabbit.test.api.WorkspaceCopyReferenceableTest#testCopyNodesNewUUID               <!-- OAK-118 -->
       org.apache.jackrabbit.test.api.WorkspaceCopyVersionableTest#testCopyNodesVersionableAndCheckedIn <!-- OAK-118 -->
-      org.apache.jackrabbit.test.api.WorkspaceMoveReferenceableTest#testMoveNodesReferenceableNodesNewUUID  <!-- OAK-118 -->
       org.apache.jackrabbit.test.api.WorkspaceMoveVersionableTest#testMoveNodesVersionableAndCheckedIn <!-- OAK-118 -->
-      org.apache.jackrabbit.test.api.SessionRemoveItemTest#testRemoveLockedNode
       org.apache.jackrabbit.test.api.SessionRemoveItemTest#testRemoveLockedChildItem
       org.apache.jackrabbit.test.api.NodeAddMixinTest#testLocked
       org.apache.jackrabbit.test.api.NodeCanAddMixinTest#testLocked
       org.apache.jackrabbit.test.api.NodeRemoveMixinTest#testLocked
-      org.apache.jackrabbit.test.api.ValueFactoryTest#testValueFormatException                         <!-- OAK-204 -->
-      org.apache.jackrabbit.test.api.WorkspaceCopySameNameSibsTest                                     <!-- OAK-118 -->
-      org.apache.jackrabbit.test.api.WorkspaceCopyTest#testCopyNodesAccessDenied                       <!-- OAK-118 -->
+      org.apache.jackrabbit.test.api.WorkspaceCopySameNameSibsTest#testCopyNodesNodeExistsAtDestPath2  <!-- OAK-118 -->
       org.apache.jackrabbit.test.api.WorkspaceCopyTest#testCopyNodesLocked                             <!-- OAK-118 -->
-      org.apache.jackrabbit.test.api.WorkspaceMoveSameNameSibsTest                                     <!-- OAK-118 -->
+      org.apache.jackrabbit.test.api.WorkspaceMoveSameNameSibsTest#testMoveNodesOrderingSupportedByParent <!-- OAK-118 -->
       org.apache.jackrabbit.test.api.WorkspaceMoveTest#testMoveNodesLocked                             <!-- OAK-118 -->
-      org.apache.jackrabbit.test.api.WorkspaceMoveTest#testMoveNodesAccessDenied                       <!-- OAK-118 -->
-      org.apache.jackrabbit.test.api.DocumentViewImportTest#testWorkspaceImportXml                     <!-- OAK-970 -->
-      org.apache.jackrabbit.test.api.DocumentViewImportTest#testSessionGetImportContentHandler         <!-- OAK-970 -->
 
       <!-- Locking : not fully implemented -->
       org.apache.jackrabbit.test.api.lock.LockTest#testNodeLocked
@@ -184,6 +170,8 @@
       org.apache.jackrabbit.core.query.ShareableNodeTest#testPathConstraint                          <!-- OAK-118 -->
       org.apache.jackrabbit.core.observation.ShareableNodesTest#testAddShare                         <!-- OAK-118 workspace support needed -->
       org.apache.jackrabbit.core.observation.ShareableNodesTest#testRemoveShare                      <!-- OAK-118 workspace support needed -->
+      org.apache.jackrabbit.oak.jcr.query.QueryTest#fnNameEncoding                                   <!-- OAK-1000 -->
+      org.apache.jackrabbit.core.query.SQL2OrderByTest#testOrderByScore                              <!-- JCR-3677 -->
 
       <!-- Node Types -->
       org.apache.jackrabbit.oak.jcr.nodetype.NodeDefinitionTest#testRootType                         <!-- OAK-901 -->
@@ -199,13 +187,29 @@
         <configuration>
           <instructions>
             <Export-Package>
-              !
+              org.apache.jackrabbit.oak.jcr
             </Export-Package>
             <Bundle-Activator>
               org.apache.jackrabbit.oak.jcr.osgi.Activator
             </Bundle-Activator>
           </instructions>
         </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <executions>
+          <execution>
+            <goals>
+              <goal>test-jar</goal>
+            </goals>
+            <configuration>
+              <excludes>
+                <exclude>logback-test.xml</exclude>
+              </excludes>
+            </configuration>
+          </execution>
+        </executions>
       </plugin>
     </plugins>
     <pluginManagement>
@@ -214,7 +218,7 @@
           <groupId>org.apache.rat</groupId>
           <artifactId>apache-rat-plugin</artifactId>
           <configuration>
-            <excludes/>
+            <excludes />
           </configuration>
         </plugin>
       </plugins>

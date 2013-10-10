@@ -16,14 +16,13 @@
  */
 package org.apache.jackrabbit.oak.jcr.xml;
 
-import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.NODE_TYPES_PATH;
-
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Set;
 import java.util.Stack;
 import java.util.UUID;
-
 import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
 import javax.jcr.ImportUUIDBehavior;
@@ -46,9 +45,9 @@ import org.apache.jackrabbit.oak.api.Root;
 import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.commons.PathUtils;
-import org.apache.jackrabbit.oak.core.IdentifierManager;
-import org.apache.jackrabbit.oak.jcr.SessionContext;
 import org.apache.jackrabbit.oak.jcr.security.AccessManager;
+import org.apache.jackrabbit.oak.jcr.session.SessionContext;
+import org.apache.jackrabbit.oak.plugins.identifier.IdentifierManager;
 import org.apache.jackrabbit.oak.plugins.memory.PropertyStates;
 import org.apache.jackrabbit.oak.plugins.nodetype.DefinitionProvider;
 import org.apache.jackrabbit.oak.plugins.nodetype.EffectiveNodeTypeProvider;
@@ -64,6 +63,8 @@ import org.apache.jackrabbit.oak.util.TreeUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.NODE_TYPES_PATH;
+
 public class ImporterImpl implements Importer {
     private static final Logger log = LoggerFactory.getLogger(ImporterImpl.class);
 
@@ -73,9 +74,27 @@ public class ImporterImpl implements Importer {
 
     private final String userID;
     private final AccessManager accessManager;
-    private final IdentifierManager idManager;
+
+    /**
+     * There are two IdentifierManagers used.
+     *
+     * baseStateIdManager - Associated with the initial root on which
+     *   no modifications are performed
+     *
+     * currentStateIdManager - Associated with current root on which all import
+     *   operations are being performed
+     *
+     */
+    private final IdentifierManager baseStateIdManager;
+    private final IdentifierManager currentStateIdManager;
     private final EffectiveNodeTypeProvider effectiveNodeTypeProvider;
     private final DefinitionProvider definitionProvider;
+
+    /**
+     * Set of newly created uuid from nodes which are
+     * created in this import
+     */
+    private final Set<String> uuids = new HashSet<String>();
 
     private final Stack<Tree> parents;
 
@@ -107,6 +126,7 @@ public class ImporterImpl implements Importer {
     public ImporterImpl(String absPath,
                         SessionContext sessionContext,
                         Root root,
+                        Root initialRoot,
                         int uuidBehavior,
                         boolean isWorkspaceImport) throws RepositoryException {
         if (!PathUtils.isAbsolute(absPath)) {
@@ -139,7 +159,8 @@ public class ImporterImpl implements Importer {
         }
         ntTypesRoot = root.getTree(NODE_TYPES_PATH);
         accessManager = sessionContext.getAccessManager();
-        idManager = new IdentifierManager(root);
+        baseStateIdManager = new IdentifierManager(initialRoot);
+        currentStateIdManager = new IdentifierManager(root);
         effectiveNodeTypeProvider = sessionContext.getWorkspace().getNodeTypeManager();
         definitionProvider = sessionContext.getWorkspace().getNodeTypeManager();
         // TODO: end
@@ -192,14 +213,10 @@ public class ImporterImpl implements Importer {
     }
 
     private Tree resolveUUIDConflict(Tree parent,
+                                     Tree conflicting,
                                      String conflictingId,
                                      NodeInfo nodeInfo) throws RepositoryException {
         Tree tree;
-        Tree conflicting = idManager.getTree(conflictingId);
-        if (conflicting != null && !conflicting.exists()) {
-            conflicting = null;
-        }
-
         if (uuidBehavior == ImportUUIDBehavior.IMPORT_UUID_CREATE_NEW) {
             // create new with new uuid
             tree = createTree(parent, nodeInfo, UUID.randomUUID().toString());
@@ -367,10 +384,28 @@ public class ImporterImpl implements Importer {
                 // no potential uuid conflict, always add new node
                 tree = createTree(parent, nodeInfo, id);
             } else {
-                Tree conflicting = idManager.getTree(id);
+
+                //1. First check from base state that tree corresponding to
+                //this id exist
+                Tree conflicting = baseStateIdManager.getTree(id);
+
+                if(conflicting == null){
+                    //1.a. Check if id is found in newly created nodes
+                    if(uuids.contains(id)){
+                        conflicting = currentStateIdManager.getTree(id);
+                    }
+                }else{
+                    //1.b Re obtain the conflicting tree from Id Manager
+                    //associated with current root. Such that any operation
+                    //on it gets reflected in later operations
+                    //In case a tree with same id was removed earlier then it
+                    //would return null
+                    conflicting = currentStateIdManager.getTree(id);
+                }
+
                 if (conflicting != null && conflicting.exists()) {
                     // resolve uuid conflict
-                    tree = resolveUUIDConflict(parent, id, nodeInfo);
+                    tree = resolveUUIDConflict(parent, conflicting, id, nodeInfo);
                     if (tree == null) {
                         // no new node has been created, so skip this node
                         parents.push(null); // push null onto stack for skipped node
@@ -428,6 +463,23 @@ public class ImporterImpl implements Importer {
                 // parent -> selecting again from available importers
                 pnImporter = null;
             }
+        }
+
+        collectUUIDs(parent);
+    }
+
+    private void collectUUIDs(Tree tree) {
+        if(tree == null){
+            return;
+        }
+
+        String uuid = TreeUtil.getString(tree, JcrConstants.JCR_UUID);
+        if(uuid != null){
+            uuids.add(uuid);
+        }
+
+        for(Tree child : tree.getChildren()){
+            collectUUIDs(child);
         }
     }
 

@@ -15,10 +15,13 @@ package org.apache.jackrabbit.oak.query.index;
 
 import org.apache.jackrabbit.oak.Oak;
 import org.apache.jackrabbit.oak.api.ContentRepository;
+import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.plugins.nodetype.write.InitialContent;
 import org.apache.jackrabbit.oak.query.AbstractQueryTest;
 import org.apache.jackrabbit.oak.spi.security.OpenSecurityProvider;
 import org.junit.Test;
+
+import com.google.common.collect.ImmutableList;
 
 /**
  * Tests the query engine using the default index implementation: the
@@ -44,4 +47,25 @@ public class TraversingIndexQueryTest extends AbstractQueryTest {
         test("sql2.txt");
     }
 
+    @Test
+    public void testFullTextTerm() throws Exception {
+        //OAK-1024 allow '/' in a full-text query 
+        Tree node = root.getTree("/").addChild("content");
+        node.setProperty("jcr:mimeType", "text/plain");
+        assertQuery("//*[jcr:contains(., 'text/plain')]", "xpath",
+                ImmutableList.of("/content"));
+    }
+
+    @Test
+    public void testFullTextTermName() throws Exception {
+        Tree c = root.getTree("/").addChild("content");
+        c.addChild("testFullTextTermNameSimple");
+        c.addChild("testFullTextTermNameFile.txt");
+        assertQuery("//*[jcr:contains(., 'testFullTextTermNameSimple')]",
+                "xpath",
+                ImmutableList.of("/content/testFullTextTermNameSimple"));
+        assertQuery("//*[jcr:contains(., 'testFullTextTermNameFile.txt')]",
+                "xpath",
+                ImmutableList.of("/content/testFullTextTermNameFile.txt"));
+    }
 }

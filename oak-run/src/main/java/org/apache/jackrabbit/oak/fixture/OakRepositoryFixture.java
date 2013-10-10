@@ -79,8 +79,10 @@ public abstract class OakRepositoryFixture implements RepositoryFixture {
     }
 
     public static RepositoryFixture getMongo(
-            final String host, final int port, final long cacheSize) {
+            final String host, final int port, final String database,
+            final boolean dropDBAfterTest, final long cacheSize) {
         return new OakRepositoryFixture("Oak-Mongo") {
+            private String dbName = database != null ? database : unique;
             private MongoMK[] kernels;
             @Override
             public Repository[] setUpCluster(int n) throws Exception {
@@ -88,10 +90,10 @@ public abstract class OakRepositoryFixture implements RepositoryFixture {
                 kernels = new MongoMK[cluster.length];
                 for (int i = 0; i < cluster.length; i++) {
                     MongoConnection mongo =
-                            new MongoConnection(host, port, unique);
+                            new MongoConnection(host, port, dbName);
                     kernels[i] = new MongoMK.Builder().
                             setMongoDB(mongo.getDB()).
-                            setClusterId(i).open();
+                            setClusterId(i).setLogging(false).open();
                     Oak oak = new Oak(new KernelNodeStore(kernels[i], cacheSize));
                     cluster[i] = new Jcr(oak).createRepository();
                 }
@@ -102,20 +104,22 @@ public abstract class OakRepositoryFixture implements RepositoryFixture {
                 for (MongoMK kernel : kernels) {
                     kernel.dispose();
                 }
-                try {
-                    MongoConnection mongo =
-                            new MongoConnection(host, port, unique);
-                    mongo.getDB().dropDatabase();
-                    mongo.close();
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
+                if (dropDBAfterTest) {
+                    try {
+                        MongoConnection mongo =
+                                new MongoConnection(host, port, dbName);
+                        mongo.getDB().dropDatabase();
+                        mongo.close();
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
                 }
             }
         };
     }
 
     public static RepositoryFixture getSegment(
-            final String host, final int port, final long cacheSize) {
+            final String host, final int port, final int cacheSize) {
         return new OakRepositoryFixture("Oak-Segment") {
             private SegmentStore[] stores;
             private Mongo mongo;
@@ -142,7 +146,9 @@ public abstract class OakRepositoryFixture implements RepositoryFixture {
         };
     }
 
-    public static RepositoryFixture getTar(final File base) {
+    public static RepositoryFixture getTar(
+            final File base,
+            final int maxFileSize, final boolean memoryMapping) {
         return new OakRepositoryFixture("Oak-Tar") {
             private SegmentStore[] stores;
             @Override
@@ -150,7 +156,8 @@ public abstract class OakRepositoryFixture implements RepositoryFixture {
                 Repository[] cluster = new Repository[n];
                 stores = new FileStore[cluster.length];
                 for (int i = 0; i < cluster.length; i++) {
-                    stores[i] = new FileStore(new File(base, unique));
+                    stores[i] = new FileStore(
+                            new File(base, unique), maxFileSize, memoryMapping);
                     Oak oak = new Oak(new SegmentNodeStore(stores[i]));
                     cluster[i] = new Jcr(oak).createRepository();
                 }

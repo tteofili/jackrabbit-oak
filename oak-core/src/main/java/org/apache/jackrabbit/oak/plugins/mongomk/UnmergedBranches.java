@@ -17,6 +17,7 @@
 package org.apache.jackrabbit.oak.plugins.mongomk;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.SortedMap;
 import java.util.SortedSet;
@@ -28,6 +29,7 @@ import javax.annotation.Nonnull;
 
 import org.apache.jackrabbit.oak.plugins.mongomk.util.Utils;
 
+import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
 
 /**
@@ -49,9 +51,9 @@ class UnmergedBranches {
     /**
      * The revision comparator.
      */
-    private final Revision.RevisionComparator comparator;
+    private final Comparator<Revision> comparator;
 
-    UnmergedBranches(@Nonnull Revision.RevisionComparator comparator) {
+    UnmergedBranches(@Nonnull Comparator<Revision> comparator) {
         this.comparator = checkNotNull(comparator);
     }
 
@@ -67,17 +69,20 @@ class UnmergedBranches {
             throw new IllegalStateException("already initialized");
         }
         NodeDocument doc = store.find(Collection.NODES, Utils.getIdFromPath("/"));
+        if (doc == null) {
+            return;
+        }
         SortedMap<Revision, Revision> revisions = doc.getUncommittedRevisions(context);
         while (!revisions.isEmpty()) {
             SortedSet<Revision> commits = new TreeSet<Revision>(comparator);
             Revision head = revisions.lastKey();
             commits.add(head);
-            Revision base = revisions.remove(head);
+            Revision base = revisions.remove(head).asTrunkRevision();
             while (revisions.containsKey(base)) {
                 commits.add(base);
-                base = revisions.remove(base);
+                base = revisions.remove(base).asTrunkRevision();
             }
-            branches.add(new Branch(commits, base, comparator));
+            branches.add(new Branch(commits, base));
         }
     }
 
@@ -87,12 +92,17 @@ class UnmergedBranches {
      * @param base the base revision of the branch.
      * @param initial the initial commit to the branch.
      * @return the branch.
+     * @throws IllegalArgumentException if
      */
     @Nonnull
     Branch create(@Nonnull Revision base, @Nonnull Revision initial) {
+        checkArgument(!checkNotNull(base).isBranch(),
+                "base is not a trunk revision: %s", base);
+        checkArgument(checkNotNull(initial).isBranch(),
+                "initial is not a branch revision: %s", initial);
         SortedSet<Revision> commits = new TreeSet<Revision>(comparator);
-        commits.add(checkNotNull(initial));
-        Branch b = new Branch(commits, checkNotNull(base), comparator);
+        commits.add(initial);
+        Branch b = new Branch(commits, base);
         synchronized (branches) {
             branches.add(b);
         }

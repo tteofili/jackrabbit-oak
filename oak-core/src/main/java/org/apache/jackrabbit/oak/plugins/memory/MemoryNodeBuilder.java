@@ -119,7 +119,7 @@ public class MemoryNodeBuilder implements NodeBuilder {
      * @param parent parent builder
      * @param name name of this node
      */
-    private MemoryNodeBuilder(MemoryNodeBuilder parent, String name) {
+    protected MemoryNodeBuilder(MemoryNodeBuilder parent, String name) {
         this.parent = parent;
         this.name = name;
         this.rootBuilder = parent.rootBuilder;
@@ -189,11 +189,51 @@ public class MemoryNodeBuilder implements NodeBuilder {
      * Called whenever <em>this</em> node is modified, i.e. a property is
      * added, changed or removed, or a child node is added or removed. Changes
      * inside child nodes or the subtrees below are not reported. The default
-     * implementation does nothing, but subclasses may override this method
-     * to better track changes.
+     * implementation triggers an {@link #updated()} call on the root builder
+     * (unless this is already the root builder), which subclasses can use
+     * to capture aggregate update information across the whole tree.
      */
     protected void updated() {
-        // do nothing
+        if (this != rootBuilder) {
+            rootBuilder.updated();
+        }
+    }
+
+    /**
+     * Accessor for parent builder
+     */
+    protected final MemoryNodeBuilder getParent() {
+        return parent;
+    }
+
+    /**
+     * Accessor for name
+     */
+    protected final String getName() {
+        return name;
+    }
+
+    /**
+     * Throws away all changes in this builder and resets the base to the
+     * given node state.
+     *
+     * @param newBase new base state
+     */
+    public void reset(NodeState newBase) {
+        base = checkNotNull(newBase);
+        baseRevision++;
+        head().setState(newBase);
+    }
+
+    /**
+     * Replaces the current state of this builder with the given node state.
+     * The base state remains unchanged.
+     *
+     * @param newHead new head state
+     */
+    protected void set(NodeState newHead) {
+        baseRevision++; // this forces all sub-builders to refresh their heads
+        head().setState(newHead);
     }
 
     //--------------------------------------------------------< NodeBuilder >---
@@ -221,13 +261,6 @@ public class MemoryNodeBuilder implements NodeBuilder {
     @Override
     public boolean isModified() {
         return head().isModified();
-    }
-
-    @Override
-    public void reset(NodeState newBase) {
-        base = checkNotNull(newBase);
-        baseRevision++;
-        head().reset();
     }
 
     @Override
@@ -278,9 +311,37 @@ public class MemoryNodeBuilder implements NodeBuilder {
         if (!isRoot() && exists()) {
             head().getMutableNodeState();  // Make sure the removed node is connected
             parent.head().getMutableNodeState().removeChildNode(name);
+            updated();
             return true;
         } else {
             return false;
+        }
+    }
+
+    @Override
+    public boolean moveTo(NodeBuilder newParent, String newName) {
+        if (isRoot()) {
+            return false;
+        } else {
+            NodeState nodeState = getNodeState();
+            remove();
+            if (newParent.exists()) {
+                checkNotNull(newParent).setChildNode(checkNotNull(newName), nodeState);
+                return true;
+            } else {
+                // Move to descendant
+                return false;
+            }
+        }
+    }
+
+    @Override
+    public boolean copyTo(NodeBuilder newParent, String newName) {
+        if (isRoot()) {
+            return false;
+        } else {
+            checkNotNull(newParent).setChildNode(checkNotNull(newName), getNodeState());
+            return true;
         }
     }
 
@@ -371,9 +432,9 @@ public class MemoryNodeBuilder implements NodeBuilder {
     }
 
     /**
-     * @return path of this builder. For debugging purposes only
+     * @return path of this builder.
      */
-    private String getPath() {
+    public final String getPath() {
         return parent == null ? "/" : getPath(new StringBuilder()).toString();
     }
 
@@ -440,9 +501,10 @@ public class MemoryNodeBuilder implements NodeBuilder {
          */
         public abstract boolean isModified();
 
-        public void reset() {
-            throw new IllegalStateException("Cannot reset a non-root builder");
+        public void setState(NodeState state) {
+            throw new IllegalStateException("Cannot set the state of a non-root builder");
         }
+
     }
 
     private class UnconnectedHead extends Head {
@@ -560,10 +622,11 @@ public class MemoryNodeBuilder implements NodeBuilder {
         }
 
         @Override
-        public final void reset() {
-            state = new MutableNodeState(base);
+        public final void setState(NodeState state) {
+            this.state = new MutableNodeState(state);
             revision++;
         }
+
     }
 
 }

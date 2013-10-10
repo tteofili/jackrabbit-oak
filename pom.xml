@@ -23,7 +23,7 @@
   <parent>
     <groupId>org.apache.jackrabbit</groupId>
     <artifactId>oak-parent</artifactId>
-    <version>0.9-SNAPSHOT</version>
+    <version>0.11-SNAPSHOT</version>
     <relativePath>oak-parent/pom.xml</relativePath>
   </parent>
 
@@ -98,12 +98,6 @@
   </reporting>
 
   <profiles>
-    <profile>
-      <id>mongomk</id>
-      <modules>
-        <module>oak-mongomk-perf</module>
-      </modules>
-    </profile>
     <profile>
       <id>apache-release</id>
       <properties>

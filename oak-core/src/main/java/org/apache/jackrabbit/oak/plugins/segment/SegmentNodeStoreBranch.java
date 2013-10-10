@@ -18,7 +18,6 @@ package org.apache.jackrabbit.oak.plugins.segment;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
-import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.apache.jackrabbit.oak.plugins.segment.SegmentNodeStore.ROOT;
 
 import java.util.Random;
@@ -30,12 +29,12 @@ import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.spi.commit.CommitHook;
 import org.apache.jackrabbit.oak.spi.commit.PostCommitHook;
-import org.apache.jackrabbit.oak.spi.state.AbstractNodeStoreBranch;
 import org.apache.jackrabbit.oak.spi.state.ConflictAnnotatingRebaseDiff;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
+import org.apache.jackrabbit.oak.spi.state.NodeStoreBranch;
 
-class SegmentNodeStoreBranch extends AbstractNodeStoreBranch {
+class SegmentNodeStoreBranch implements NodeStoreBranch {
 
     private static final Random RANDOM = new Random();
 
@@ -47,19 +46,16 @@ class SegmentNodeStoreBranch extends AbstractNodeStoreBranch {
 
     private SegmentNodeState head;
 
-    private long maximumBackoff = MILLISECONDS.convert(10, SECONDS);
+    private long maximumBackoff;
 
     SegmentNodeStoreBranch(
             SegmentNodeStore store, SegmentWriter writer,
-            SegmentNodeState base) {
+            SegmentNodeState base, long maximumBackoff) {
         this.store = store;
         this.writer = writer;
         this.base = base;
         this.head = base;
-    }
-
-    void setMaximumBackoff(long max) {
-        this.maximumBackoff = max;
+        this.maximumBackoff = maximumBackoff;
     }
 
     @Override @Nonnull
@@ -77,7 +73,6 @@ class SegmentNodeStoreBranch extends AbstractNodeStoreBranch {
         NodeBuilder builder = head.builder();
         builder.setChildNode(ROOT, newRoot);
         head = writer.writeNode(builder.getNodeState());
-        writer.flush();
     }
 
     @Override
@@ -90,7 +85,6 @@ class SegmentNodeStoreBranch extends AbstractNodeStoreBranch {
                     new ConflictAnnotatingRebaseDiff(builder.child(ROOT)));
             base = newBase;
             head = writer.writeNode(builder.getNodeState());
-            writer.flush();
         }
     }
 
@@ -110,7 +104,6 @@ class SegmentNodeStoreBranch extends AbstractNodeStoreBranch {
             builder.setChildNode(ROOT, hook.processCommit(
                     base.getChildNode(ROOT), head.getChildNode(ROOT)));
             SegmentNodeState newHead = writer.writeNode(builder.getNodeState());
-            writer.flush();
 
             // use optimistic locking to update the journal
             if (base.hasProperty("token")
@@ -160,7 +153,6 @@ class SegmentNodeStoreBranch extends AbstractNodeStoreBranch {
 
                 SegmentNodeState after =
                         writer.writeNode(builder.getNodeState());
-                writer.flush();
                 if (store.setHead(before, after)) {
                     SegmentNodeState originalBase = base;
                     SegmentNodeState originalHead = head;
@@ -175,7 +167,6 @@ class SegmentNodeStoreBranch extends AbstractNodeStoreBranch {
                     // complete the commit
                     SegmentNodeState newHead =
                             writer.writeNode(builder.getNodeState());
-                    writer.flush();
                     if (store.setHead(after, newHead)) {
                         NodeState previousBase = base;
                         base = newHead;
@@ -295,4 +286,8 @@ class SegmentNodeStoreBranch extends AbstractNodeStoreBranch {
         return true;
     }
 
+    @Override
+    public String toString() {
+        return getHead().toString();
+    }
 }

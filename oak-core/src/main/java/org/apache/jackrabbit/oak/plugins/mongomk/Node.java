@@ -78,10 +78,10 @@ public class Node implements CacheValue {
         UpdateOp op = new UpdateOp(id, isNew);
         op.set(Document.ID, id);
         NodeDocument.setModified(op, rev);
-        op.setMapEntry(NodeDocument.DELETED, rev.toString(), "false");
+        NodeDocument.setDeleted(op, rev, false);
         for (String p : properties.keySet()) {
             String key = Utils.escapePropertyName(p);
-            op.setMapEntry(key, rev.toString(), properties.get(p));
+            op.setMapEntry(key, rev, properties.get(p));
         }
         return op;
     }
@@ -122,7 +122,7 @@ public class Node implements CacheValue {
     static class Children implements CacheValue {
 
         final ArrayList<String> children = new ArrayList<String>();
-        boolean hasMore = false;
+        boolean hasMore;
 
         @Override
         public int getMemory() {
