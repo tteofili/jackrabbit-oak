@@ -21,6 +21,7 @@ import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.collect.Maps.newHashMap;
 import static org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState.EMPTY_NODE;
+import static org.apache.jackrabbit.oak.plugins.memory.ModifiedNodeState.squeeze;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -29,11 +30,14 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
 import com.google.common.io.ByteStreams;
+
+import org.apache.jackrabbit.oak.api.Blob;
 import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.spi.commit.CommitHook;
-import org.apache.jackrabbit.oak.spi.commit.PostCommitHook;
+import org.apache.jackrabbit.oak.spi.commit.CommitInfo;
 import org.apache.jackrabbit.oak.spi.state.ConflictAnnotatingRebaseDiff;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
@@ -75,21 +79,21 @@ public class MemoryNodeStore implements NodeStore {
      * new branch and immediately merging it back.
      * @param builder  the builder whose changes to apply
      * @param commitHook the commit hook to apply while merging changes
-     * @param committed  the pos commit hook
      * @return the node state resulting from the merge.
      * @throws CommitFailedException
      * @throws IllegalArgumentException if the builder is not acquired from a root state of
      *                                  this store
      */
     @Override
-    public synchronized NodeState merge(@Nonnull NodeBuilder builder, @Nonnull CommitHook commitHook,
-            PostCommitHook committed) throws CommitFailedException {
+    public synchronized NodeState merge(
+            @Nonnull NodeBuilder builder, @Nonnull CommitHook commitHook,
+            @Nullable CommitInfo info) throws CommitFailedException {
         checkArgument(builder instanceof MemoryNodeBuilder);
         checkNotNull(commitHook);
-        rebase(checkNotNull(builder));
+        rebase(builder);
         NodeStoreBranch branch = new MemoryNodeStoreBranch(this, getRoot());
         branch.setRoot(builder.getNodeState());
-        NodeState merged = branch.merge(commitHook, committed);
+        NodeState merged = branch.merge(commitHook, info);
         ((MemoryNodeBuilder) builder).reset(merged);
         return merged;
     }
@@ -148,6 +152,11 @@ public class MemoryNodeStore implements NodeStore {
         }
     }
 
+    @Override
+    public Blob getBlob(@Nonnull String reference) {
+        return null;
+    }
+
     @Override @Nonnull
     public synchronized String checkpoint(long lifetime) {
         checkArgument(lifetime > 0);
@@ -198,27 +207,17 @@ public class MemoryNodeStore implements NodeStore {
         }
 
         @Override
-        public NodeState merge(CommitHook hook, PostCommitHook committed) throws CommitFailedException {
+        public NodeState merge(
+                @Nonnull CommitHook hook, @Nonnull CommitInfo info)
+                throws CommitFailedException {
+            checkNotNull(hook);
+            checkNotNull(info);
             // TODO: rebase();
             checkNotMerged();
-            NodeState merged = ModifiedNodeState.squeeze(checkNotNull(hook).processCommit(base, root));
-            synchronized (this) {
-                // FIXME temporarily synchronized to work around the race described in OAK-1055
-                store.root.set(merged);
-                root = null; // Mark as merged
-                committed.contentChanged(base, merged);
-            }
+            NodeState merged = squeeze(hook.processCommit(base, root, info));
+            store.root.set(merged);
+            root = null; // Mark as merged
             return merged;
-        }
-
-        @Override
-        public boolean copy(String source, String target) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public boolean move(String source, String target) {
-            throw new UnsupportedOperationException();
         }
 
         @Override

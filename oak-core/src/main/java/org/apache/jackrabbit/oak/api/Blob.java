@@ -20,6 +20,7 @@ package org.apache.jackrabbit.oak.api;
 
 import java.io.InputStream;
 
+import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
 
 /**
@@ -38,9 +39,13 @@ import javax.annotation.Nonnull;
 public interface Blob {
 
     /**
-     * Returns a new stream for this value object. Multiple calls to this
-     * methods return equal instances: {@code getNewStream().equals(getNewStream())}.
-     * @return a new stream for this value based on an internal conversion.
+     * Returns a new stream for this blob. The streams returned from
+     * multiple calls to this method are byte wise equals. That is,
+     * subsequent calls to {@link java.io.InputStream#read() read}
+     * return the same sequence of bytes as long as neither call throws
+     * an exception.
+     *
+     * @return a new stream for this blob
      */
     @Nonnull
     InputStream getNewStream();
@@ -51,5 +56,15 @@ public interface Blob {
      * @return the length of this blob.
      */
     long length();
+
+    /**
+     * Returns a secure reference to this blob, or {@code null} if such
+     * a reference is not available.
+     *
+     * @see <a href="https://issues.apache.org/jira/browse/OAK-834">OAK-834</a>
+     * @return binary reference, or {@code null}
+     */
+    @CheckForNull
+    String getReference();
 
 }

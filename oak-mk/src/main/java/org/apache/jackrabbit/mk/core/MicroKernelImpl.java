@@ -22,12 +22,14 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
+import javax.annotation.Nonnull;
+
 import org.apache.jackrabbit.mk.api.MicroKernel;
 import org.apache.jackrabbit.mk.api.MicroKernelException;
-import org.apache.jackrabbit.mk.json.JsonObject;
-import org.apache.jackrabbit.mk.json.JsopBuilder;
-import org.apache.jackrabbit.mk.json.JsopReader;
-import org.apache.jackrabbit.mk.json.JsopTokenizer;
+import org.apache.jackrabbit.oak.commons.json.JsonObject;
+import org.apache.jackrabbit.oak.commons.json.JsopBuilder;
+import org.apache.jackrabbit.oak.commons.json.JsopReader;
+import org.apache.jackrabbit.oak.commons.json.JsopTokenizer;
 import org.apache.jackrabbit.mk.model.ChildNodeEntry;
 import org.apache.jackrabbit.mk.model.Commit;
 import org.apache.jackrabbit.mk.model.CommitBuilder;
@@ -411,7 +413,7 @@ public class MicroKernelImpl implements MicroKernel {
             throw new IllegalArgumentException("absolute path expected: " + path);
         }
         if (jsonDiff == null || jsonDiff.length() == 0) {
-            return getHeadRevision();
+            return revisionId != null ? revisionId : getHeadRevision();
         }
 
         Id revId = revisionId == null ? getHeadRevisionId() : Id.fromString(revisionId);
@@ -577,6 +579,39 @@ public class MicroKernelImpl implements MicroKernel {
                 throw new MicroKernelException(e);
             }
         }
+    }
+
+    @Nonnull
+    @Override
+    public String reset(@Nonnull String branchRevisionId,
+                        @Nonnull String ancestorRevisionId)
+            throws MicroKernelException {
+        Id branchId = Id.fromString(branchRevisionId);
+        Id ancestorId = Id.fromString(ancestorRevisionId);
+        StoredCommit commit;
+        try {
+            commit = rep.getCommit(branchId);
+        } catch (Exception e) {
+            throw new MicroKernelException(e);
+        }
+        Id baseId = commit.getBranchRootId();
+        if (baseId == null) {
+            throw new MicroKernelException("Not a private branch: " + branchRevisionId);
+        }
+        // verify ancestorId is in fact an ancestor of branchId
+        while (!ancestorId.equals(branchId)) {
+            try {
+                commit = rep.getCommit(branchId);
+            } catch (Exception e) {
+                throw new MicroKernelException(e);
+            }
+            if (commit.getBranchRootId() == null) {
+                throw new MicroKernelException(ancestorRevisionId + " is not " +
+                        "an ancestor revision of " + branchRevisionId);
+            }
+            branchId = commit.getParentId();
+        }
+        return ancestorRevisionId;
     }
 
     public long getLength(String blobId) throws MicroKernelException {

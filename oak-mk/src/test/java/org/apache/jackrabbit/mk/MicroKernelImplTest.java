@@ -16,19 +16,18 @@
  */
 package org.apache.jackrabbit.mk;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
-
 import java.io.File;
 
 import org.apache.commons.io.FileUtils;
 import org.apache.jackrabbit.mk.core.MicroKernelImpl;
 import org.junit.After;
 import org.junit.Before;
-import org.junit.Ignore;
 import org.junit.Test;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 
 public class MicroKernelImplTest {
     
@@ -401,4 +400,22 @@ public class MicroKernelImplTest {
         assertTrue(trunkNode.contains("\"q\":43"));
     }
 
+    @Test // OAK-1122
+    public void emptyCommit() {
+        String rev = mk.getHeadRevision();
+        assertEquals("empty commit must return current head revision",
+                rev, mk.commit("/", "", rev, null));
+        // now the same on a branch
+        rev = mk.branch(rev);
+        // commit something to branch
+        rev = mk.commit("/", "+\"x\":{}", rev, null);
+        assertEquals("empty branch commit must return current head of branch revision",
+                rev, mk.commit("/", "", rev, null));
+    }
+
+    @Test(expected = Throwable.class)
+    public void foo() {
+        mk.commit("", "+\"/x\":{}", null, null);
+        mk.commit("", "+\"/x/\":{}", null, null);
+    }
 }

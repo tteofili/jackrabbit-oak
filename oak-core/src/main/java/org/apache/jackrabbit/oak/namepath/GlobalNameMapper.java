@@ -16,13 +16,30 @@
  */
 package org.apache.jackrabbit.oak.namepath;
 
+import java.util.Collections;
 import java.util.Map;
+import java.util.Map.Entry;
+
 import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
 import javax.jcr.RepositoryException;
 
+import org.apache.jackrabbit.oak.api.PropertyState;
+import org.apache.jackrabbit.oak.api.Root;
+import org.apache.jackrabbit.oak.api.Tree;
+import org.apache.jackrabbit.oak.plugins.tree.ImmutableTree;
+import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
+
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
+import static org.apache.jackrabbit.oak.api.Type.STRING;
+import static org.apache.jackrabbit.oak.api.Type.STRINGS;
+import static org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState.EMPTY_NODE;
+import static org.apache.jackrabbit.oak.plugins.name.NamespaceConstants.NAMESPACES_PATH;
+import static org.apache.jackrabbit.oak.plugins.name.NamespaceConstants.REP_NSDATA;
+import static org.apache.jackrabbit.oak.plugins.name.NamespaceConstants.REP_PREFIXES;
+import static org.apache.jackrabbit.oak.plugins.name.NamespaceConstants.REP_URIS;
+import static org.apache.jackrabbit.oak.plugins.name.Namespaces.encodeUri;
 
 /**
  * Name mapper with no local prefix remappings. URI to prefix mappings
@@ -37,14 +54,54 @@ import static com.google.common.base.Preconditions.checkNotNull;
  * consistency check can be used if needed to locate and fix any Oak names
  * with invalid namespace prefixes.
  */
-public abstract class GlobalNameMapper implements NameMapper {
+public class GlobalNameMapper implements NameMapper {
+
+    protected static boolean isHiddenName(String name) {
+        return name.startsWith(":");
+    }
+
+    protected static boolean isExpandedName(String name) {
+        if (name.startsWith("{")) {
+            int brace = name.indexOf('}', 1);
+            return brace != -1 && name.substring(1, brace).indexOf(':') != -1;
+        } else {
+            return false;
+        }
+    }
+
+    protected final Tree namespaces;
+    protected final Tree nsdata;
+
+    public GlobalNameMapper(Root root) {
+        this.namespaces = root.getTree(NAMESPACES_PATH);
+        this.nsdata = namespaces.getChild(REP_NSDATA);
+    }
+
+    public GlobalNameMapper(Map<String, String> mappings) {
+        NodeBuilder forward = EMPTY_NODE.builder();
+        NodeBuilder reverse = EMPTY_NODE.builder();
+
+        for (Entry<String, String> entry : mappings.entrySet()) {
+            String prefix = entry.getKey();
+            if (!prefix.isEmpty()) {
+                String uri = entry.getValue();
+                forward.setProperty(prefix, uri);
+                reverse.setProperty(encodeUri(uri), prefix);
+            }
+        }
+        reverse.setProperty(REP_PREFIXES, mappings.keySet(), STRINGS);
+        reverse.setProperty(REP_URIS, mappings.values(), STRINGS);
+
+        this.namespaces = new ImmutableTree(forward.getNodeState());
+        this.nsdata = new ImmutableTree(reverse.getNodeState());
+    }
 
     @Override @Nonnull
     public String getJcrName(@Nonnull String oakName) {
         // Sanity checks, can be turned to assertions if needed for performance
         checkNotNull(oakName);
-        checkArgument(!oakName.startsWith(":")); // hidden name
-        checkArgument(!oakName.startsWith("{")); // expanded name
+        checkArgument(!isHiddenName(oakName), oakName);
+        checkArgument(!isExpandedName(oakName), oakName);
 
         return oakName;
     }
@@ -58,8 +115,7 @@ public abstract class GlobalNameMapper implements NameMapper {
         return jcrName;
     }
 
-    @Nonnull
-    @Override
+    @Override @Nonnull
     public String getOakName(@Nonnull String jcrName) throws RepositoryException {
         String oakName = getOakNameOrNull(jcrName);
         if (oakName == null) {
@@ -69,8 +125,8 @@ public abstract class GlobalNameMapper implements NameMapper {
     }
 
     @Override
-    public boolean hasSessionLocalMappings() {
-        return false;
+    public Map<String, String> getSessionLocalMappings() {
+        return Collections.emptyMap();
     }
 
     @CheckForNull
@@ -96,16 +152,31 @@ public abstract class GlobalNameMapper implements NameMapper {
         return expandedName; // not an expanded name
     }
 
-    protected abstract Map<String, String> getNamespaceMap();
+    @CheckForNull
+    protected synchronized String getOakPrefixOrNull(String uri) {
+        if (uri.isEmpty()) {
+            return uri;
+        }
+
+        PropertyState mapping = nsdata.getProperty(encodeUri(uri));
+        if (mapping != null && mapping.getType() == STRING) {
+            return mapping.getValue(STRING);
+        }
+
+        return null;
+    }
 
     @CheckForNull
-    protected String getOakPrefixOrNull(String uri) {
-        Map<String, String> namespaces = getNamespaceMap();
-        for (Map.Entry<String, String> entry : namespaces.entrySet()) {
-            if (uri.equals(entry.getValue())) {
-                return entry.getKey();
-            }
+    protected synchronized String getOakURIOrNull(String prefix) {
+        if (prefix.isEmpty()) {
+            return prefix;
         }
+
+        PropertyState mapping = namespaces.getProperty(prefix);
+        if (mapping != null && mapping.getType() == STRING) {
+            return mapping.getValue(STRING);
+        }
+
         return null;
     }
 

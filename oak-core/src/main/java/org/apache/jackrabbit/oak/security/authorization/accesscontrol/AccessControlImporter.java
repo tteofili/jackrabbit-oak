@@ -16,14 +16,12 @@
  */
 package org.apache.jackrabbit.oak.security.authorization.accesscontrol;
 
-import static com.google.common.base.Preconditions.checkNotNull;
-
+import java.security.AccessControlException;
 import java.security.Principal;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-
 import javax.annotation.CheckForNull;
 import javax.jcr.PropertyType;
 import javax.jcr.RepositoryException;
@@ -47,6 +45,7 @@ import org.apache.jackrabbit.oak.spi.security.authorization.AuthorizationConfigu
 import org.apache.jackrabbit.oak.spi.security.authorization.accesscontrol.AccessControlConstants;
 import org.apache.jackrabbit.oak.spi.security.principal.PrincipalConfiguration;
 import org.apache.jackrabbit.oak.spi.security.principal.PrincipalImpl;
+import org.apache.jackrabbit.oak.spi.xml.ImportBehavior;
 import org.apache.jackrabbit.oak.spi.xml.NodeInfo;
 import org.apache.jackrabbit.oak.spi.xml.PropInfo;
 import org.apache.jackrabbit.oak.spi.xml.ProtectedNodeImporter;
@@ -54,6 +53,8 @@ import org.apache.jackrabbit.oak.spi.xml.ReferenceChangeTracker;
 import org.apache.jackrabbit.oak.spi.xml.TextValue;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import static com.google.common.base.Preconditions.checkNotNull;
 
 /**
  * {@link ProtectedNodeImporter} implementation that handles access control lists,
@@ -77,6 +78,8 @@ public class AccessControlImporter implements ProtectedNodeImporter, AccessContr
     private JackrabbitAccessControlList acl;
     private MutableEntry entry;
 
+    private int importBehavior;
+
     //----------------------------------------------< ProtectedItemImporter >---
 
     @Override
@@ -87,8 +90,10 @@ public class AccessControlImporter implements ProtectedNodeImporter, AccessContr
             throw new IllegalStateException("Already initialized");
         }
         try {
+            AuthorizationConfiguration config = securityProvider.getConfiguration(AuthorizationConfiguration.class);
+            importBehavior = Util.getImportBehavior(config);
+
             if (isWorkspaceImport) {
-                AuthorizationConfiguration config = securityProvider.getConfiguration(AuthorizationConfiguration.class);
                 acMgr = config.getAccessControlManager(root, namePathMapper);
                 PrincipalConfiguration pConfig = securityProvider.getConfiguration(PrincipalConfiguration.class);
                 principalManager = pConfig.getPrincipalManager(root, namePathMapper);
@@ -231,9 +236,12 @@ public class AccessControlImporter implements ProtectedNodeImporter, AccessContr
     private final class MutableEntry {
 
         final boolean isAllow;
+
         Principal principal;
         List<Privilege> privileges;
         Map<String, Value> restrictions = new HashMap<String, Value>();
+
+        boolean ignore;
 
         private MutableEntry(boolean isAllow) {
             this.isAllow = isAllow;
@@ -243,11 +251,20 @@ public class AccessControlImporter implements ProtectedNodeImporter, AccessContr
             String principalName = txtValue.getString();
             principal = principalManager.getPrincipal(principalName);
             if (principal == null) {
-                principal = new PrincipalImpl(principalName);
+                switch (importBehavior) {
+                    case ImportBehavior.IGNORE:
+                        log.debug("Unknown principal " + principalName + " -> Ignoring this ACE.");
+                        ignore = true;
+                        break;
+                    case ImportBehavior.ABORT:
+                        throw new AccessControlException("Unknown principal " + principalName);
+                    case ImportBehavior.BESTEFFORT:
+                        principal = new PrincipalImpl(principalName);
+                }
             }
         }
 
-        private void setPrivilegeNames(TextValue[] txtValues) throws RepositoryException {
+        private void setPrivilegeNames(List<? extends TextValue> txtValues) throws RepositoryException {
             privileges = new ArrayList<Privilege>();
             for (TextValue value : txtValues) {
                 Value privilegeName = value.getValue(PropertyType.NAME);
@@ -269,7 +286,11 @@ public class AccessControlImporter implements ProtectedNodeImporter, AccessContr
 
         private void applyTo(JackrabbitAccessControlList acl) throws RepositoryException {
             checkNotNull(acl);
-            acl.addEntry(principal, privileges.toArray(new Privilege[privileges.size()]), isAllow, restrictions);
+            if (!ignore) {
+                acl.addEntry(principal, privileges.toArray(new Privilege[privileges.size()]), isAllow, restrictions);
+            } else {
+                log.debug("Unknown principal: Ignore ACE based on ImportBehavior.IGNORE configuration.");
+            }
         }
     }
 }

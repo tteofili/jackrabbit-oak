@@ -21,21 +21,18 @@ import static org.apache.jackrabbit.JcrConstants.JCR_SYSTEM;
 import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.JCR_NODE_TYPES;
 
 import java.text.ParseException;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.Map.Entry;
+import java.util.Set;
 
 import org.apache.jackrabbit.oak.api.PropertyValue;
 import org.apache.jackrabbit.oak.api.QueryEngine;
 import org.apache.jackrabbit.oak.api.Result;
-import org.apache.jackrabbit.oak.api.Tree;
+import org.apache.jackrabbit.oak.namepath.LocalNameMapper;
 import org.apache.jackrabbit.oak.namepath.NamePathMapper;
-import org.apache.jackrabbit.oak.query.index.TraversingIndex;
-import org.apache.jackrabbit.oak.spi.query.Filter;
-import org.apache.jackrabbit.oak.spi.query.QueryIndex;
-import org.apache.jackrabbit.oak.spi.query.QueryIndexProvider;
+import org.apache.jackrabbit.oak.namepath.NamePathMapperImpl;
+import org.apache.jackrabbit.oak.query.xpath.XPathToSQL2Converter;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -60,32 +57,16 @@ public abstract class QueryEngineImpl implements QueryEngine {
             XPATH, XPATH + NO_LITERALS,
             JQOM);
 
-    private final QueryIndexProvider indexProvider;
-    
     /**
-     * Whether fallback to the traversing index is supported if no other index
-     * is available. This is enabled by default and can be disabled for testing
-     * purposes.
+     * Whether node traversal is enabled. This is enabled by default, and can be
+     * disabled for testing purposes.
      */
-    private boolean traversalFallback = true;
-
-    public QueryEngineImpl(QueryIndexProvider indexProvider) {
-        this.indexProvider = indexProvider;
-    }
+    private boolean traversalEnabled = true;
 
     /**
-     * Get the current root node state, to run the query against.
-     * 
-     * @return the node state
+     * @return Execution context for a single query execution.
      */
-    protected abstract NodeState getRootState();
-
-    /**
-     * Get the current root tree, to run the query against.
-     * 
-     * @return the node state
-     */
-    protected abstract Tree getRootTree();
+    protected abstract ExecutionContext getExecutionContext();
 
     @Override
     public Set<String> getSupportedQueryLanguages() {
@@ -95,23 +76,33 @@ public abstract class QueryEngineImpl implements QueryEngine {
     /**
      * Parse the query (check if it's valid) and get the list of bind variable names.
      *
-     * @param statement
-     * @param language
+     * @param statement query statement
+     * @param language query language
+     * @param mappings namespace prefix mappings
      * @return the list of bind variable names
      * @throws ParseException
      */
     @Override
-    public List<String> getBindVariableNames(String statement, String language) throws ParseException {
-        Query q = parseQuery(statement, language);
+    public List<String> getBindVariableNames(
+            String statement, String language, Map<String, String> mappings)
+            throws ParseException {
+        Query q = parseQuery(statement, language, getExecutionContext(), mappings);
         return q.getBindVariableNames();
     }
 
-    private Query parseQuery(String statement, String language) throws ParseException {
+    private static Query parseQuery(
+            String statement, String language, ExecutionContext context,
+            Map<String, String> mappings) throws ParseException {
         LOG.debug("Parsing {} statement: {}", language, statement);
-        NodeState root = getRootState();
-        NodeState system = root.getChildNode(JCR_SYSTEM);
-        NodeState types = system.getChildNode(JCR_NODE_TYPES);
-        SQL2Parser parser = new SQL2Parser(types);
+
+        NamePathMapper mapper = new NamePathMapperImpl(
+                new LocalNameMapper(context.getRoot(), mappings));
+
+        NodeState types = context.getBaseState()
+                .getChildNode(JCR_SYSTEM)
+                .getChildNode(JCR_NODE_TYPES);
+
+        SQL2Parser parser = new SQL2Parser(mapper, types);
         if (language.endsWith(NO_LITERALS)) {
             language = language.substring(0, language.length() - NO_LITERALS.length());
             parser.setAllowNumberLiterals(false);
@@ -127,9 +118,14 @@ public abstract class QueryEngineImpl implements QueryEngine {
             String sql2 = converter.convert(statement);
             LOG.debug("XPath > SQL2: {}", sql2);
             try {
+                // OAK-874: No artificial XPath selector name in wildcards
+                parser.setIncludeSelectorNameInWildcardColumns(false);
                 return parser.parse(sql2);
             } catch (ParseException e) {
-                throw new ParseException(statement + " converted to SQL-2 " + e.getMessage(), 0);
+                ParseException e2 = new ParseException(
+                        statement + " converted to SQL-2 " + e.getMessage(), 0);
+                e2.initCause(e);
+                throw e2;
             }
         } else {
             throw new ParseException("Unsupported language: " + language, 0);
@@ -137,19 +133,28 @@ public abstract class QueryEngineImpl implements QueryEngine {
     }
     
     @Override
-    public Result executeQuery(String statement, String language, long limit,
-            long offset, Map<String, ? extends PropertyValue> bindings,
-            NamePathMapper namePathMapper) throws ParseException {
+    public Result executeQuery(
+            String statement, String language, long limit, long offset,
+            Map<String, ? extends PropertyValue> bindings,
+            Map<String, String> mappings) throws ParseException {
         if (limit < 0) {
             throw new IllegalArgumentException("Limit may not be negative, is: " + limit);
         }
         if (offset < 0) {
             throw new IllegalArgumentException("Offset may not be negative, is: " + offset);
         }
-        Query q = parseQuery(statement, language);
-        q.setRootTree(getRootTree());
-        q.setRootState(getRootState());
-        q.setNamePathMapper(namePathMapper);
+
+        // avoid having to deal with null arguments
+        if (bindings == null) {
+            bindings = NO_BINDINGS;
+        }
+        if (mappings == null) {
+            mappings = NO_MAPPINGS;
+        }
+
+        ExecutionContext context = getExecutionContext();
+        Query q = parseQuery(statement, language, context, mappings);
+        q.setExecutionContext(context);
         q.setLimit(limit);
         q.setOffset(offset);
         if (bindings != null) {
@@ -157,38 +162,13 @@ public abstract class QueryEngineImpl implements QueryEngine {
                 q.bindValue(e.getKey(), e.getValue());
             }
         }
-        q.setQueryEngine(this);
+        q.setTraversalEnabled(traversalEnabled);
         q.prepare();
         return q.executeQuery();
     }
 
-    protected void setTravesalFallback(boolean traversal) {
-        this.traversalFallback = traversal;
-    }
-
-    public QueryIndex getBestIndex(QueryImpl query, NodeState rootState, Filter filter) {
-        QueryIndex best = null;
-        if (LOG.isDebugEnabled()) {
-            LOG.debug("cost using filter " + filter);
-        }
-        List<QueryIndex> indexes = new ArrayList<QueryIndex>(
-                indexProvider.getQueryIndexes(rootState));
-        if (traversalFallback) {
-            indexes.add(new TraversingIndex());
-        }
-
-        double bestCost = Double.POSITIVE_INFINITY;
-        for (QueryIndex index : indexes) {
-            double cost = index.getCost(filter, rootState);
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("cost for " + index.getIndexName() + " is " + cost);
-            }
-            if (cost < bestCost) {
-                bestCost = cost;
-                best = index;
-            }
-        }
-        return best;
+    protected void setTraversalEnabled(boolean traversalEnabled) {
+        this.traversalEnabled = traversalEnabled;
     }
 
 }

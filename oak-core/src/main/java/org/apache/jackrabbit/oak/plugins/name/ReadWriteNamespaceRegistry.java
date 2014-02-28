@@ -16,24 +16,26 @@
  */
 package org.apache.jackrabbit.oak.plugins.name;
 
-import java.util.Map;
+import static org.apache.jackrabbit.oak.api.Type.STRING;
+
 import javax.jcr.NamespaceException;
 import javax.jcr.RepositoryException;
 
-import org.apache.jackrabbit.JcrConstants;
 import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Root;
 import org.apache.jackrabbit.oak.api.Tree;
 
-import static org.apache.jackrabbit.oak.api.Type.NAME;
-import static org.apache.jackrabbit.oak.api.Type.STRING;
 
 /**
  * Writable namespace registry. Mainly for use to implement the full JCR API.
  */
 public abstract class ReadWriteNamespaceRegistry
         extends ReadOnlyNamespaceRegistry {
+
+    public ReadWriteNamespaceRegistry(Root root) {
+        super(root);
+    }
 
     /**
      * Called by the write methods to acquire a fresh {@link Root} instance
@@ -56,56 +58,55 @@ public abstract class ReadWriteNamespaceRegistry
         // do nothing
     }
 
-    private static Tree getOrCreate(Root root, String... path) {
-        Tree tree = root.getTree("/");
-        assert tree.exists();
-        for (String name : path) {
-            Tree child = tree.getChild(name);
-            if (!child.exists()) {
-                child = tree.addChild(name);
-            }
-            tree = child;
-        }
-        return tree;
-    }
-
     //--------------------------------------------------< NamespaceRegistry >---
 
     @Override
     public void registerNamespace(String prefix, String uri)
             throws RepositoryException {
-        Map<String, String> map = Namespaces.getNamespaceMap(getReadTree());
-        if (uri.equals(map.get(prefix))) {
-            return; // Namespace already registered, so we do nothing
+        if (prefix.isEmpty() && uri.isEmpty()) {
+            return; // the default empty namespace is always registered
+        } else if (prefix.isEmpty() || uri.isEmpty()) {
+            throw new NamespaceException(
+                    "Cannot remap the default empty namespace");
+        }
+
+        PropertyState property = namespaces.getProperty(prefix);
+        if (property != null && property.getType() == STRING
+                && uri.equals(property.getValue(STRING))) {
+            return; // common case: namespace already registered -> do nothing
         }
 
         try {
             Root root = getWriteRoot();
-            Tree namespaces =
-                    getOrCreate(root, JcrConstants.JCR_SYSTEM, REP_NAMESPACES);
-            if (!namespaces.hasProperty(JcrConstants.JCR_PRIMARYTYPE)) {
-                namespaces.setProperty(JcrConstants.JCR_PRIMARYTYPE,
-                        JcrConstants.NT_UNSTRUCTURED, NAME);
-            }
-            // remove existing mapping to given uri
-            for (PropertyState p : namespaces.getProperties()) {
-                if (!p.isArray() && p.getValue(STRING).equals(uri)) {
-                    namespaces.removeProperty(p.getName());
+            Tree namespaces = root.getTree(NAMESPACES_PATH);
+
+            // remove existing mapping to given URI
+            for (PropertyState mapping : namespaces.getProperties()) {
+                if (mapping.getType() == STRING
+                        && uri.equals(mapping.getValue(STRING))) {
+                    namespaces.removeProperty(mapping.getName());
                 }
             }
+
+            // add this mapping (overrides existing mapping with same prefix)
             namespaces.setProperty(prefix, uri);
+
             root.commit();
             refresh();
         } catch (CommitFailedException e) {
-            String message =
-                    "Failed to register namespace mapping from "
-                            + prefix + " to " + uri;
-            throw e.asRepositoryException(message);
+            throw e.asRepositoryException(
+                    "Failed to register namespace mapping "
+                    + prefix + " -> " + uri);
         }
     }
 
     @Override
     public void unregisterNamespace(String prefix) throws RepositoryException {
+        if (prefix.isEmpty()) {
+            throw new NamespaceException(
+                    "Cannot unregister the default empty namespace");
+        }
+
         Root root = getWriteRoot();
         Tree namespaces = root.getTree(NAMESPACES_PATH);
         if (!namespaces.exists() || !namespaces.hasProperty(prefix)) {

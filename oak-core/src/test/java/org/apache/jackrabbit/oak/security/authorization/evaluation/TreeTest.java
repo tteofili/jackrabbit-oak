@@ -16,6 +16,13 @@
  */
 package org.apache.jackrabbit.oak.security.authorization.evaluation;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+
 import java.util.List;
 
 import com.google.common.collect.ImmutableList;
@@ -28,18 +35,11 @@ import org.apache.jackrabbit.oak.spi.security.privilege.PrivilegeConstants;
 import org.junit.Before;
 import org.junit.Test;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
-
 public class TreeTest extends AbstractOakCoreTest {
-
-    // TODO: add tests for acls withs restrictions
-    // TODO: add tests with READ_PROPERTIES and READ_NODES privileges
 
     private Root testRoot;
 
+    @Override
     @Before
     public void before() throws Exception {
         super.before();
@@ -110,13 +110,46 @@ public class TreeTest extends AbstractOakCoreTest {
     }
 
     @Test
+    public void testGetChildren() throws Exception {
+        for (Tree t : testRoot.getTree("/a").getChildren()) {
+            if (!"b".equals(t.getName())) {
+                fail("Child " + t.getName() + " should not be accessible.");
+            }
+        }
+    }
+
+    /**
+     * @see <a href="https://issues.apache.org/jira/browse/OAK-842">OAK-842</a>
+     */
+    @Test
+    public void testOrderableChildren() throws Exception {
+        Tree a = root.getTree("/a");
+        a.setOrderableChildren(true);
+
+        testRoot.refresh();
+        for (Tree t : testRoot.getTree("/a").getChildren()) {
+            if (!"b".equals(t.getName())) {
+                fail("Child " + t.getName() + " should not be accessible.");
+            }
+        }
+    }
+
+    @Test
     public void testHasProperty() throws Exception {
-        // TODO
+        setupPermission("/a", testPrincipal, false, PrivilegeConstants.REP_READ_PROPERTIES);
+
+        testRoot.refresh();
+        Tree a = testRoot.getTree("/a");
+        assertFalse(a.hasProperty("aProp"));
     }
 
     @Test
     public void testGetProperty() throws Exception {
-        // TODO
+        setupPermission("/a", testPrincipal, false, PrivilegeConstants.REP_READ_PROPERTIES);
+
+        testRoot.refresh();
+        Tree a = testRoot.getTree("/a");
+        assertNull(a.getProperty("aProp"));
     }
 
     @Test
@@ -129,17 +162,26 @@ public class TreeTest extends AbstractOakCoreTest {
 
         PropertyState p = a.getProperty(JcrConstants.JCR_PRIMARYTYPE);
         assertNotNull(p);
-        assertEquals(Tree.Status.EXISTING, a.getPropertyStatus(JcrConstants.JCR_PRIMARYTYPE));
+        assertEquals(Tree.Status.UNCHANGED, a.getPropertyStatus(JcrConstants.JCR_PRIMARYTYPE));
 
     }
 
     @Test
     public void testGetPropertyCount() throws Exception {
-        // TODO
+        setupPermission("/a", testPrincipal, false, PrivilegeConstants.REP_READ_PROPERTIES);
+
+        testRoot.refresh();
+        Tree a = testRoot.getTree("/a");
+        assertEquals(0, a.getPropertyCount());
     }
 
     @Test
     public void testGetProperties() throws Exception {
-        // TODO
+        setupPermission("/a", testPrincipal, false, PrivilegeConstants.REP_READ_PROPERTIES);
+
+        testRoot.refresh();
+        Tree a = testRoot.getTree("/a");
+        Iterable<? extends PropertyState> props = a.getProperties();
+        assertFalse(props.iterator().hasNext());
     }
 }

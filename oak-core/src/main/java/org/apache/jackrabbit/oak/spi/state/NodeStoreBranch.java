@@ -17,10 +17,11 @@
 package org.apache.jackrabbit.oak.spi.state;
 
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
 import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.spi.commit.CommitHook;
-import org.apache.jackrabbit.oak.spi.commit.PostCommitHook;
+import org.apache.jackrabbit.oak.spi.commit.CommitInfo;
 
 /**
  * An instance of this class represents a private branch of the tree in a
@@ -61,38 +62,19 @@ public interface NodeStoreBranch {
     void setRoot(NodeState newRoot);
 
     /**
-     * Moves a node in this private branch.
-     *
-     * @param source source path
-     * @param target target path
-     * @return  {@code true} iff the move succeeded
-     * @throws IllegalStateException if the branch is already merged
-     */
-    boolean move(String source, String target);
-
-    /**
-     * Copies a node in this private branch.
-     *
-     * @param source source path
-     * @param target target path
-     * @return  {@code true} iff the copy succeeded
-     * @throws IllegalStateException if the branch is already merged
-     */
-    boolean copy(String source, String target);
-
-    /**
      * Merges the changes in this branch to the main content tree.
      * Merging is done by rebasing the changes in this branch on top of
      * the current head revision followed by a fast forward merge.
      *
      * @param hook the commit hook to apply while merging changes
-     * @param committed the post commit hook to call after a successful merge
+     * @param info commit info associated with this merge operation
      * @return the node state resulting from the merge.
      * @throws CommitFailedException if the merge failed
      * @throws IllegalStateException if the branch is already merged
      */
     @Nonnull
-    NodeState merge(@Nonnull CommitHook hook, PostCommitHook committed) throws CommitFailedException;
+    NodeState merge(@Nonnull CommitHook hook, @Nonnull CommitInfo info)
+            throws CommitFailedException;
 
     /**
      * Rebase the changes from this branch on top of the current

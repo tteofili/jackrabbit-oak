@@ -18,6 +18,32 @@
  */
 package org.apache.jackrabbit.oak.plugins.version;
 
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
+import javax.jcr.RepositoryException;
+import javax.jcr.Value;
+import javax.jcr.nodetype.PropertyDefinition;
+import javax.jcr.version.OnParentVersionAction;
+
+import com.google.common.collect.Lists;
+import org.apache.jackrabbit.oak.api.CommitFailedException;
+import org.apache.jackrabbit.oak.api.PropertyState;
+import org.apache.jackrabbit.oak.api.Type;
+import org.apache.jackrabbit.oak.plugins.identifier.IdentifierManager;
+import org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState;
+import org.apache.jackrabbit.oak.plugins.memory.MemoryNodeBuilder;
+import org.apache.jackrabbit.oak.plugins.memory.PropertyStates;
+import org.apache.jackrabbit.oak.plugins.nodetype.ReadOnlyNodeTypeManager;
+import org.apache.jackrabbit.oak.plugins.tree.ImmutableTree;
+import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
+import org.apache.jackrabbit.oak.spi.state.NodeState;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import static com.google.common.base.Preconditions.checkNotNull;
 import static javax.jcr.version.OnParentVersionAction.ABORT;
 import static javax.jcr.version.OnParentVersionAction.COMPUTE;
@@ -44,32 +70,6 @@ import static org.apache.jackrabbit.JcrConstants.NT_VERSIONEDCHILD;
 import static org.apache.jackrabbit.oak.plugins.version.Utils.primaryTypeOf;
 import static org.apache.jackrabbit.oak.plugins.version.Utils.uuidFromNode;
 
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
-
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
-import javax.jcr.RepositoryException;
-import javax.jcr.Value;
-import javax.jcr.nodetype.PropertyDefinition;
-import javax.jcr.version.OnParentVersionAction;
-
-import com.google.common.collect.Lists;
-import org.apache.jackrabbit.oak.api.CommitFailedException;
-import org.apache.jackrabbit.oak.api.PropertyState;
-import org.apache.jackrabbit.oak.api.Type;
-import org.apache.jackrabbit.oak.plugins.identifier.IdentifierManager;
-import org.apache.jackrabbit.oak.core.ImmutableTree;
-import org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState;
-import org.apache.jackrabbit.oak.plugins.memory.MemoryNodeBuilder;
-import org.apache.jackrabbit.oak.plugins.memory.PropertyStates;
-import org.apache.jackrabbit.oak.plugins.nodetype.ReadOnlyNodeTypeManager;
-import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
-import org.apache.jackrabbit.oak.spi.state.NodeState;
-import org.apache.jackrabbit.oak.util.TODO;
-
 /**
  * {@code VersionableState} provides methods to create a versionable state
  * for a version based on a versionable node.
@@ -81,6 +81,8 @@ import org.apache.jackrabbit.oak.util.TODO;
  * </p>
  */
 class VersionableState {
+
+    private static final Logger log = LoggerFactory.getLogger(VersionableState.class);
 
     private static final String JCR_CHILDVERSIONHISTORY = "jcr:childVersionHistory";
     private static final Set<String> BASIC_PROPERTIES = new HashSet<String>();
@@ -134,8 +136,10 @@ class VersionableState {
                                         @Nonnull NodeBuilder versionable,
                                         @Nonnull ReadWriteVersionManager vMgr,
                                         @Nonnull ReadOnlyNodeTypeManager ntMgr) {
-        VersionableState state = new VersionableState(version, history, versionable, vMgr, ntMgr);
-        return state.initFrozen(version.child(JCR_FROZENNODE), versionable);
+        VersionableState state = new VersionableState(
+                version, history, versionable, vMgr, ntMgr);
+        return state.initFrozen(version.child(JCR_FROZENNODE),
+                versionable, uuidFromNode(versionable));
     }
 
     /**
@@ -164,7 +168,8 @@ class VersionableState {
      * @return this versionable state.
      */
     private VersionableState initFrozen(NodeBuilder frozen,
-                                        NodeBuilder node) {
+                                        NodeBuilder node,
+                                        String nodeId) {
         // initialize jcr:frozenNode
         frozen.setProperty(JCR_UUID, IdentifierManager.generateUUID(), Type.STRING);
         frozen.setProperty(JCR_PRIMARYTYPE, NT_FROZENNODE, Type.NAME);
@@ -174,14 +179,7 @@ class VersionableState {
         } else {
             mixinTypes = Collections.emptyList();
         }
-        String id;
-        if (node.hasProperty(JCR_UUID)) {
-            id = uuidFromNode(node);
-        } else {
-            // TODO: use identifier
-            id = "";
-        }
-        frozen.setProperty(JCR_FROZENUUID, id, Type.STRING);
+        frozen.setProperty(JCR_FROZENUUID, nodeId, Type.STRING);
         frozen.setProperty(JCR_FROZENPRIMARYTYPE, primaryTypeOf(node), Type.NAME);
         if (mixinTypes.isEmpty()) {
             frozen.removeProperty(JCR_FROZENMIXINTYPES);
@@ -200,7 +198,7 @@ class VersionableState {
      */
     NodeBuilder create() throws CommitFailedException {
         try {
-            createFrozen(versionable, frozenNode);
+            createFrozen(versionable, uuidFromNode(versionable), frozenNode);
             return frozenNode;
         } catch (RepositoryException e) {
             throw new CommitFailedException(CommitFailedException.VERSION,
@@ -221,7 +219,7 @@ class VersionableState {
             throws CommitFailedException {
         try {
             if (selector == null) {
-                long created = version.getProperty(JCR_CREATED).getValue(Type.DATE);
+                String created = version.getProperty(JCR_CREATED).getValue(Type.DATE);
                 selector = new DateVersionSelector(created);
             }
             restoreFrozen(frozenNode, versionable, selector);
@@ -291,15 +289,16 @@ class VersionableState {
             }
         }
         for (PropertyState p : dest.getProperties()) {
-            if (BASIC_PROPERTIES.contains(p.getName())) {
+            String propName = p.getName();
+            if (BASIC_PROPERTIES.contains(propName)) {
                 continue;
             }
-            if (frozen.hasProperty(p.getName())) {
+            if (frozen.hasProperty(propName)) {
                 continue;
             }
             int action = getOPV(dest, p);
             if (action == COPY || action == VERSION || action == ABORT) {
-                dest.removeProperty(p.getName());
+                dest.removeProperty(propName);
             } else if (action == IGNORE) {
                 // no action
             } else if (action == INITIALIZE) {
@@ -308,6 +307,9 @@ class VersionableState {
                 // only COMPUTE property definitions currently are
                 // jcr:primaryType and jcr:mixinTypes
                 // do nothing for now
+                if (!(JCR_PRIMARYTYPE.equals(propName) || JCR_MIXINTYPES.equals(propName))) {
+                    log.warn("OPV.COMPUTE not implemented for restoring property: " + propName);
+                }
             }
         }
         restoreChildren(frozen, dest, selector);
@@ -322,7 +324,8 @@ class VersionableState {
         dest.setProperty(JCR_PRIMARYTYPE,
                 frozen.getName(JCR_FROZENPRIMARYTYPE), Type.NAME);
         String id = frozen.getProperty(JCR_FROZENUUID).getValue(Type.STRING);
-        if (id.length() > 0) {
+        if (id.indexOf('/') == -1) {
+            // only restore jcr:uuid if id is in fact a uuid
             dest.setProperty(JCR_UUID, id, Type.STRING);
         }
         if (frozen.hasProperty(JCR_FROZENMIXINTYPES)) {
@@ -406,10 +409,11 @@ class VersionableState {
             } else if (action == IGNORE) {
                 // no action
             } else if (action == INITIALIZE) {
-                TODO.unimplemented().doNothing();
+                log.warn("OPV.INITIALIZE not implemented for restoring child nodes.");
             } else if (action == COMPUTE) {
                 // there are currently no child node definitions
                 // with OPV compute
+                log.warn("OPV.COMPUTE not implemented for restoring child nodes: ");
             }
         }
     }
@@ -421,7 +425,8 @@ class VersionableState {
                                     @Nonnull NodeBuilder version) {
         checkNotNull(versionable).setProperty(JCR_ISCHECKEDOUT,
                 false, Type.BOOLEAN);
-        versionable.setProperty(JCR_VERSIONHISTORY, uuidFromNode(history));
+        versionable.setProperty(JCR_VERSIONHISTORY,
+                uuidFromNode(history), Type.REFERENCE);
         versionable.setProperty(JCR_BASEVERSION,
                 uuidFromNode(version), Type.REFERENCE);
         versionable.setProperty(JCR_PREDECESSORS,
@@ -444,9 +449,9 @@ class VersionableState {
         }
     }
 
-    private void createFrozen(NodeBuilder src, NodeBuilder dest)
+    private void createFrozen(NodeBuilder src, String srcId, NodeBuilder dest)
             throws CommitFailedException, RepositoryException {
-        initFrozen(dest, src);
+        initFrozen(dest, src, srcId);
         copyProperties(src, dest, new OPVProvider() {
             @Override
             public int getAction(NodeBuilder src,
@@ -464,6 +469,7 @@ class VersionableState {
         // add the frozen children and histories
         for (String name : src.getChildNodeNames()) {
             NodeBuilder child = src.getChildNode(name);
+            String childId = getChildId(srcId, child, name);
             int opv = getOPV(src, child, name);
 
             if (opv == OnParentVersionAction.ABORT) {
@@ -477,10 +483,10 @@ class VersionableState {
                     versionedChild(child, dest.child(name));
                 } else {
                     // else copy
-                    copy(child, dest.child(name));
+                    copy(child, childId, dest.child(name));
                 }
             } else if (opv == COPY) {
-                copy(child, dest.child(name));
+                copy(child, childId, dest.child(name));
             }
         }
     }
@@ -492,13 +498,32 @@ class VersionableState {
     }
 
     private void copy(NodeBuilder src,
+                      String srcId,
                       NodeBuilder dest)
             throws RepositoryException, CommitFailedException {
-        initFrozen(dest, src);
+        initFrozen(dest, src, srcId);
         copyProperties(src, dest, OPVForceCopy.INSTANCE, true);
         for (String name : src.getChildNodeNames()) {
             NodeBuilder child = src.getChildNode(name);
-            copy(child, dest.child(name));
+            copy(child, getChildId(srcId, child, name), dest.child(name));
+        }
+    }
+
+    /**
+     * Returns the id of the {@code child} node. The id is the value of the
+     * jcr:uuid property of the child node if present, or the concatenation of
+     * the {@code parentId} and the {@code name} of the child node.
+     *
+     * @param parentId the parentId.
+     * @param child the child node.
+     * @param name the name of the child node.
+     * @return the identifier of the child node.
+     */
+    private String getChildId(String parentId, NodeBuilder child, String name) {
+        if (child.hasProperty(JCR_UUID)) {
+            return uuidFromNode(child);
+        } else {
+            return parentId + "/" + name;
         }
     }
 
@@ -539,6 +564,10 @@ class VersionableState {
 
     private int getOPV(NodeBuilder parent, NodeBuilder child, String childName)
             throws RepositoryException {
+        // ignore hidden tree
+        if (childName.startsWith(":")) {
+            return IGNORE;
+        }
         ImmutableTree parentTree = new ImmutableTree(parent.getNodeState());
         NodeState childState;
         if (NT_FROZENNODE.equals(child.getName(JCR_PRIMARYTYPE))) {

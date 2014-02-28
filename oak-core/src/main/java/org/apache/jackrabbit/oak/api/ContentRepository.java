@@ -55,10 +55,6 @@ public interface ContentRepository {
      * the documentation of relevant login modules for the kind of access
      * credentials they expect.
      * <p/>
-     * TODO: Instead of the explicit access credentials, should this method
-     * rather take the arguments to be passed to the relevant
-     * JAAS {@link javax.security.auth.login.LoginContext} constructor?
-     * <p/>
      * The client must explicitly {@link ContentSession#close()} the
      * returned session once it is no longer used. The recommended access
      * pattern is:
@@ -83,4 +79,12 @@ public interface ContentRepository {
     ContentSession login(@Nullable Credentials credentials, @Nullable String workspaceName)
             throws LoginException, NoSuchWorkspaceException;
 
+    /**
+     * Returns the repository descriptors which contain all or a subset of the descriptors defined in
+     * {@link javax.jcr.Repository}.
+     *
+     * @return the repository descriptors
+     */
+    @Nonnull
+    Descriptors getDescriptors();
 }

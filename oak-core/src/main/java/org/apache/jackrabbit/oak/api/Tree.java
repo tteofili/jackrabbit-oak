@@ -52,8 +52,7 @@ import com.google.common.base.Function;
  * will throw an {@code InvalidStateException}.
  * <p>
  * {@link Tree} instances may become non existing after a call to
- * {@link Root#refresh()}, {@link Root#rebase()} or
- * {@link Root#commit(org.apache.jackrabbit.oak.spi.commit.CommitHook...)}.
+ * {@link Root#refresh()}, {@link Root#rebase()} or {@link Root#commit()}.
  * Any write access to non existing {@code Tree} instances will cause an
  * {@code InvalidStateException}.
  *
@@ -93,9 +92,9 @@ public interface Tree {
      */
     enum Status {
         /**
-         * Item is persisted
+         * Item is unchanged
          */
-        EXISTING,
+        UNCHANGED,
 
         /**
          * Item is new
@@ -201,9 +200,10 @@ public interface Tree {
      * Get a possibly non existing child of this {@code Tree}.
      * @param name The name of the child to retrieve.
      * @return The child with the given {@code name}.
+     * @throws IllegalArgumentException if the given name is invalid
      */
     @Nonnull
-    Tree getChild(@Nonnull String name);
+    Tree getChild(@Nonnull String name) throws IllegalArgumentException;
 
     /**
      * Determine if a child of this {@code Tree} instance exists. If no child
@@ -251,11 +251,13 @@ public interface Tree {
      * Add a child with the given {@code name}. Does nothing if such a child
      * already exists.
      *
-     * @param name name of the child
+     * @param name name of the child. A valid name does not start with a colon,
+     *             is not empty and does not contain a forward slash.
      * @return the {@code Tree} instance of the child with the given {@code name}.
+     * @throws IllegalArgumentException if {@code name} is not valid.
      */
     @Nonnull
-    Tree addChild(@Nonnull String name);
+    Tree addChild(@Nonnull String name) throws IllegalArgumentException;
 
     /**
      * Changes the nature of this tree such that the order of the children
@@ -295,6 +297,7 @@ public interface Tree {
      * @return {@code false} if there is no sibling with the given
      *         {@code name} or no reordering was performed;
      *         {@code true} otherwise.
+     * @throws IllegalArgumentException if the given name is invalid
      */
     boolean orderBefore(@Nullable String name);
 
@@ -302,28 +305,36 @@ public interface Tree {
      * Set a property state
      *
      * @param property The property state to set
+     * @throws IllegalArgumentException if {@code property} has a non valid name. A valid name
+     *         does not start with a colon, is not empty and does not contain a forward slash.
      */
     void setProperty(@Nonnull PropertyState property);
 
     /**
      * Set a property state
      *
-     * @param name  The name of this property
+     * @param name  The name of this property. A valid name does not start with a colon,
+     *              is not empty and does not contain a forward slash.
      * @param value The value of this property
      * @param <T>   The type of this property. Must be one of {@code String, Blob, byte[], Long, Integer, Double, Boolean, BigDecimal}
-     * @throws IllegalArgumentException if {@code T} is not one of the above types.
+     * @throws IllegalArgumentException if {@code T} is not one of the above types or
+     *         if {@code name} is not valid.
      */
-    <T> void setProperty(@Nonnull String name, @Nonnull T value);
+    <T> void setProperty(@Nonnull String name, @Nonnull T value)
+            throws IllegalArgumentException;
 
     /**
      * Set a property state
      *
-     * @param name  The name of this property
+     * @param name  The name of this property. A valid name does not start with a colon,
+     *              is not empty and does not contain a forward slash.
      * @param value The value of this property
      * @param type  The type of this property.
      * @param <T>   The type of this property.
+     * @throws IllegalArgumentException if {@code name} is not valid.
      */
-    <T> void setProperty(@Nonnull String name, @Nonnull T value, Type<T> type);
+    <T> void setProperty(@Nonnull String name, @Nonnull T value, Type<T> type)
+            throws IllegalArgumentException;
 
     /**
      * Remove the property with the given name. This method has no effect if a
@@ -332,6 +343,11 @@ public interface Tree {
      * @param name The name of the property
      */
     void removeProperty(@Nonnull String name);
+
+    /**
+     * Empty array of trees.
+     */
+    Tree[] EMPTY_ARRAY = new Tree[0];
 
     /**
      * Mapping from a Tree instance to its name.

@@ -23,11 +23,9 @@ import java.util.List;
 import org.apache.jackrabbit.oak.api.PropertyValue;
 import org.apache.jackrabbit.oak.api.Result;
 import org.apache.jackrabbit.oak.api.Tree;
-import org.apache.jackrabbit.oak.namepath.NamePathMapper;
 import org.apache.jackrabbit.oak.query.ast.ColumnImpl;
 import org.apache.jackrabbit.oak.query.ast.OrderingImpl;
 import org.apache.jackrabbit.oak.spi.query.PropertyValues;
-import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -46,7 +44,7 @@ public class UnionQueryImpl implements Query {
     private OrderingImpl[] orderings;
     private boolean explain;
     private boolean measure;
-    private long limit;
+    private long limit = Long.MAX_VALUE;
     private long offset;
     private long size = -1;
     
@@ -57,17 +55,11 @@ public class UnionQueryImpl implements Query {
     }
 
     @Override
-    public void setRootTree(Tree rootTree) {
-        left.setRootTree(rootTree);
-        right.setRootTree(rootTree);
+    public void setExecutionContext(ExecutionContext context) {
+        left.setExecutionContext(context);
+        right.setExecutionContext(context);
     }
 
-    @Override
-    public void setRootState(NodeState rootState) {
-        left.setRootState(rootState);
-        right.setRootState(rootState);
-    }
-    
     @Override
     public void setOrderings(OrderingImpl[] orderings) {
         if (orderings == null) {
@@ -88,14 +80,10 @@ public class UnionQueryImpl implements Query {
     }
 
     @Override
-    public void setNamePathMapper(NamePathMapper namePathMapper) {
-        left.setNamePathMapper(namePathMapper);
-        right.setNamePathMapper(namePathMapper);
-    }
-
-    @Override
     public void setLimit(long limit) {
         this.limit = limit;
+        left.setLimit(limit);
+        right.setLimit(limit);
     }
 
     @Override
@@ -110,15 +98,20 @@ public class UnionQueryImpl implements Query {
     }
 
     @Override
-    public void setQueryEngine(QueryEngineImpl queryEngineImpl) {
-        left.setQueryEngine(queryEngineImpl);
-        right.setQueryEngine(queryEngineImpl);
+    public void setTraversalEnabled(boolean traversal) {
+        left.setTraversalEnabled(traversal);
+        right.setTraversalEnabled(traversal);
     }
 
     @Override
     public void prepare() {
         left.prepare();
         right.prepare();
+    }
+    
+    @Override
+    public double getEstimatedCost() {
+        return left.getEstimatedCost() + right.getEstimatedCost();
     }
 
     @Override
@@ -226,7 +219,7 @@ public class UnionQueryImpl implements Query {
             String plan = getPlan();
             columns = new ColumnImpl[] { new ColumnImpl("explain", "plan", "plan")};
             ResultRowImpl r = new ResultRowImpl(this,
-                    new String[0], 
+                    Tree.EMPTY_ARRAY,
                     new PropertyValue[] { PropertyValues.newString(plan)},
                     null);
             return Arrays.asList(r).iterator();

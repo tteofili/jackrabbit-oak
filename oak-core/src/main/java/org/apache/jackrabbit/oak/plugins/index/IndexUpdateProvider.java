@@ -19,12 +19,21 @@ package org.apache.jackrabbit.oak.plugins.index;
 import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
 
+import org.apache.jackrabbit.oak.spi.commit.CommitInfo;
 import org.apache.jackrabbit.oak.spi.commit.Editor;
 import org.apache.jackrabbit.oak.spi.commit.EditorProvider;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 
 public class IndexUpdateProvider implements EditorProvider {
+
+    private static final IndexUpdateCallback NOOP_CALLBACK =
+            new IndexUpdateCallback() {
+                @Override
+                public void indexUpdate() {
+                    // do nothing
+                }
+            };
 
     private final IndexEditorProvider provider;
 
@@ -42,8 +51,9 @@ public class IndexUpdateProvider implements EditorProvider {
 
     @Override @CheckForNull
     public Editor getRootEditor(
-            NodeState before, NodeState after, NodeBuilder builder) {
-        return new IndexUpdate(provider, async, after, builder);
+            NodeState before, NodeState after,
+            NodeBuilder builder, CommitInfo info) {
+        return new IndexUpdate(provider, async, after, builder, NOOP_CALLBACK);
     }
 
 }

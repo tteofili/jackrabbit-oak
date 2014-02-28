@@ -18,6 +18,8 @@
  */
 package org.apache.jackrabbit.oak.query.ast;
 
+import java.util.Set;
+
 import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.query.index.FilterImpl;
 import org.apache.jackrabbit.oak.spi.query.Filter;
@@ -69,45 +71,41 @@ public class SameNodeJoinConditionImpl extends JoinConditionImpl {
     public boolean evaluate() {
         String p1 = selector1.currentPath();
         String p2 = selector2.currentPath();
-        // TODO normalize paths; support more complex relative path (".." and so on)
         if (selector2Path.equals(".")) {
             return p1.equals(p2);
         }
-        String p = PathUtils.concat(p2, selector2Path);
+        String pn = normalizePath(selector2Path);
+        String p = PathUtils.concat(p2, pn);
         return p.equals(p1);
     }
 
     @Override
     public void restrict(FilterImpl f) {
-        if (f.getSelector() == selector1) {
+        if (f.getSelector().equals(selector1)) {
             String p2 = selector2.currentPath();
-            if (p2 == null && f.isPreparing() && selector2.isPrepared()) {
+            if (p2 == null && f.isPreparing() && f.isPrepared(selector2)) {
                 // during the prepare phase, if the selector is already
                 // prepared, then we would know the value
-                p2 = KNOWN_PATH;
-            }
-            if (p2 != null) {
+                f.restrictPath(KNOWN_PATH, Filter.PathRestriction.EXACT);
+            } else if (p2 != null) {
                 if (selector2Path.equals(".")) {
                     f.restrictPath(p2, Filter.PathRestriction.EXACT);
                 } else {
-                    // TODO normalize paths; support more complex relative path (".." and so on)
-                    String p = PathUtils.concat(p2, selector2Path);
+                    String pn = normalizePath(selector2Path);
+                    String p = PathUtils.concat(p2, pn);
                     f.restrictPath(p, Filter.PathRestriction.EXACT);
                 }
             }
         }
-        if (f.getSelector() == selector2) {
+        if (f.getSelector().equals(selector2)) {
             String p1 = selector1.currentPath();
-            if (p1 == null && f.isPreparing() && selector1.isPrepared()) {
+            if (p1 == null && f.isPreparing() && f.isPrepared(selector1)) {
                 // during the prepare phase, if the selector is already
                 // prepared, then we would know the value
-                p1 = KNOWN_PATH;
-            }
-            if (p1 != null) {
+                f.restrictPath(KNOWN_PATH, Filter.PathRestriction.EXACT);
+            } else if (p1 != null) {
                 if (selector2Path.equals(".")) {
                     f.restrictPath(p1, Filter.PathRestriction.EXACT);
-                } else {
-                    // TODO normalize paths; support relative path (".." and so on)
                 }
             }
         }
@@ -116,6 +114,16 @@ public class SameNodeJoinConditionImpl extends JoinConditionImpl {
     @Override
     public void restrictPushDown(SelectorImpl s) {
         // nothing to do
+    }
+    
+    @Override
+    public boolean isParent(SourceImpl source) {
+        return false;
+    }
+    
+    @Override
+    public boolean canEvaluate(Set<SourceImpl> available) {
+        return available.contains(selector1) && available.contains(selector2);
     }
 
 }

@@ -18,13 +18,6 @@
  */
 package org.apache.jackrabbit.oak.core;
 
-import static org.apache.jackrabbit.oak.api.Tree.Status.NEW;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assume.assumeTrue;
-
 import java.util.ArrayList;
 import java.util.List;
 
@@ -40,6 +33,12 @@ import org.apache.jackrabbit.oak.api.Type;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+
+import static org.apache.jackrabbit.oak.api.Tree.Status.NEW;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 
 public class RootTest extends OakBaseTest {
 
@@ -193,24 +192,6 @@ public class RootTest extends OakBaseTest {
         assertFalse(root.move("/s", "/s/t"));
     }
 
-    @Test
-    public void copyToSelf() throws CommitFailedException {
-        Root root = session.getLatestRoot();
-        root.getTree("/").addChild("s");
-        root.commit();
-
-        assertFalse(root.copy("/s", "/s"));
-    }
-
-    @Test
-    public void copyToDescendant() throws CommitFailedException {
-        Root root = session.getLatestRoot();
-        root.getTree("/").addChild("s");
-        root.commit();
-
-        assertTrue(root.copy("/s", "/s/t"));
-    }
-
     /**
      * Regression test for OAK-208
      */
@@ -250,51 +231,6 @@ public class RootTest extends OakBaseTest {
 
         assertFalse(tree.hasChild("x"));
         assertTrue(tree.hasChild("xx"));
-    }
-
-    @Test
-    public void copy() throws CommitFailedException {
-        Root root = session.getLatestRoot();
-        Tree tree = root.getTree("/");
-
-        Tree y = tree.getChild("y");
-        Tree x = tree.getChild("x");
-        assertTrue(x.exists());
-
-        assertTrue(tree.hasChild("x"));
-        root.copy("/x", "/y/xx");
-        assertTrue(tree.hasChild("x"));
-        assertTrue(y.hasChild("xx"));
-        
-        root.commit();
-
-        assertTrue(tree.hasChild("x"));
-        assertTrue(tree.hasChild("y"));
-        assertTrue(tree.getChild("y").hasChild("xx"));
-    }
-
-    @Test
-    public void deepCopy() throws CommitFailedException {
-        Root root = session.getLatestRoot();
-        Tree tree = root.getTree("/");
-
-        Tree y = tree.getChild("y");
-
-        root.getTree("/x").addChild("x1");
-        root.copy("/x", "/y/xx");
-        assertTrue(y.hasChild("xx"));
-        assertTrue(y.getChild("xx").hasChild("x1"));
-
-        root.commit();
-
-        assertTrue(tree.hasChild("x"));
-        assertTrue(tree.hasChild("y"));
-        assertTrue(tree.getChild("y").hasChild("xx"));
-        assertTrue(tree.getChild("y").getChild("xx").hasChild("x1"));
-
-        Tree x = tree.getChild("x");
-        Tree xx = tree.getChild("y").getChild("xx");
-        checkEqual(x, xx);
     }
 
     @Test
@@ -455,24 +391,6 @@ public class RootTest extends OakBaseTest {
         root1.rebase();
 
         root2.move("/x", "/y/x-moved");
-        checkEqual(root1.getTree("/"), (root2.getTree("/")));
-    }
-
-    @Test
-    public void rebaseWithCopy() throws CommitFailedException {
-        Root root1 = session.getLatestRoot();
-        Root root2 = session.getLatestRoot();
-
-        checkEqual(root1.getTree("/"), root2.getTree("/"));
-
-        root2.getTree("/").addChild("one").addChild("two").addChild("three")
-                .setProperty("p1", "V1");
-        root2.commit();
-
-        root1.copy("/x", "/y/x-copied");
-        root1.rebase();
-
-        root2.copy("/x", "/y/x-copied");
         checkEqual(root1.getTree("/"), (root2.getTree("/")));
     }
 

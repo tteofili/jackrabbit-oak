@@ -16,27 +16,29 @@
  */
 package org.apache.jackrabbit.oak.plugins.memory;
 
-import static com.google.common.base.Objects.toStringHelper;
-import static com.google.common.base.Preconditions.checkNotNull;
-import static com.google.common.base.Preconditions.checkState;
-import static java.util.Collections.emptyList;
-import static org.apache.jackrabbit.oak.api.Type.BOOLEAN;
-import static org.apache.jackrabbit.oak.api.Type.NAME;
-import static org.apache.jackrabbit.oak.api.Type.NAMES;
-import static org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState.EMPTY_NODE;
-
 import java.io.IOException;
 import java.io.InputStream;
 
+import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
+
+import com.google.common.base.Objects;
+import com.google.common.io.ByteStreams;
 
 import org.apache.jackrabbit.oak.api.Blob;
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Type;
+import org.apache.jackrabbit.oak.commons.PathUtils;
+import org.apache.jackrabbit.oak.spi.state.EqualsDiff;
+import org.apache.jackrabbit.oak.spi.state.MoveDetector;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 
-import com.google.common.io.ByteStreams;
+import static com.google.common.base.Objects.toStringHelper;
+import static com.google.common.base.Preconditions.checkNotNull;
+import static com.google.common.base.Preconditions.checkState;
+import static org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState.EMPTY_NODE;
+import static org.apache.jackrabbit.oak.spi.state.AbstractNodeState.checkValidName;
 
 /**
  * In-memory node state builder.
@@ -106,6 +108,7 @@ public class MemoryNodeBuilder implements NodeBuilder {
      * The base state of this builder, possibly non-existent if this builder
      * represents a new node that didn't yet exist in the base content tree.
      */
+    @Nonnull
     private NodeState base;
 
     /**
@@ -123,7 +126,9 @@ public class MemoryNodeBuilder implements NodeBuilder {
         this.parent = parent;
         this.name = name;
         this.rootBuilder = parent.rootBuilder;
-        this.head = new UnconnectedHead();
+        this.base = parent.base().getChildNode(name);
+        this.baseRevision = parent.baseRevision;
+        this.head = new UnconnectedHead(baseRevision, base);
     }
 
     /**
@@ -136,8 +141,7 @@ public class MemoryNodeBuilder implements NodeBuilder {
         this.name = null;
         this.rootBuilder = this;
 
-        // ensure child builder's base is updated on first access
-        this.baseRevision = 1;
+        this.baseRevision = 0;
         this.base = checkNotNull(base);
 
         this.head = new RootHead();
@@ -158,7 +162,7 @@ public class MemoryNodeBuilder implements NodeBuilder {
     /**
      * @return  {@code true} iff this is the root builder
      */
-    private boolean isRoot() {
+    protected final boolean isRoot() {
         return this == rootBuilder;
     }
 
@@ -219,10 +223,10 @@ public class MemoryNodeBuilder implements NodeBuilder {
      *
      * @param newBase new base state
      */
-    public void reset(NodeState newBase) {
+    public void reset(@Nonnull NodeState newBase) {
+        checkState(parent == null);
         base = checkNotNull(newBase);
-        baseRevision++;
-        head().setState(newBase);
+        baseRevision = rootHead().setState(newBase) + 1;
     }
 
     /**
@@ -232,18 +236,19 @@ public class MemoryNodeBuilder implements NodeBuilder {
      * @param newHead new head state
      */
     protected void set(NodeState newHead) {
-        baseRevision++; // this forces all sub-builders to refresh their heads
-        head().setState(newHead);
+        checkState(parent == null);
+        // updating the base revision forces all sub-builders to refresh
+        baseRevision = rootHead().setState(newHead);
     }
 
     //--------------------------------------------------------< NodeBuilder >---
 
-    @Override
+    @Override @Nonnull
     public NodeState getNodeState() {
         return head().getImmutableNodeState();
     }
 
-    @Override
+    @Override @Nonnull
     public NodeState getBaseState() {
         return base();
     }
@@ -255,12 +260,27 @@ public class MemoryNodeBuilder implements NodeBuilder {
 
     @Override
     public boolean isNew() {
-        return !isRoot() && !parent.base().hasChildNode(name) && parent.hasChildNode(name);
+        return exists() && !getBaseState().exists();
+    }
+
+    @Override
+    public boolean isNew(String name) {
+        return hasProperty(name) && !getBaseState().hasProperty(name);
     }
 
     @Override
     public boolean isModified() {
         return head().isModified();
+    }
+
+    @Override
+    public boolean isReplaced() {
+        return head().isReplaced();
+    }
+
+    @Override
+    public boolean isReplaced(String name) {
+        return head().isReplaced(name);
     }
 
     @Override
@@ -289,18 +309,19 @@ public class MemoryNodeBuilder implements NodeBuilder {
 
     @Override
     public NodeBuilder getChildNode(String name) {
-        return createChildBuilder(checkNotNull(name));
+        checkValidName(name);
+        return createChildBuilder(name);
     }
 
     @Override
     public NodeBuilder setChildNode(String name) {
-        return setChildNode(checkNotNull(name), EMPTY_NODE);
+        return setChildNode(name, EMPTY_NODE);
     }
 
     @Override
     public NodeBuilder setChildNode(String name, NodeState state) {
         checkState(exists(), "This builder does not exist: " + this.name);
-        head().getMutableNodeState().setChildNode(checkNotNull(name), checkNotNull(state));
+        head().getMutableNodeState().setChildNode(name, checkNotNull(state));
         MemoryNodeBuilder builder = createChildBuilder(name);
         updated();
         return builder;
@@ -318,31 +339,104 @@ public class MemoryNodeBuilder implements NodeBuilder {
         }
     }
 
+    /**
+     * This implementation has the same semantics as adding this node
+     * with name {@code newName} as a new child of {@code newParent} followed
+     * by removing this node. As a consequence this implementation allows
+     * moving this node into the subtree rooted here, the result of which
+     * is the same as removing this node.
+     * <p>
+     * See also {@link NodeBuilder#moveTo(NodeBuilder, String) the general contract}
+     * for {@code MoveTo}.
+     *
+     * @param newParent  builder for the new parent.
+     * @param newName  name of this child at the new parent
+     * @return  {@code true} on success, {@code false} otherwise
+     * @throws IllegalArgumentException if the given name string is empty
+     *                                  or contains the forward slash character
+     */
     @Override
-    public boolean moveTo(NodeBuilder newParent, String newName) {
-        if (isRoot()) {
+    public boolean moveTo(NodeBuilder newParent, String newName)
+            throws IllegalArgumentException {
+        checkNotNull(newParent);
+        checkValidName(newName);
+        if (isRoot() || !exists() || newParent.hasChildNode(newName)) {
             return false;
         } else {
-            NodeState nodeState = getNodeState();
-            remove();
             if (newParent.exists()) {
-                checkNotNull(newParent).setChildNode(checkNotNull(newName), nodeState);
+                annotateSourcePath();
+                NodeState nodeState = getNodeState();
+                newParent.setChildNode(newName, nodeState);
+                remove();
                 return true;
             } else {
-                // Move to descendant
                 return false;
             }
         }
     }
 
-    @Override
-    public boolean copyTo(NodeBuilder newParent, String newName) {
-        if (isRoot()) {
-            return false;
-        } else {
-            checkNotNull(newParent).setChildNode(checkNotNull(newName), getNodeState());
-            return true;
+    /**
+     * Annotate this builder with its source path if this builder has not
+     * been transiently added. The source path is written to a property with
+     * the name {@link MoveDetector#SOURCE_PATH}.
+     * <p>
+     * The source path of a builder is its current path if its current
+     * source path annotation is empty and none of its parents has a source
+     * path annotation set. Otherwise it is the source path of the first parent
+     * (or self) that has its source path annotation set appended with the relative
+     * path from that parent to this builder.
+     * <p>
+     * This builder has been transiently added when there exists no
+     * base node at its source path.
+     */
+    protected final void annotateSourcePath() {
+        String sourcePath = getSourcePath();
+        if (!isTransientlyAdded(sourcePath)) {
+            setProperty(MoveDetector.SOURCE_PATH, sourcePath);
         }
+    }
+
+    private final String getSourcePath() {
+        // Traverse up the hierarchy until we encounter the first builder
+        // having a source path annotation or until we hit the root
+        MemoryNodeBuilder builder = this;
+        String sourcePath = getSourcePathAnnotation(builder);
+        while (sourcePath == null && builder.parent != null) {
+            builder = builder.parent;
+            sourcePath = getSourcePathAnnotation(builder);
+        }
+
+        if (sourcePath == null) {
+            // Neither self nor any parent has a source path annotation. The source
+            // path is just the path of this builder
+            return getPath();
+        } else {
+            // The source path is the source path of the first parent having a source
+            // path annotation with the relative path from this builder up to that
+            // parent appended.
+            return PathUtils.concat(sourcePath,
+                    PathUtils.relativize(builder.getPath(), getPath()));
+        }
+    }
+
+    private static String getSourcePathAnnotation(MemoryNodeBuilder builder) {
+        PropertyState base = builder.getBaseState().getProperty(MoveDetector.SOURCE_PATH);
+        PropertyState head = builder.getNodeState().getProperty(MoveDetector.SOURCE_PATH);
+        if (Objects.equal(base, head)) {
+            // Both null: no source path annotation
+            // Both non null but equals: source path annotation is from a previous commit
+            return null;
+        } else {
+            return head.getValue(Type.STRING);
+        }
+    }
+
+    private boolean isTransientlyAdded(String path) {
+        NodeState node = rootBuilder.getBaseState();
+        for (String name : PathUtils.elements(path)) {
+            node = node.getChildNode(name);
+        }
+        return !node.exists();
     }
 
     @Override
@@ -367,30 +461,22 @@ public class MemoryNodeBuilder implements NodeBuilder {
 
     @Override
     public boolean getBoolean(String name) {
-        PropertyState property = getProperty(name);
-        return property != null
-                && property.getType() == BOOLEAN
-                && property.getValue(BOOLEAN);
+        return head().getCurrentNodeState().getBoolean(checkNotNull(name));
     }
 
-    @Override
+    @Override @CheckForNull
+    public String getString(@Nonnull String name) {
+        return head().getCurrentNodeState().getString(checkNotNull(name));
+    }
+
+    @Override @CheckForNull
     public String getName(@Nonnull String name) {
-        PropertyState property = getProperty(name);
-        if (property != null && property.getType() == NAME) {
-            return property.getValue(NAME);
-        } else {
-            return null;
-        }
+        return head().getCurrentNodeState().getName(checkNotNull(name));
     }
 
-    @Override
+    @Override @Nonnull
     public Iterable<String> getNames(@Nonnull String name) {
-        PropertyState property = getProperty(name);
-        if (property != null && property.getType() == NAMES) {
-            return property.getValue(NAMES);
-        } else {
-            return emptyList();
-        }
+        return head().getCurrentNodeState().getNames(checkNotNull(name));
     }
 
     @Override
@@ -501,15 +587,32 @@ public class MemoryNodeBuilder implements NodeBuilder {
          */
         public abstract boolean isModified();
 
-        public void setState(NodeState state) {
-            throw new IllegalStateException("Cannot set the state of a non-root builder");
-        }
+        /**
+         * Check whether the associated builder represents a node that
+         * used to exist but was replaced with other content.
+         *
+         * @return  {@code true} for a replaced node
+         */
+        public abstract boolean isReplaced();
+
+        /**
+         * Check whether the named property is replaced.
+         *
+         * @param name property name
+         * @return {@code true} for a replaced property
+         */
+        public abstract boolean isReplaced(String name);
 
     }
 
     private class UnconnectedHead extends Head {
         private long revision;
         private NodeState state;
+
+        UnconnectedHead(long revision, NodeState state) {
+            this.revision = revision;
+            this.state = state;
+        }
 
         @Override
         public Head update() {
@@ -552,6 +655,16 @@ public class MemoryNodeBuilder implements NodeBuilder {
 
         @Override
         public boolean isModified() {
+            return EqualsDiff.modified(base(), state);
+        }
+
+        @Override
+        public boolean isReplaced() {
+            return false;
+        }
+
+        @Override
+        public boolean isReplaced(String name) {
             return false;
         }
 
@@ -574,7 +687,9 @@ public class MemoryNodeBuilder implements NodeBuilder {
             if (revision != rootBuilder.baseRevision) {
                 // the root builder's base state has been reset: transition back
                 // to unconnected and connect again if necessary.
-                return new UnconnectedHead().update();
+                // No need to pass base() instead of base as the subsequent
+                // call to update will take care of updating to the latest state.
+                return new UnconnectedHead(baseRevision, base).update();
             } else {
                 return this;
             }
@@ -604,6 +719,16 @@ public class MemoryNodeBuilder implements NodeBuilder {
         }
 
         @Override
+        public boolean isReplaced() {
+            return state.isReplaced(base());
+        }
+
+        @Override
+        public boolean isReplaced(String name) {
+            return state.isReplaced(base(), name);
+        }
+
+        @Override
         public String toString() {
             return toStringHelper(this).add("path", getPath()).toString();
         }
@@ -611,9 +736,8 @@ public class MemoryNodeBuilder implements NodeBuilder {
 
     private class RootHead extends ConnectedHead {
         public RootHead() {
+            // Base of root is always up to date. No need to call base()
             super(new MutableNodeState(base));
-            // ensure updating of child builders on first access
-            revision = 1;
         }
 
         @Override
@@ -621,10 +745,11 @@ public class MemoryNodeBuilder implements NodeBuilder {
             return this;
         }
 
-        @Override
-        public final void setState(NodeState state) {
+        public final long setState(NodeState state) {
             this.state = new MutableNodeState(state);
-            revision++;
+            // To be able to make a distinction between set() and reset(), we
+            revision++;          // increment the revision twice and
+            return revision++;   // return the intermediate value
         }
 
     }

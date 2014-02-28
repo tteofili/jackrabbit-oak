@@ -16,98 +16,99 @@
  */
 package org.apache.jackrabbit.oak.osgi;
 
-import java.io.File;
-import java.io.IOException;
-import java.net.MalformedURLException;
-import java.net.URISyntaxException;
-import java.util.regex.Pattern;
-
-import javax.inject.Inject;
-import javax.jcr.Repository;
-
-import org.apache.jackrabbit.mk.api.MicroKernel;
-import org.apache.jackrabbit.oak.api.ContentRepository;
-import org.junit.Ignore;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.ops4j.pax.exam.CoreOptions;
-import org.ops4j.pax.exam.Option;
-import org.ops4j.pax.exam.junit.Configuration;
-import org.ops4j.pax.exam.junit.JUnit4TestRunner;
-import org.ops4j.pax.exam.options.SystemPropertyOption;
-import org.ops4j.pax.exam.options.UrlProvisionOption;
-
-import static junit.framework.Assert.assertNotNull;
-import static junit.framework.Assert.assertTrue;
 import static org.ops4j.pax.exam.CoreOptions.bundle;
 import static org.ops4j.pax.exam.CoreOptions.junitBundles;
 import static org.ops4j.pax.exam.CoreOptions.mavenBundle;
 import static org.ops4j.pax.exam.CoreOptions.systemProperties;
 
-@RunWith(JUnit4TestRunner.class)
+import java.io.File;
+import java.io.IOException;
+import java.net.MalformedURLException;
+import java.net.URISyntaxException;
+
+import javax.inject.Inject;
+import javax.jcr.Repository;
+import javax.jcr.RepositoryException;
+
+import org.apache.jackrabbit.oak.spi.state.NodeStore;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.ops4j.pax.exam.Configuration;
+import org.ops4j.pax.exam.CoreOptions;
+import org.ops4j.pax.exam.Option;
+import org.ops4j.pax.exam.junit.PaxExam;
+import org.ops4j.pax.exam.options.DefaultCompositeOption;
+import org.ops4j.pax.exam.options.SystemPropertyOption;
+import org.ops4j.pax.exam.spi.reactors.ExamReactorStrategy;
+import org.ops4j.pax.exam.spi.reactors.PerClass;
+import org.osgi.framework.Bundle;
+import org.osgi.framework.BundleContext;
+import org.osgi.framework.InvalidSyntaxException;
+import org.osgi.framework.ServiceReference;
+
+@RunWith(PaxExam.class)
+@ExamReactorStrategy(PerClass.class)
 public class OSGiIT {
 
     @Configuration
     public Option[] configuration() throws IOException, URISyntaxException {
         return CoreOptions.options(
                 junitBundles(),
-                mavenBundle("org.apache.felix", "org.apache.felix.scr", "1.6.0"),
+                mavenBundle("org.apache.felix", "org.apache.felix.scr", "1.8.0"),
                 mavenBundle( "org.apache.felix", "org.apache.felix.configadmin", "1.4.0" ),
                 mavenBundle( "org.apache.felix", "org.apache.felix.fileinstall", "3.2.6" ),
                 systemProperties(new SystemPropertyOption("felix.fileinstall.dir").value(getConfigDir())),
-                jarBundle("jcr.jar"),
-                jarBundle("guava.jar"),
-                jarBundle("jackrabbit-api.jar"),
-                jarBundle("jackrabbit-jcr-commons.jar"),
-                jarBundle("oak-commons.jar"),
-                jarBundle("oak-mk-api.jar"),
-                jarBundle("oak-mk.jar"),
-                jarBundle("oak-mk-remote.jar"),
-                jarBundle("oak-core.jar"),
-                jarBundle("oak-lucene.jar"),
-                jarBundle("oak-jcr.jar"),
-                jarBundle("tika-core.jar"));
+                jarBundles());
     }
 
     private String getConfigDir(){
         return new File(new File("src", "test"), "config").getAbsolutePath();
     }
 
-    private UrlProvisionOption jarBundle(String jar)
-            throws MalformedURLException {
-        File target = new File("target");
-        File bundles = new File(target, "test-bundles");
-        return bundle(new File(bundles, jar).toURI().toURL().toString());
+    private Option jarBundles() throws MalformedURLException {
+        DefaultCompositeOption composite = new DefaultCompositeOption();
+        for (File bundle : new File("target", "test-bundles").listFiles()) {
+            if (bundle.getName().endsWith(".jar") && bundle.isFile()) {
+                composite.add(bundle(bundle.toURI().toURL().toString()));
+            }
+        }
+        return composite;
     }
 
     @Inject
-    private MicroKernel kernel;
+    private BundleContext context;
 
     @Test
-    @Ignore("OAK-454")
-    public void testMicroKernel() {
-        assertNotNull(kernel);
-        assertTrue(Pattern.matches("[0-9a-f]+", kernel.getHeadRevision()));
+    public void listBundles() {
+        for (Bundle bundle : context.getBundles()) {
+            System.out.println(bundle);
+        }
+    }
+
+    @Test
+    public void listServices() throws InvalidSyntaxException {
+        for (ServiceReference reference
+                : context.getAllServiceReferences(null, null)) {
+            System.out.println(reference);
+        }
     }
 
     @Inject
-    private ContentRepository oakRepository;
+    private NodeStore store;
 
     @Test
-    @Ignore("OAK-795")
-    public void testOakRepository() {
-        assertNotNull(oakRepository);
-        // TODO: try something with oakRepository
+    public void testNodeStore() {
+        System.out.println(store);
+        System.out.println(store.getRoot());
     }
 
     @Inject
-    private Repository jcrRepository;
+    private Repository repository;
 
     @Test
-    @Ignore("OAK-795")
-    public void testJcrRepository() {
-        assertNotNull(jcrRepository);
-        // TODO: try something with jcrRepository
+    public void testRepository() throws RepositoryException {
+        System.out.println(repository);
+        System.out.println(repository.getDescriptor(Repository.REP_NAME_DESC));
     }
 
 }

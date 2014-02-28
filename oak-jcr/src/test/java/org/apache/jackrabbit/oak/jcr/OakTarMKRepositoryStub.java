@@ -19,7 +19,6 @@ package org.apache.jackrabbit.oak.jcr;
 import java.io.File;
 import java.security.Principal;
 import java.util.Properties;
-import java.util.Random;
 
 import javax.jcr.Credentials;
 import javax.jcr.GuestCredentials;
@@ -59,8 +58,9 @@ public class OakTarMKRepositoryStub extends RepositoryStub {
         try {
             File directory =
                     new File("target", "tarmk-" + System.currentTimeMillis());
-            this.store = new FileStore(directory, 1024 * 1024, false);
+            this.store = new FileStore(directory, 1, false);
             Jcr jcr = new Jcr(new Oak(new SegmentNodeStore(store)));
+            preCreateRepository(jcr);
             this.repository = jcr.createRepository();
 
             session = getRepository().login(superuser);
@@ -79,6 +79,15 @@ public class OakTarMKRepositoryStub extends RepositoryStub {
                 store.close();
             }
         }));
+    }
+
+    /**
+     * Override in base class and perform additional configuration on the
+     * {@link Jcr} builder before the repository is created.
+     *
+     * @param jcr the builder.
+     */
+    protected void preCreateRepository(Jcr jcr) {
     }
 
     /**

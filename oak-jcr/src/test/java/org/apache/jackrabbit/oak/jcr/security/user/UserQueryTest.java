@@ -34,6 +34,8 @@ import org.apache.jackrabbit.api.security.user.Group;
 import org.apache.jackrabbit.api.security.user.Query;
 import org.apache.jackrabbit.api.security.user.QueryBuilder;
 import org.apache.jackrabbit.api.security.user.User;
+import org.apache.jackrabbit.api.security.user.UserManager;
+import org.apache.jackrabbit.oak.spi.security.principal.EveryonePrincipal;
 import org.junit.Test;
 
 /**
@@ -292,6 +294,33 @@ public class UserQueryTest extends AbstractUserTest {
                 }
             });
             assertSameElements(result, users);
+        }
+    }
+
+    @Test
+    public void testFindInEveryoneGroup() throws RepositoryException {
+        Authorizable everyone = userMgr.getAuthorizable(EveryonePrincipal.NAME);
+        boolean doRemove = false;
+        try {
+            if (everyone == null) {
+                everyone = userMgr.createGroup(EveryonePrincipal.NAME);
+                superuser.save();
+                doRemove = true;
+            }
+
+            Iterator<Authorizable> result = userMgr.findAuthorizables(new Query() {
+                public <T> void build(QueryBuilder<T> builder) {
+                    builder.setScope(EveryonePrincipal.NAME, true);
+                }
+            });
+
+            Iterator<Authorizable> members = ((Group) everyone).getDeclaredMembers();
+            assertSameElements(result, members);
+        } finally {
+            if (doRemove) {
+                everyone.remove();
+                superuser.save();
+            }
         }
     }
 
@@ -574,7 +603,22 @@ public class UserQueryTest extends AbstractUserTest {
 
         Iterator<User> expected = Iterators.singletonIterator(elephant);
         assertTrue(result.hasNext());
-        assertSameElements(result, expected);
+        assertSameElements(expected, result);
+    }
+
+    @Test
+    public void testAdminImpersonation() throws Exception {
+        final String adminPrincipalName = userMgr.getAuthorizable(superuser.getUserID()).getPrincipal().getName();
+        Iterator<Authorizable> result = userMgr.findAuthorizables(new Query() {
+            public <T> void build(QueryBuilder<T> builder) {
+                builder.setCondition(builder.
+                        impersonates(adminPrincipalName));
+            }
+        });
+
+        Iterator<Authorizable> expected = userMgr.findAuthorizables("rep:principalName", null, UserManager.SEARCH_TYPE_USER);
+        assertTrue(result.hasNext());
+        assertSameElements(expected, result);
     }
 
     @Test

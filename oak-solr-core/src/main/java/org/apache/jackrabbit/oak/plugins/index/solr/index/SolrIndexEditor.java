@@ -16,15 +16,13 @@
  */
 package org.apache.jackrabbit.oak.plugins.index.solr.index;
 
-import static org.apache.jackrabbit.oak.commons.PathUtils.concat;
-
 import java.io.IOException;
-
 import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.plugins.index.IndexEditor;
+import org.apache.jackrabbit.oak.plugins.index.IndexUpdateCallback;
 import org.apache.jackrabbit.oak.plugins.index.solr.configuration.OakSolrConfiguration;
 import org.apache.jackrabbit.oak.plugins.index.solr.util.OakSolrUtils;
 import org.apache.jackrabbit.oak.spi.commit.Editor;
@@ -33,6 +31,8 @@ import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.apache.solr.client.solrj.SolrServer;
 import org.apache.solr.client.solrj.SolrServerException;
 import org.apache.solr.common.SolrInputDocument;
+
+import static org.apache.jackrabbit.oak.commons.PathUtils.concat;
 
 /**
  * Index editor for keeping a Solr index up to date.
@@ -57,15 +57,19 @@ public class SolrIndexEditor implements IndexEditor {
 
     private boolean propertiesChanged = false;
 
+    private final IndexUpdateCallback updateCallback;
+
     SolrIndexEditor(
             NodeBuilder definition, SolrServer solrServer,
-            OakSolrConfiguration configuration) throws CommitFailedException {
+            OakSolrConfiguration configuration,
+            IndexUpdateCallback callback) throws CommitFailedException {
         this.parent = null;
         this.name = null;
         this.path = "/";
         this.definition = definition;
         this.solrServer = solrServer;
         this.configuration = configuration;
+        this.updateCallback = callback;
     }
 
     private SolrIndexEditor(SolrIndexEditor parent, String name) {
@@ -75,6 +79,7 @@ public class SolrIndexEditor implements IndexEditor {
         this.definition = parent.definition;
         this.solrServer = parent.solrServer;
         this.configuration = parent.configuration;
+        this.updateCallback = parent.updateCallback;
     }
 
     public String getPath() {
@@ -92,6 +97,7 @@ public class SolrIndexEditor implements IndexEditor {
     public void leave(NodeState before, NodeState after)
             throws CommitFailedException {
         if (propertiesChanged || !before.exists()) {
+            updateCallback.indexUpdate();
             try {
                 solrServer.add(docFromState(after));
             } catch (SolrServerException e) {
@@ -151,7 +157,8 @@ public class SolrIndexEditor implements IndexEditor {
 
         try {
             solrServer.deleteByQuery(String.format(
-                    "%s:%s\\/*", configuration.getPathField(), path));
+                    "%s:%s*", configuration.getPathField(), path));
+            updateCallback.indexUpdate();
         } catch (SolrServerException e) {
             throw new CommitFailedException(
                     "Solr", 5, "Failed to remove documents from Solr", e);
@@ -166,9 +173,6 @@ public class SolrIndexEditor implements IndexEditor {
     private SolrInputDocument docFromState(NodeState state) {
         SolrInputDocument inputDocument = new SolrInputDocument();
         String path = getPath();
-        if (!path.endsWith("/")) {
-            path = path + "/";
-        }
         inputDocument.addField(configuration.getPathField(), path);
         for (PropertyState property : state.getProperties()) {
             // try to get the field to use for this property from configuration

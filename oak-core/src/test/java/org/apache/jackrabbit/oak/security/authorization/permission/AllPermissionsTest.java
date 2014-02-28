@@ -22,10 +22,13 @@ import java.util.List;
 import org.apache.jackrabbit.oak.AbstractSecurityTest;
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Tree;
+import org.apache.jackrabbit.oak.core.ImmutableRoot;
+import org.apache.jackrabbit.oak.plugins.tree.ImmutableTree;
 import org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants;
 import org.apache.jackrabbit.oak.plugins.version.VersionConstants;
 import org.apache.jackrabbit.oak.spi.security.authorization.permission.Permissions;
-import org.apache.jackrabbit.oak.spi.security.authorization.permission.ReadStatus;
+import org.apache.jackrabbit.oak.spi.security.authorization.permission.RepositoryPermission;
+import org.apache.jackrabbit.oak.spi.security.authorization.permission.TreePermission;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -53,27 +56,27 @@ public class AllPermissionsTest extends AbstractSecurityTest {
     }
 
     @Test
-    public void testGetReadStatus() {
+    public void testGetRepositoryPermission() {
+        assertSame(RepositoryPermission.ALL, all.getRepositoryPermission());
+    }
+
+    @Test
+    public void testGetTreePermission() {
         for (String path : paths) {
-            Tree tree = root.getTree(path);
+            ImmutableTree tree = new ImmutableRoot(root).getTree(path);
             assertTrue(tree.exists());
 
-            assertSame(ReadStatus.ALLOW_ALL, all.getReadStatus(tree, null));
+            assertSame(TreePermission.ALL, all.getTreePermission(tree, TreePermission.EMPTY));
             for (Tree child : tree.getChildren()) {
-                assertSame(ReadStatus.ALLOW_ALL, all.getReadStatus(child, null));
-            }
-            for (PropertyState ps : tree.getProperties()) {
-                assertSame(ReadStatus.ALLOW_ALL, all.getReadStatus(tree, ps));
+                assertSame(TreePermission.ALL, all.getTreePermission((ImmutableTree) child, TreePermission.EMPTY));
             }
         }
     }
 
     @Test
     public void testIsGranted() {
-        assertTrue(all.isGranted(Permissions.ALL));
-
         for (String path : paths) {
-            Tree tree = root.getTree(path);
+            ImmutableTree tree = new ImmutableRoot(root).getTree(path);
             assertTrue(tree.exists());
 
             assertTrue(all.isGranted(tree, null, Permissions.ALL));
@@ -81,7 +84,7 @@ public class AllPermissionsTest extends AbstractSecurityTest {
                 assertTrue(all.isGranted(tree, prop, Permissions.ALL));
             }
             for (Tree child : tree.getChildren()) {
-                assertTrue(all.isGranted(child, null, Permissions.ALL));
+                assertTrue(all.isGranted((ImmutableTree) child, null, Permissions.ALL));
             }
         }
     }

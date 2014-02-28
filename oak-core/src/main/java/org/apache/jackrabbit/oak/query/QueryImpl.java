@@ -17,12 +17,13 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Set;
 
 import org.apache.jackrabbit.oak.api.PropertyValue;
 import org.apache.jackrabbit.oak.api.Tree;
-import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.namepath.JcrPathParser;
 import org.apache.jackrabbit.oak.namepath.NamePathMapper;
 import org.apache.jackrabbit.oak.query.ast.AndImpl;
@@ -39,9 +40,13 @@ import org.apache.jackrabbit.oak.query.ast.EquiJoinConditionImpl;
 import org.apache.jackrabbit.oak.query.ast.FullTextSearchImpl;
 import org.apache.jackrabbit.oak.query.ast.FullTextSearchScoreImpl;
 import org.apache.jackrabbit.oak.query.ast.InImpl;
+import org.apache.jackrabbit.oak.query.ast.JoinConditionImpl;
+import org.apache.jackrabbit.oak.query.ast.JoinImpl;
+import org.apache.jackrabbit.oak.query.ast.JoinType;
 import org.apache.jackrabbit.oak.query.ast.LengthImpl;
 import org.apache.jackrabbit.oak.query.ast.LiteralImpl;
 import org.apache.jackrabbit.oak.query.ast.LowerCaseImpl;
+import org.apache.jackrabbit.oak.query.ast.NativeFunctionImpl;
 import org.apache.jackrabbit.oak.query.ast.NodeLocalNameImpl;
 import org.apache.jackrabbit.oak.query.ast.NodeNameImpl;
 import org.apache.jackrabbit.oak.query.ast.NotImpl;
@@ -55,11 +60,15 @@ import org.apache.jackrabbit.oak.query.ast.SameNodeJoinConditionImpl;
 import org.apache.jackrabbit.oak.query.ast.SelectorImpl;
 import org.apache.jackrabbit.oak.query.ast.SourceImpl;
 import org.apache.jackrabbit.oak.query.ast.UpperCaseImpl;
+import org.apache.jackrabbit.oak.query.index.FilterImpl;
+import org.apache.jackrabbit.oak.query.index.TraversingIndex;
+import org.apache.jackrabbit.oak.query.plan.ExecutionPlan;
+import org.apache.jackrabbit.oak.query.plan.SelectorExecutionPlan;
 import org.apache.jackrabbit.oak.spi.query.Filter;
 import org.apache.jackrabbit.oak.spi.query.PropertyValues;
 import org.apache.jackrabbit.oak.spi.query.QueryIndex;
+import org.apache.jackrabbit.oak.spi.query.QueryIndexProvider;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
-import org.apache.jackrabbit.oak.util.TreeUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -86,14 +95,20 @@ public class QueryImpl implements Query {
 
     private static final Logger LOG = LoggerFactory.getLogger(QueryImpl.class);
 
-    final SourceImpl source;
+    SourceImpl source;
     final String statement;
     final HashMap<String, PropertyValue> bindVariableMap = new HashMap<String, PropertyValue>();
     final HashMap<String, Integer> selectorIndexes = new HashMap<String, Integer>();
     final ArrayList<SelectorImpl> selectors = new ArrayList<SelectorImpl>();
     ConstraintImpl constraint;
-    
-    private QueryEngineImpl queryEngine;
+
+    /**
+     * Whether fallback to the traversing index is supported if no other index
+     * is available. This is enabled by default and can be disabled for testing
+     * purposes.
+     */
+    private boolean traversalEnabled = true;
+
     private OrderingImpl[] orderings;
     private ColumnImpl[] columns;
     private boolean explain, measure;
@@ -102,15 +117,19 @@ public class QueryImpl implements Query {
     private long offset;
     private long size = -1;
     private boolean prepared;
-    private Tree rootTree;
-    private NodeState rootState;
-    private NamePathMapper namePathMapper;
+    private ExecutionContext context;
 
-    QueryImpl(String statement, SourceImpl source, ConstraintImpl constraint, ColumnImpl[] columns) {
+    private final NamePathMapper namePathMapper;
+    
+    private double estimatedCost;
+
+    QueryImpl(String statement, SourceImpl source, ConstraintImpl constraint,
+            ColumnImpl[] columns, NamePathMapper mapper) {
         this.statement = statement;
         this.source = source;
         this.constraint = constraint;
         this.columns = columns;
+        this.namePathMapper = mapper;
     }
 
     @Override
@@ -170,6 +189,13 @@ public class QueryImpl implements Query {
 
             @Override
             public boolean visit(FullTextSearchImpl node) {
+                node.setQuery(query);
+                node.bindSelector(source);
+                return super.visit(node);
+            }
+
+            @Override
+            public boolean visit(NativeFunctionImpl node) {
                 node.setQuery(query);
                 node.bindSelector(source);
                 return super.visit(node);
@@ -301,7 +327,6 @@ public class QueryImpl implements Query {
             constraint = constraint.simplify();
         }
         source.setQueryConstraint(constraint);
-        source.init(this);
         for (ColumnImpl column : columns) {
             column.bindSelector(source);
         }
@@ -365,7 +390,7 @@ public class QueryImpl implements Query {
             String plan = getPlan();
             columns = new ColumnImpl[] { new ColumnImpl("explain", "plan", "plan")};
             ResultRowImpl r = new ResultRowImpl(this,
-                    new String[0], 
+                    Tree.EMPTY_ARRAY,
                     new PropertyValue[] { PropertyValues.newString(plan)},
                     null);
             return Arrays.asList(r).iterator();
@@ -374,7 +399,7 @@ public class QueryImpl implements Query {
             LOG.debug("query execute {} ", statement);
             LOG.debug("query plan {}", getPlan());
         }
-        RowIterator rowIt = new RowIterator(rootState);
+        RowIterator rowIt = new RowIterator(context.getBaseState());
         Comparator<ResultRowImpl> orderBy = ResultRowImpl.getComparator(orderings);
         Iterator<ResultRowImpl> it = 
                 FilterIterators.newCombinedFilter(rowIt, distinct, limit, offset, orderBy);
@@ -389,7 +414,7 @@ public class QueryImpl implements Query {
             };
             ArrayList<ResultRowImpl> list = new ArrayList<ResultRowImpl>();
             ResultRowImpl r = new ResultRowImpl(this,
-                    new String[0],
+                    Tree.EMPTY_ARRAY,
                     new PropertyValue[] {
                             PropertyValues.newString("query"),
                             PropertyValues.newLong(rowIt.getReadCount())
@@ -398,7 +423,7 @@ public class QueryImpl implements Query {
             list.add(r);
             for (SelectorImpl selector : selectors) {
                 r = new ResultRowImpl(this,
-                        new String[0],
+                        Tree.EMPTY_ARRAY,
                         new PropertyValue[] {
                                 PropertyValues.newString(selector.getSelectorName()),
                                 PropertyValues.newLong(selector.getScanCount()),
@@ -413,7 +438,12 @@ public class QueryImpl implements Query {
     
     @Override
     public String getPlan() {
-        return source.getPlan(rootState);
+        return source.getPlan(context.getBaseState());
+    }
+    
+    @Override
+    public double getEstimatedCost() {
+        return estimatedCost;
     }
 
     @Override
@@ -422,7 +452,78 @@ public class QueryImpl implements Query {
             return;
         }
         prepared = true;
-        source.prepare();
+        List<SourceImpl> sources = source.getInnerJoinSelectors();
+        List<JoinConditionImpl> conditions = source.getInnerJoinConditions();
+
+        if (sources.size() <= 1) {
+            // simple case (no join)
+            estimatedCost = source.prepare().getEstimatedCost();
+            return;
+        }
+
+        // use a greedy algorithm
+        SourceImpl result = null;
+        Set<SourceImpl> available = new HashSet<SourceImpl>();
+        while (sources.size() > 0) {
+            int bestIndex = 0;
+            double bestCost = Double.POSITIVE_INFINITY;
+            ExecutionPlan bestPlan = null;
+            SourceImpl best = null;
+            for (int i = 0; i < sources.size(); i++) {
+                SourceImpl test = buildJoin(result, sources.get(i), conditions);
+                if (test == null) {
+                    // no join condition
+                    continue;
+                }
+                ExecutionPlan testPlan = test.prepare();
+                double cost = testPlan.getEstimatedCost();
+                if (best == null || cost < bestCost) {
+                    bestPlan = testPlan;
+                    bestCost = cost;
+                    bestIndex = i;
+                    best = test;
+                }
+                test.unprepare();
+            }
+            available.add(sources.remove(bestIndex));
+            result = best;
+            best.prepare(bestPlan);
+        }
+        estimatedCost = result.prepare().getEstimatedCost();
+        source = result;
+                
+    }
+    
+    private static SourceImpl buildJoin(SourceImpl result, SourceImpl last, List<JoinConditionImpl> conditions) {
+        if (result == null) {
+            return last;
+        }
+        List<SourceImpl> selectors = result.getInnerJoinSelectors();
+        Set<SourceImpl> oldSelectors = new HashSet<SourceImpl>();
+        oldSelectors.addAll(selectors);
+        Set<SourceImpl> newSelectors = new HashSet<SourceImpl>();
+        newSelectors.addAll(selectors);
+        newSelectors.add(last);
+        for (JoinConditionImpl j : conditions) {
+            // only join conditions can now be evaluated,
+            // but couldn't be evaluated before
+            if (!j.canEvaluate(oldSelectors) && j.canEvaluate(newSelectors)) {
+                JoinImpl join = new JoinImpl(result, last, JoinType.INNER, j);
+                return join;
+            }
+        }
+        // no join condition was found
+        return null;
+    }
+ 
+    /**
+     * <b>!Test purpose only! <b>
+     * 
+     * this creates a filter for the given query
+     * 
+     */
+    Filter createFilter(boolean preparing) {
+        return source.createFilter(preparing);
     }
 
     /**
@@ -499,10 +600,10 @@ public class QueryImpl implements Query {
 
     ResultRowImpl currentRow() {
         int selectorCount = selectors.size();
-        String[] paths = new String[selectorCount];
+        Tree[] trees = new Tree[selectorCount];
         for (int i = 0; i < selectorCount; i++) {
             SelectorImpl s = selectors.get(i);
-            paths[i] = s.currentPath();
+            trees[i] = s.currentTree();
         }
         int columnCount = columns.length;
         PropertyValue[] values = new PropertyValue[columnCount];
@@ -520,7 +621,7 @@ public class QueryImpl implements Query {
                 orderValues[i] = orderings[i].getOperand().currentProperty();
             }
         }
-        return new ResultRowImpl(this, paths, values, orderValues);
+        return new ResultRowImpl(this, trees, values, orderValues);
     }
 
     @Override
@@ -571,36 +672,54 @@ public class QueryImpl implements Query {
     }
 
     @Override
-    public void setQueryEngine(QueryEngineImpl queryEngine) {
-        this.queryEngine = queryEngine;
+    public void setTraversalEnabled(boolean traversalEnabled) {
+        this.traversalEnabled = traversalEnabled;
     }
 
-    public QueryIndex getBestIndex(Filter filter) {
-        return queryEngine.getBestIndex(this, rootState, filter);
+    public SelectorExecutionPlan getBestSelectorExecutionPlan(FilterImpl filter) {
+        return getBestSelectorExecutionPlan(context.getBaseState(), filter,
+                context.getIndexProvider(), traversalEnabled);
+    }
+
+    private static SelectorExecutionPlan getBestSelectorExecutionPlan(
+            NodeState rootState, FilterImpl filter,
+            QueryIndexProvider indexProvider, boolean traversalEnabled) {
+        QueryIndex best = null;
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("cost using filter " + filter);
+        }
+
+        double bestCost = Double.POSITIVE_INFINITY;
+        for (QueryIndex index : indexProvider.getQueryIndexes(rootState)) {
+            double cost = index.getCost(filter, rootState);
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("cost for " + index.getIndexName() + " is " + cost);
+            }
+            if (cost < bestCost) {
+                bestCost = cost;
+                best = index;
+            }
+        }
+
+        if (traversalEnabled) {
+            QueryIndex traversal = new TraversingIndex();
+            double cost = traversal.getCost(filter, rootState);
+            if (cost < bestCost || bestCost == Double.POSITIVE_INFINITY) {
+                bestCost = cost;
+                best = traversal;
+            }
+        }
+        return new SelectorExecutionPlan(filter.getSelector(), best, bestCost);
     }
 
     @Override
-    public void setRootTree(Tree rootTree) {
-        this.rootTree = rootTree;
+    public void setExecutionContext(ExecutionContext context) {
+        this.context = context;
     }
-    
-    public Tree getRootTree() {
-        return rootTree;
-    }
-    
-    @Override
-    public void setRootState(NodeState rootState) {
-        this.rootState = rootState;
-    }
-    
+
     @Override
     public void setOrderings(OrderingImpl[] orderings) {
         this.orderings = orderings;
-    }
-
-    @Override
-    public void setNamePathMapper(NamePathMapper namePathMapper) {
-        this.namePathMapper = namePathMapper;
     }
 
     public NamePathMapper getNamePathMapper() {
@@ -609,18 +728,28 @@ public class QueryImpl implements Query {
 
     @Override
     public Tree getTree(String path) {
-        return TreeUtil.getTree(rootTree, PathUtils.isAbsolute(path) ? path.substring(1) : path);
+        return context.getRoot().getTree(path);
     }
 
     /**
-     * Validate a path is syntactically correct.
+     * Validate the path is syntactically correct, and convert it to an Oak
+     * internal path (including namespace remapping if needed).
      * 
-     * @param path the path to validate
+     * @param path the path
+     * @return the the converted path
      */
-    public void validatePath(String path) {
+    public String getOakPath(String path) {
+        if (path == null) {
+            return null;
+        }
         if (!JcrPathParser.validate(path)) {
             throw new IllegalArgumentException("Invalid path: " + path);
         }
+        String p = namePathMapper.getOakPath(path);
+        if (p == null) {
+            throw new IllegalArgumentException("Invalid path or namespace prefix: " + path);
+        }
+        return p;
     }
 
     @Override

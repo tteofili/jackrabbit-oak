@@ -16,8 +16,6 @@
  */
 package org.apache.jackrabbit.oak.jcr.nodetype;
 
-import static org.apache.jackrabbit.JcrConstants.NT_UNSTRUCTURED;
-
 import javax.jcr.Node;
 import javax.jcr.nodetype.NoSuchNodeTypeException;
 
@@ -26,28 +24,14 @@ import org.apache.jackrabbit.api.JackrabbitSession;
 import org.apache.jackrabbit.api.security.user.Authorizable;
 import org.apache.jackrabbit.test.AbstractJCRTest;
 import org.apache.jackrabbit.test.NotExecutableException;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
+
+import static org.apache.jackrabbit.JcrConstants.NT_UNSTRUCTURED;
 
 /**
  *
  */
 public class MixinTest extends AbstractJCRTest {
 
-    @Override
-    @Before()
-    public void setUp() throws Exception {
-        super.setUp();
-    }
-
-    @Override
-    @After()
-    public void tearDown() throws Exception {
-        super.tearDown();
-    }
-
-    @Test
     public void testRemoveMixinWithoutMixinProperty() throws Exception {
         Node node = testRootNode.addNode(
                 "testRemoveMixinWithoutMixinProperty", NT_UNSTRUCTURED);
@@ -64,7 +48,6 @@ public class MixinTest extends AbstractJCRTest {
 
     }
 
-    @Test
     public void testRemoveInheritedMixin() throws Exception {
         Node node = testRootNode.addNode(
                 "testRemoveInheritedMixin", NT_UNSTRUCTURED);
@@ -72,7 +55,7 @@ public class MixinTest extends AbstractJCRTest {
         superuser.save();
 
         try {
-            testRootNode.removeMixin(JcrConstants.MIX_REFERENCEABLE);
+            node.removeMixin(JcrConstants.MIX_REFERENCEABLE);
             fail();
         } catch (NoSuchNodeTypeException e) {
             // success
@@ -82,7 +65,6 @@ public class MixinTest extends AbstractJCRTest {
         }
     }
 
-    @Test
     public void testRemoveInheritedMixin2() throws Exception {
         try {
             Authorizable user = ((JackrabbitSession) superuser).getUserManager().getAuthorizable("admin");
@@ -100,4 +82,49 @@ public class MixinTest extends AbstractJCRTest {
         }
     }
 
+    public void testRemoveMixVersionable() throws Exception {
+        Node node = testRootNode.addNode(nodeName1);
+        node.addMixin(mixVersionable);
+        superuser.save();
+
+        node.removeMixin(mixVersionable);
+        superuser.save();
+    }
+
+    public void testRemoveMixVersionable1() throws Exception {
+        Node node = testRootNode.addNode(nodeName1);
+        node.addMixin(mixReferenceable);
+        node.addMixin(mixVersionable);
+        superuser.save();
+
+        node.removeMixin(mixVersionable);
+        superuser.save();
+    }
+
+    public void testRemoveAddMixVersionable() throws Exception {
+        Node node = testRootNode.addNode(nodeName1);
+        node.addMixin(mixVersionable);
+        superuser.save();
+        String vhId = node.getVersionHistory().getUUID();
+
+        node.removeMixin(mixVersionable);
+        node.addMixin(mixVersionable);
+        superuser.save();
+
+        assertFalse(vhId.equals(node.getVersionHistory().getUUID()));
+    }
+
+    public void testRemoveAddMixVersionable1() throws Exception {
+        Node node = testRootNode.addNode(nodeName1);
+        node.addMixin(mixReferenceable);
+        node.addMixin(mixVersionable);
+        superuser.save();
+        String vhId = node.getVersionHistory().getUUID();
+
+        node.removeMixin(mixVersionable);
+        node.addMixin(mixVersionable);
+        superuser.save();
+
+        assertEquals(vhId, node.getVersionHistory().getUUID());
+    }
 }

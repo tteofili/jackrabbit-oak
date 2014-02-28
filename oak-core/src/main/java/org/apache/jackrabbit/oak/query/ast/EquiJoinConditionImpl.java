@@ -18,6 +18,8 @@
  */
 package org.apache.jackrabbit.oak.query.ast;
 
+import java.util.Set;
+
 import org.apache.jackrabbit.oak.api.PropertyValue;
 import org.apache.jackrabbit.oak.query.index.FilterImpl;
 import org.apache.jackrabbit.oak.spi.query.PropertyValues;
@@ -74,17 +76,13 @@ public class EquiJoinConditionImpl extends JoinConditionImpl {
         }
         // TODO what is the expected result of an equi join for multi-valued properties?
         if (!p1.isArray() && p2.isArray()) {
-            if (p1.getType().tag() != p2.getType().tag()) {
-                p1 = PropertyValues.convert(p1, p2.getType().tag(), query.getNamePathMapper());
-            }
+            p1 = convertValueToType(p1, p2);
             if (p1 != null && PropertyValues.match(p1, p2)) {
                 return true;
             }
             return false;
         } else if (p1.isArray() && !p2.isArray()) {
-            if (p1.getType().tag() != p2.getType().tag()) {
-                p2 = PropertyValues.convert(p2, p1.getType().tag(), query.getNamePathMapper());
-            }
+            p2 = convertValueToType(p2, p1);
             if (p2 != null && PropertyValues.match(p1, p2)) {
                 return true;
             }
@@ -95,9 +93,9 @@ public class EquiJoinConditionImpl extends JoinConditionImpl {
 
     @Override
     public void restrict(FilterImpl f) {
-        if (f.getSelector() == selector1) {
+        if (f.getSelector().equals(selector1)) {
             PropertyValue p2 = selector2.currentProperty(property2Name);
-            if (p2 == null && f.isPreparing() && selector2.isPrepared()) {
+            if (p2 == null && f.isPreparing() && f.isPrepared(selector2)) {
                 // during the prepare phase, if the selector is already
                 // prepared, then we would know the value
                 p2 = PropertyValues.newString(KNOWN_VALUE);
@@ -109,11 +107,12 @@ public class EquiJoinConditionImpl extends JoinConditionImpl {
                 }
             }
             // always set the condition, even if unkown ( -> is not null)
-            f.restrictProperty(property1Name, Operator.EQUAL, p2);
+            String p1n = normalizePropertyName(property1Name);
+            f.restrictProperty(p1n, Operator.EQUAL, p2);
         }
-        if (f.getSelector() == selector2) {
+        if (f.getSelector().equals(selector2)) {
             PropertyValue p1 = selector1.currentProperty(property1Name);
-            if (p1 == null && f.isPreparing() && selector1.isPrepared()) {
+            if (p1 == null && f.isPreparing() && f.isPrepared(selector1)) {
                 // during the prepare phase, if the selector is already
                 // prepared, then we would know the value
                 p1 = PropertyValues.newString(KNOWN_VALUE);
@@ -125,22 +124,33 @@ public class EquiJoinConditionImpl extends JoinConditionImpl {
                 }
             }
             // always set the condition, even if unkown ( -> is not null)
-            f.restrictProperty(property2Name, Operator.EQUAL, p1);
+            String p2n = normalizePropertyName(property2Name);
+            f.restrictProperty(p2n, Operator.EQUAL, p1);
         }
     }
 
     @Override
     public void restrictPushDown(SelectorImpl s) {
         // both properties may not be null
-        if (s == selector1) {
+        if (s.equals(selector1)) {
             PropertyExistenceImpl ex = new PropertyExistenceImpl(s.getSelectorName(), property1Name);
             ex.bindSelector(s);
             s.restrictSelector(ex);
-        } else if (s == selector2) {
+        } else if (s.equals(selector2)) {
             PropertyExistenceImpl ex = new PropertyExistenceImpl(s.getSelectorName(), property2Name);
             ex.bindSelector(s);
             s.restrictSelector(ex);
         }
+    }
+    
+    @Override
+    public boolean isParent(SourceImpl source) {
+        return false;
+    }
+    
+    @Override
+    public boolean canEvaluate(Set<SourceImpl> available) {
+        return available.contains(selector1) && available.contains(selector2);
     }
 
 }

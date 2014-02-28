@@ -23,10 +23,13 @@ import static org.apache.jackrabbit.commons.JcrUtils.getChildNodes;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
+import static org.junit.Assume.assumeTrue;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -39,6 +42,7 @@ import java.util.Set;
 
 import javax.jcr.Binary;
 import javax.jcr.GuestCredentials;
+import javax.jcr.ImportUUIDBehavior;
 import javax.jcr.InvalidItemStateException;
 import javax.jcr.Item;
 import javax.jcr.ItemExistsException;
@@ -54,6 +58,7 @@ import javax.jcr.PropertyType;
 import javax.jcr.Repository;
 import javax.jcr.RepositoryException;
 import javax.jcr.Session;
+import javax.jcr.SimpleCredentials;
 import javax.jcr.Value;
 import javax.jcr.ValueFactory;
 import javax.jcr.nodetype.NodeDefinition;
@@ -62,10 +67,15 @@ import javax.jcr.nodetype.NodeTypeManager;
 import javax.jcr.nodetype.NodeTypeTemplate;
 
 import org.apache.jackrabbit.JcrConstants;
+import org.apache.jackrabbit.api.JackrabbitNode;
 import org.apache.jackrabbit.api.JackrabbitRepository;
+import org.apache.jackrabbit.api.ReferenceBinary;
 import org.apache.jackrabbit.commons.cnd.CndImporter;
 import org.apache.jackrabbit.commons.cnd.ParseException;
+import org.apache.jackrabbit.commons.jackrabbit.SimpleReferenceBinary;
+import org.apache.jackrabbit.core.data.RandomInputStream;
 import org.apache.jackrabbit.oak.jcr.repository.RepositoryImpl;
+import org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants;
 import org.junit.Before;
 import org.junit.Ignore;
 import org.junit.Test;
@@ -117,6 +127,25 @@ public class RepositoryTest extends AbstractRepositoryTest {
         assertEquals(1, attributeNames.length);
         assertEquals(RepositoryImpl.REFRESH_INTERVAL, attributeNames[0]);
         assertEquals(42L, session.getAttribute(RepositoryImpl.REFRESH_INTERVAL));
+    }
+
+    @Test
+    public void loginWithCredentialsAttribute() throws RepositoryException {
+        SimpleCredentials sc = getAdminCredentials();
+        sc.setAttribute("attr", "val");
+        Session session = null;
+
+        try {
+            session = getRepository().login(sc, null);
+            String[] attributeNames = session.getAttributeNames();
+            assertEquals(1, attributeNames.length);
+            assertEquals("attr", attributeNames[0]);
+            assertEquals("val", session.getAttribute("attr"));
+        } finally {
+            if (session != null) {
+                session.logout();
+            }
+        }
     }
 
     @Test(expected = NoSuchWorkspaceException.class)
@@ -269,6 +298,51 @@ public class RepositoryTest extends AbstractRepositoryTest {
         assertEquals("/foo", node.getPath());
     }
 
+    /**
+     * Test SNS 1-based indexed path.
+     * JCR 2.0, Chapter 22.2:
+     * <em>
+     *     A name in a content repository path that does not explicitly specify an index implies an index of 1.
+     *     For example, /a/b/c is equivalent to /a[1]/b[1]/c[1].
+     * </em>
+     *
+     * @throws RepositoryException
+     */
+    @Test
+    public void getNodeSNS() throws RepositoryException {
+        Node node = getNode("/foo[1]");
+        assertNotNull(node);
+        assertEquals("foo", node.getName());
+        assertEquals("/foo", node.getPath());
+
+        node.addNode("bar");
+        Node bar = getNode("/foo[1]/bar[1]");
+        assertEquals("/foo/bar", bar.getPath());
+
+        try {
+            getNode("/foo[1]/bar[2]");
+            fail("retrieving wrong SNS index should throw PathNotFoundException");
+        } catch (PathNotFoundException e) {
+            // expected.
+        }
+
+        try {
+            getProperty("/foo[1]/bar[2]/jcr:primaryType");
+            fail("retrieving wrong SNS index should throw PathNotFoundException");
+        } catch (PathNotFoundException e) {
+            // expected.
+        }
+
+        assertTrue(getAdminSession().nodeExists("/foo[1]/bar[1]"));
+        assertTrue(node.hasNode("bar[1]"));
+        assertTrue(node.hasProperty("bar[1]/jcr:primaryType"));
+        assertTrue(getAdminSession().propertyExists("/foo[1]/bar[1]/jcr:primaryType"));
+        assertFalse(getAdminSession().nodeExists("/foo[1]/bar[2]"));
+        assertFalse(node.hasNode("bar[2]"));
+        assertFalse(node.hasProperty("bar[2]/jcr:primaryType"));
+        assertFalse(getAdminSession().propertyExists("/foo[1]/bar[2]/jcr:primaryType"));
+    }
+
     @Test(expected = RepositoryException.class)
     public void getNodeAbsolutePath() throws RepositoryException {
         Node root = getNode("/");
@@ -279,6 +353,27 @@ public class RepositoryTest extends AbstractRepositoryTest {
     public void testExceptionThrownForInvalidPath() throws RepositoryException {
         Session session = getAdminSession();
         session.itemExists("//jcr:content");
+    }
+
+    @Test
+    @Ignore("OAK-1174")  // FIXME OAK-1174
+    public void testInvalidName() throws RepositoryException {
+        Session session = getAdminSession();
+
+        RepositoryException exception = null;
+        try {
+            session.itemExists("/jcr:cont]ent");
+        } catch (RepositoryException e) {
+            exception = e;
+        }
+
+        session.setNamespacePrefix("foo", "http://foo.bar");
+        try {
+            session.itemExists("/jcr:cont]ent");
+            assertNull(exception);
+        } catch (RepositoryException e) {
+            assertNotNull(exception);
+        }
     }
 
     @Test
@@ -1158,7 +1253,11 @@ public class RepositoryTest extends AbstractRepositoryTest {
         Node n = getNode(TEST_PATH);
         Node file = n.addNode("file", "nt:file");
         Node content = file.addNode("jcr:content", "nt:resource");
-        content.setProperty("jcr:lastModified", System.currentTimeMillis());
+
+        long value = System.currentTimeMillis();
+        Property property = content.setProperty("jcr:lastModified", value);
+        assertEquals(value, property.getDate().getTimeInMillis());
+
         content.setProperty("jcr:data", new ByteArrayInputStream("foo".getBytes()));
         content.setProperty("jcr:mimeType", "text/plain");
         n.getSession().save();
@@ -1606,6 +1705,21 @@ public class RepositoryTest extends AbstractRepositoryTest {
         assertTrue(node.hasNode("target/moved"));
     }
 
+    @Test
+    public void renameNonOrderable() throws RepositoryException {
+        Session session = getAdminSession();
+        Node root = session.getRootNode();
+        Node parent = root.addNode("parent", NodeTypeConstants.NT_OAK_UNSTRUCTURED);
+        parent.addNode("fo");
+        Node foo = parent.addNode("foo");
+        session.save();
+
+        ((JackrabbitNode) foo).rename("renamed");
+        assertEquals("renamed", foo.getName());
+        assertFalse(session.nodeExists("/parent/foo"));
+        assertTrue(session.nodeExists("/parent/renamed"));
+    }
+
     @Test(expected = RepositoryException.class)
     public void moveToDescendant() throws RepositoryException {
         Session session = getAdminSession();
@@ -1915,6 +2029,44 @@ public class RepositoryTest extends AbstractRepositoryTest {
         }
         assertTrue(paths.contains("/other"));
         assertTrue(paths.contains("/dest/test"));
+    }
+
+    @Test // OAK-1244
+    public void importUUIDCreateNew() throws Exception {
+        Session session = getAdminSession();
+        Node node = session.getRootNode().addNode("node");
+        node.addMixin("mix:referenceable");
+        session.save();
+        String uuid = node.getIdentifier();
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        session.exportSystemView("/node", out, true, false);
+        node.remove();
+        session.save();
+        session.importXML("/", new ByteArrayInputStream(out.toByteArray()),
+                ImportUUIDBehavior.IMPORT_UUID_CREATE_NEW);
+        session.save();
+        node = session.getNode("/node");
+        assertFalse(uuid.equals(node.getIdentifier()));
+    }
+
+    @Test
+    public void testReferenceBinary() throws RepositoryException {
+        ValueFactory valueFactory = getAdminSession().getValueFactory();
+        Binary binary = valueFactory.createBinary(new RandomInputStream(1, 256*1024));
+
+        String reference = binary instanceof ReferenceBinary
+            ? ((ReferenceBinary) binary).getReference()
+            : null;
+
+        assumeTrue(reference != null);
+        Session session = createAdminSession();
+        try {
+            valueFactory = session.getValueFactory();
+            assertEquals(binary, valueFactory.createValue(
+                    new SimpleReferenceBinary(reference)).getBinary());
+        } finally {
+            session.logout();
+        }
     }
 
     //------------------------------------------------------------< private >---

@@ -18,10 +18,14 @@
  */
 package org.apache.jackrabbit.oak.plugins.version;
 
+import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import javax.jcr.RepositoryException;
@@ -35,11 +39,14 @@ import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.core.ImmutableRoot;
-import org.apache.jackrabbit.oak.core.ImmutableTree;
 import org.apache.jackrabbit.oak.namepath.NamePathMapper;
 import org.apache.jackrabbit.oak.plugins.identifier.IdentifierManager;
+import org.apache.jackrabbit.oak.plugins.memory.PropertyBuilder;
 import org.apache.jackrabbit.oak.plugins.nodetype.ReadOnlyNodeTypeManager;
+import org.apache.jackrabbit.oak.plugins.tree.ImmutableTree;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
+import org.apache.jackrabbit.util.ISO8601;
+import org.apache.jackrabbit.util.Text;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
@@ -59,6 +66,7 @@ import static org.apache.jackrabbit.JcrConstants.NT_VERSION;
 import static org.apache.jackrabbit.JcrConstants.NT_VERSIONHISTORY;
 import static org.apache.jackrabbit.JcrConstants.NT_VERSIONLABELS;
 import static org.apache.jackrabbit.oak.plugins.version.Utils.uuidFromNode;
+import static org.apache.jackrabbit.oak.plugins.version.VersionConstants.JCR_COPIED_FROM;
 import static org.apache.jackrabbit.oak.plugins.version.VersionConstants.REP_VERSIONSTORAGE;
 import static org.apache.jackrabbit.oak.plugins.version.VersionConstants.VERSION_STORE_PATH;
 
@@ -104,12 +112,13 @@ class ReadWriteVersionManager extends ReadOnlyVersionManager {
      * {@code versionable} node.
      *
      * @param versionable the versionable node.
+     * @param infoMap The additional information as provided by {@link org.apache.jackrabbit.oak.spi.commit.CommitInfo#getInfo()}
      * @return the version history node.
      * @throws IllegalArgumentException if the given node does not have a
      *                                  {@code jcr:uuid} property.
      */
     @Nonnull
-    NodeBuilder getOrCreateVersionHistory(@Nonnull NodeBuilder versionable)
+    NodeBuilder getOrCreateVersionHistory(@Nonnull NodeBuilder versionable, @Nonnull Map<String, Object> infoMap)
             throws CommitFailedException {
         checkNotNull(versionable);
         String vUUID = uuidFromNode(versionable);
@@ -129,6 +138,11 @@ class ReadWriteVersionManager extends ReadOnlyVersionManager {
                 node.setProperty(JCR_PRIMARYTYPE, nt, Type.NAME);
             }
         }
+        Object copiedFrom = infoMap.get(JCR_COPIED_FROM);
+        if (copiedFrom != null) {
+            node.setProperty(JCR_COPIED_FROM, copiedFrom.toString(), Type.WEAKREFERENCE);
+        }
+
         // use jcr:rootVersion node to detect if we need to initialize the
         // version history
         if (!node.hasChildNode(JCR_ROOTVERSION)) {
@@ -143,8 +157,58 @@ class ReadWriteVersionManager extends ReadOnlyVersionManager {
 
             // jcr:rootVersion child node
             createVersion(node, versionable);
+        } else if (!versionable.hasProperty(JCR_VERSIONHISTORY)) {
+            // connect versionable node with existing history
+            connectHistory(node.getChildNode(JCR_ROOTVERSION),
+                    uuidFromNode(node), versionable);
         }
         return node;
+    }
+
+    void removeVersion(String versionRelPath) throws CommitFailedException {
+        String historyRelPath = PathUtils.getAncestorPath(versionRelPath, 1);
+        String versionName = Text.getName(versionRelPath);
+
+        NodeBuilder vh = resolve(versionStorageNode, historyRelPath);
+
+        if (JCR_ROOTVERSION.equals(versionName)) {
+            String msg = "Removal of root version not allowed.";
+            throw new CommitFailedException(CommitFailedException.VERSION, VersionExceptionCode.ROOT_VERSION_REMOVAL.ordinal(), msg);
+        }
+
+        NodeBuilder versionNode = vh.getChildNode(versionName);
+        String versionId = versionNode.getProperty(JCR_UUID).getValue(Type.STRING);
+        // unregister from labels
+        for (String label : getVersionLabels(versionRelPath, versionId)) {
+            removeVersionLabel(historyRelPath, label);
+        }
+        // reconnected predecessors and successors of the version being removed
+        PropertyState successorIds = versionNode.getProperty(JCR_SUCCESSORS);
+        PropertyState predecessorIds = versionNode.getProperty(JCR_PREDECESSORS);
+
+        for (String succId :  successorIds.getValue(Type.REFERENCES)) {
+            NodeBuilder successor = getVersionById(vh, succId);
+
+            PropertyBuilder pb = new PropertyBuilder(Type.REFERENCE).setArray();
+            pb.setName(JCR_PREDECESSORS).setValues(successor.getProperty(JCR_PREDECESSORS).getValue(Type.REFERENCES));
+
+            pb.removeValue(versionId);
+            pb.setValues(predecessorIds.getValue(Type.REFERENCES));
+
+            successor.setProperty(pb.getPropertyState());
+        }
+
+        for (String predId :  predecessorIds.getValue(Type.REFERENCES)) {
+            NodeBuilder predecessor = getVersionById(vh, predId);
+            PropertyBuilder pb = new PropertyBuilder(Type.REFERENCE).setArray();
+            pb.setName(JCR_SUCCESSORS).setValues(predecessor.getProperty(JCR_SUCCESSORS).getValue(Type.REFERENCES));
+
+            pb.removeValue(versionId);
+            pb.setValues(successorIds.getValue(Type.REFERENCES));
+
+            predecessor.setProperty(pb.getPropertyState());
+        }
+        versionNode.remove();
     }
 
     public void checkout(NodeBuilder versionable) {
@@ -157,7 +221,7 @@ class ReadWriteVersionManager extends ReadOnlyVersionManager {
 
     public void checkin(@Nonnull NodeBuilder versionable)
             throws CommitFailedException {
-        NodeBuilder history = getOrCreateVersionHistory(versionable);
+        NodeBuilder history = getOrCreateVersionHistory(versionable, Collections.EMPTY_MAP);
         createVersion(history, versionable);
     }
 
@@ -166,7 +230,7 @@ class ReadWriteVersionManager extends ReadOnlyVersionManager {
                         @Nullable VersionSelector selector)
             throws CommitFailedException {
         String versionPath = getIdentifierManager().getPath(versionUUID);
-        NodeBuilder history = getOrCreateVersionHistory(versionable);
+        NodeBuilder history = getOrCreateVersionHistory(versionable, Collections.EMPTY_MAP);
         NodeBuilder version = null;
         if (versionPath != null) {
             String versionName = PathUtils.getName(versionPath);
@@ -326,8 +390,7 @@ class ReadWriteVersionManager extends ReadOnlyVersionManager {
         String versionUUID = IdentifierManager.generateUUID();
         version.setProperty(JCR_UUID, versionUUID, Type.STRING);
         version.setProperty(JCR_PRIMARYTYPE, NT_VERSION, Type.NAME);
-        long now = System.currentTimeMillis();
-        version.setProperty(JCR_CREATED, now, Type.DATE);
+        version.setProperty(JCR_CREATED, ISO8601.format(Calendar.getInstance()), Type.DATE);
         version.setProperty(JCR_PREDECESSORS, predecessors, Type.REFERENCES);
         version.setProperty(JCR_SUCCESSORS, Collections.<String>emptyList(), Type.REFERENCES);
 
@@ -367,6 +430,25 @@ class ReadWriteVersionManager extends ReadOnlyVersionManager {
         }
         versionable.setProperty(JCR_PREDECESSORS, predecessors, Type.REFERENCES);
         return version;
+    }
+
+    /**
+     * Connects a versionable node with the root version of an existing version
+     * history.
+     *
+     * @param rootVersion the root version of a version history.
+     * @param vHistoryUUID the uuid of the version history node.
+     * @param versionable the versionable node.
+     */
+    private void connectHistory(@Nonnull NodeBuilder rootVersion,
+                                @Nonnull String vHistoryUUID,
+                                @Nonnull NodeBuilder versionable) {
+        String rootVersionUUID = uuidFromNode(rootVersion);
+        versionable.setProperty(JCR_ISCHECKEDOUT, true, Type.BOOLEAN);
+        versionable.setProperty(JCR_VERSIONHISTORY, vHistoryUUID, Type.REFERENCE);
+        versionable.setProperty(JCR_BASEVERSION, rootVersionUUID, Type.REFERENCE);
+        versionable.setProperty(JCR_PREDECESSORS,
+                Collections.singleton(rootVersionUUID), Type.REFERENCES);
     }
 
     /**
@@ -482,5 +564,31 @@ class ReadWriteVersionManager extends ReadOnlyVersionManager {
                             VERSION_STORE_PATH, historyRelPath));
         }
         return history.child(JCR_VERSIONLABELS);
+    }
+
+    @Nonnull
+    private Iterable<String> getVersionLabels(@Nonnull String historyRelPath, @Nonnull String versionId) throws CommitFailedException {
+        List<String> labels = new ArrayList<String>();
+        NodeBuilder labelNode = getVersionLabelsFor(historyRelPath);
+        for (PropertyState ps : labelNode.getProperties()) {
+            if (Type.REFERENCE == ps.getType()) {
+                if (versionId.equals(ps.getValue(Type.REFERENCE))) {
+                    labels.add(ps.getName());
+                }
+            }
+        }
+        return labels;
+    }
+
+    @CheckForNull
+    private NodeBuilder getVersionById(@Nonnull NodeBuilder vhBuilder, @Nonnull String versionId) {
+        for (String childName : vhBuilder.getChildNodeNames()) {
+            NodeBuilder nb = vhBuilder.getChildNode(childName);
+            PropertyState uuid = nb.getProperty(JCR_UUID);
+            if (uuid != null && versionId.equals(uuid.getValue(Type.STRING))) {
+                return nb;
+            }
+        }
+        return null;
     }
 }

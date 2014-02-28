@@ -16,18 +16,14 @@
  */
 package org.apache.jackrabbit.oak.plugins.index.solr.osgi;
 
-import static org.apache.felix.scr.annotations.ReferencePolicy.STATIC;
-import static org.apache.felix.scr.annotations.ReferencePolicyOption.GREEDY;
-
 import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
-
 import org.apache.felix.scr.annotations.Component;
 import org.apache.felix.scr.annotations.Reference;
 import org.apache.felix.scr.annotations.Service;
 import org.apache.jackrabbit.oak.api.CommitFailedException;
-import org.apache.jackrabbit.oak.plugins.index.IndexEditor;
 import org.apache.jackrabbit.oak.plugins.index.IndexEditorProvider;
+import org.apache.jackrabbit.oak.plugins.index.IndexUpdateCallback;
 import org.apache.jackrabbit.oak.plugins.index.solr.configuration.OakSolrConfigurationProvider;
 import org.apache.jackrabbit.oak.plugins.index.solr.index.SolrIndexEditorProvider;
 import org.apache.jackrabbit.oak.plugins.index.solr.server.SolrServerProvider;
@@ -45,10 +41,10 @@ import org.apache.jackrabbit.oak.spi.state.NodeState;
 @Service(value = IndexEditorProvider.class)
 public class SolrIndexEditorProviderService implements IndexEditorProvider {
     
-    @Reference(policyOption = GREEDY, policy = STATIC)
+    @Reference
     private SolrServerProvider solrServerProvider;
 
-    @Reference(policyOption = GREEDY, policy = STATIC)
+    @Reference
     private OakSolrConfigurationProvider oakSolrConfigurationProvider;
 
     private SolrIndexEditorProvider solrIndexEditorProvider;
@@ -56,11 +52,11 @@ public class SolrIndexEditorProviderService implements IndexEditorProvider {
     @Override
     @CheckForNull
     public Editor getIndexEditor(@Nonnull String type, @Nonnull NodeBuilder definition, 
-                    @Nonnull NodeState root) throws CommitFailedException {
+                    @Nonnull NodeState root, @Nonnull IndexUpdateCallback callback) throws CommitFailedException {
         Editor indexEditor = null;
         if (solrServerProvider != null && oakSolrConfigurationProvider != null && solrIndexEditorProvider == null) {
             solrIndexEditorProvider = new SolrIndexEditorProvider(solrServerProvider, oakSolrConfigurationProvider);
-            indexEditor = solrIndexEditorProvider.getIndexEditor(type, definition, root);
+            indexEditor = solrIndexEditorProvider.getIndexEditor(type, definition, root, callback);
         }
         return indexEditor;
     }

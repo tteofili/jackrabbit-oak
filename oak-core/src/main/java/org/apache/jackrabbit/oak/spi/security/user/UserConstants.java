@@ -31,7 +31,11 @@ public interface UserConstants {
     String NT_REP_AUTHORIZABLE_FOLDER = "rep:AuthorizableFolder";
     String NT_REP_USER = "rep:User";
     String NT_REP_GROUP = "rep:Group";
+    @Deprecated
     String NT_REP_MEMBERS = "rep:Members";
+    String NT_REP_MEMBER_REFERENCES_LIST = "rep:MemberReferencesList";
+    String NT_REP_MEMBER_REFERENCES = "rep:MemberReferences";
+
     String MIX_REP_IMPERSONATABLE = "rep:Impersonatable";
 
     String REP_PRINCIPAL_NAME = "rep:principalName";
@@ -39,6 +43,7 @@ public interface UserConstants {
     String REP_PASSWORD = "rep:password";
     String REP_DISABLED = "rep:disabled";
     String REP_MEMBERS = "rep:members";
+    String REP_MEMBERS_LIST = "rep:membersList";
     String REP_IMPERSONATORS = "rep:impersonators";
 
     Collection<String> GROUP_PROPERTY_NAMES = ImmutableSet.of(
@@ -54,8 +59,6 @@ public interface UserConstants {
             REP_DISABLED,
             REP_IMPERSONATORS
     );
-
-    Collection<String> NODE_TYPE_NAMES = ImmutableSet.of(NT_REP_AUTHORIZABLE, NT_REP_USER, NT_REP_GROUP, NT_REP_MEMBERS);
 
     /**
      * Configuration option defining the ID of the administrator user.
@@ -120,19 +123,6 @@ public interface UserConstants {
     int DEFAULT_DEPTH = 2;
 
     /**
-     * Its value determines the maximum number of members within a given
-     * content structure until additional intermediate structuring is being
-     * added. This may for example be used to
-     * <ul>
-     *     <li>switch storing group members in JCR properties or nodes</li>
-     *     <li>define maximum number of members is a multivalued property</li>
-     *     <li>define maximum number of member properties within a given
-     *     node structure</li>
-     * </ul>
-     */
-    String PARAM_GROUP_MEMBERSHIP_SPLIT_SIZE = "groupMembershipSplitSize";
-
-    /**
      * Configuration parameter to change the default algorithm used to generate
      * password hashes.
      */
@@ -167,4 +157,19 @@ public interface UserConstants {
      * is used.
      */
     String PARAM_AUTHORIZABLE_ACTION_PROVIDER = "authorizableActionProvider";
+
+    /**
+     * Optional configuration parameter that might be used to get back support
+     * for the auto-save behavior which has been dropped in the default
+     * user management implementation present with OAK.
+     *
+     * <p>Note that this option has been added for those cases where API consumers
+     * rely on the implementation specific behavior present with Jackrabbit 2.x.
+     * In general using this option should not be required as the Jackrabbit
+     * User Management API expects that API consumers tests the auto-save
+     * mode is enabled. Therefore this option should be considered a temporary
+     * workaround after upgrading a repository to OAK; the affected code should
+     * be reviewed and adjusted accordingly.</p>
+     */
+    String PARAM_SUPPORT_AUTOSAVE = "supportAutoSave";
 }

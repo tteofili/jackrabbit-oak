@@ -27,10 +27,10 @@ import static org.apache.jackrabbit.JcrConstants.JCR_PRIMARYTYPE;
 import static org.apache.jackrabbit.JcrConstants.NT_BASE;
 import static org.apache.jackrabbit.oak.api.Type.NAME;
 import static org.apache.jackrabbit.oak.api.Type.NAMES;
-import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.OAK_MIXIN_SUBTYPES;
-import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.OAK_NAMED_SINGLE_VALUED_PROPERTIES;
-import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.OAK_PRIMARY_SUBTYPES;
-import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.OAK_SUPERTYPES;
+import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.REP_MIXIN_SUBTYPES;
+import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.REP_NAMED_SINGLE_VALUED_PROPERTIES;
+import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.REP_PRIMARY_SUBTYPES;
+import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.REP_SUPERTYPES;
 
 import java.util.ArrayList;
 import java.util.Set;
@@ -40,30 +40,47 @@ import javax.annotation.Nonnull;
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.PropertyValue;
 import org.apache.jackrabbit.oak.api.Tree;
+import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.query.QueryImpl;
 import org.apache.jackrabbit.oak.query.fulltext.FullTextExpression;
 import org.apache.jackrabbit.oak.query.index.FilterImpl;
+import org.apache.jackrabbit.oak.query.plan.ExecutionPlan;
+import org.apache.jackrabbit.oak.query.plan.SelectorExecutionPlan;
 import org.apache.jackrabbit.oak.spi.query.Cursor;
 import org.apache.jackrabbit.oak.spi.query.Cursors;
-import org.apache.jackrabbit.oak.spi.query.Filter;
 import org.apache.jackrabbit.oak.spi.query.IndexRow;
 import org.apache.jackrabbit.oak.spi.query.PropertyValues;
 import org.apache.jackrabbit.oak.spi.query.QueryIndex;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Iterables;
 
 /**
  * A selector within a query.
  */
 public class SelectorImpl extends SourceImpl {
-
+    
     // TODO possibly support using multiple indexes (using index intersection / index merge)
-    protected QueryIndex index;
+    private SelectorExecutionPlan plan;
+    
+    /**
+     * The WHERE clause of the query.
+     */
+    private ConstraintImpl queryConstraint;
+    
+    /**
+     * The join condition of this selector that can be evaluated at execution
+     * time. For the query "select * from nt:base as a inner join nt:base as b
+     * on a.x = b.x", the join condition "a.x = b.x" is only set for the
+     * selector b, as selector a can't evaluate it if it is executed first
+     * (until b is executed).
+     */
+    private JoinConditionImpl joinCondition;
 
     /**
-     * the node type associated with the {@link #nodeTypeName}
+     * The node type associated with the {@link #nodeTypeName}
      */
     private final NodeState nodeType;
 
@@ -74,24 +91,51 @@ public class SelectorImpl extends SourceImpl {
     private final boolean matchesAllTypes;
 
     /**
-     * all of the matching supertypes, or empty if the {@link #matchesAllTypes} flag is set
+     * All of the matching supertypes, or empty if the {@link #matchesAllTypes}
+     * flag is set
      */
     private final Set<String> supertypes;
 
     /**
-     * all of the matching primary subtypes, or empty if the {@link #matchesAllTypes} flag is set
+     * All of the matching primary subtypes, or empty if the
+     * {@link #matchesAllTypes} flag is set
      */
     private final Set<String> primaryTypes;
 
     /**
-     * all of the matching mixin types, or empty if the {@link #matchesAllTypes}
+     * All of the matching mixin types, or empty if the {@link #matchesAllTypes}
      * flag is set
      */
     private final Set<String> mixinTypes;
+    
+    /**
+     * Whether this selector is the parent of a descendent or parent-child join.
+     * Access rights don't need to be checked in such selectors (unless there
+     * are conditions on the selector).
+     */
+    private boolean isParent;  
+    
+    /**
+     * Whether this selector is the left hand side of a left outer join.
+     * Right outer joins are converted to left outer join.
+     */
+    private boolean outerJoinLeftHandSide;
 
-    private Cursor cursor;
-    private IndexRow currentRow;
-    private int scanCount;
+    /**
+     * Whether this selector is the right hand side of a left outer join.
+     * Right outer joins are converted to left outer join.
+     */
+    private boolean outerJoinRightHandSide;
+    
+    /**
+     * The list of all join conditions this selector is involved. For the query
+     * "select * from nt:base as a inner join nt:base as b on a.x =
+     * b.x", the join condition "a.x = b.x" is set for both selectors a and b,
+     * so both can check if the property x is set.
+     * The join conditions are added during the init phase.
+     */
+    private ArrayList<JoinConditionImpl> allJoinConditions =
+            new ArrayList<JoinConditionImpl>();
 
     /**
      * The selector condition can be evaluated when the given selector is
@@ -99,8 +143,16 @@ public class SelectorImpl extends SourceImpl {
      * "select * from nt:base a inner join nt:base b where a.x = 1 and b.y = 2",
      * the condition "a.x = 1" can be evaluated when evaluating selector a. The
      * other part of the condition can't be evaluated until b is available.
+     * This field is set during the prepare phase.
      */
     private ConstraintImpl selectorCondition;
+
+    private Cursor cursor;
+    private IndexRow currentRow;
+    private int scanCount;
+    
+    private Tree lastTree;
+    private String lastPath;
 
     public SelectorImpl(NodeState nodeType, String selectorName) {
         this.nodeType = checkNotNull(nodeType);
@@ -110,12 +162,12 @@ public class SelectorImpl extends SourceImpl {
         this.matchesAllTypes = NT_BASE.equals(nodeTypeName);
 
         if (!this.matchesAllTypes) {
-            this.supertypes = newHashSet(nodeType.getNames(OAK_SUPERTYPES));
+            this.supertypes = newHashSet(nodeType.getNames(REP_SUPERTYPES));
             supertypes.add(nodeTypeName);
 
             this.primaryTypes = newHashSet(nodeType
-                    .getNames(OAK_PRIMARY_SUBTYPES));
-            this.mixinTypes = newHashSet(nodeType.getNames(OAK_MIXIN_SUBTYPES));
+                    .getNames(REP_PRIMARY_SUBTYPES));
+            this.mixinTypes = newHashSet(nodeType.getNames(REP_MIXIN_SUBTYPES));
             if (nodeType.getBoolean(JCR_ISMIXIN)) {
                 mixinTypes.add(nodeTypeName);
             } else {
@@ -164,7 +216,7 @@ public class SelectorImpl extends SourceImpl {
     }
 
     public Iterable<String> getWildcardColumns() {
-        return nodeType.getNames(OAK_NAMED_SINGLE_VALUED_PROPERTIES);
+        return nodeType.getNames(REP_NAMED_SINGLE_VALUED_PROPERTIES);
     }
 
     @Override
@@ -178,11 +230,32 @@ public class SelectorImpl extends SourceImpl {
     }
 
     public boolean isPrepared() {
-        return index != null;
+        return plan != null;
     }
-
+    
     @Override
-    public void prepare() {
+    public void unprepare() {
+        plan = null;
+        selectorCondition = null;
+        isParent = false;
+        joinCondition = null;
+        allJoinConditions.clear();
+    }
+    
+    @Override
+    public void prepare(ExecutionPlan p) {
+        if (!(p instanceof SelectorExecutionPlan)) {
+            throw new IllegalArgumentException("Not a selector plan");
+        }
+        SelectorExecutionPlan selectorPlan = (SelectorExecutionPlan) p;
+        if (selectorPlan.getSelector() != this) {
+            throw new IllegalArgumentException("Not a plan for this selector");
+        }
+        pushDown();
+        this.plan = selectorPlan;
+    }
+    
+    private void pushDown() {
         if (queryConstraint != null) {
             queryConstraint.restrictPushDown(this);
         }
@@ -191,13 +264,44 @@ public class SelectorImpl extends SourceImpl {
                 c.restrictPushDown(this);
             }
         }
-        index = query.getBestIndex(createFilter(true));
+    }
+
+    @Override
+    public ExecutionPlan prepare() {
+        if (plan != null) {
+            return plan;
+        }
+        pushDown();
+        plan = query.getBestSelectorExecutionPlan(createFilter(true));
+        return plan;
+    }
+    
+    @Override
+    public void setQueryConstraint(ConstraintImpl queryConstraint) {
+        this.queryConstraint = queryConstraint;
+    }    
+    
+    @Override
+    public void setOuterJoin(boolean outerJoinLeftHandSide, boolean outerJoinRightHandSide) {
+        this.outerJoinLeftHandSide = outerJoinLeftHandSide;
+        this.outerJoinRightHandSide = outerJoinRightHandSide;
+    }    
+    
+    @Override
+    public void addJoinCondition(JoinConditionImpl joinCondition, boolean forThisSelector) {
+        if (forThisSelector) {
+            this.joinCondition = joinCondition;
+        }
+        allJoinConditions.add(joinCondition);
+        if (joinCondition.isParent(this)) {
+            isParent = true;
+        }
     }
 
     @Override
     public void execute(NodeState rootState) {
-        if (index != null) {
-            cursor = index.query(createFilter(false), rootState);
+        if (plan.getIndex() != null) {
+            cursor = plan.getIndex().query(createFilter(false), rootState);
         } else {
             cursor = Cursors.newPathCursor(new ArrayList<String>());
         }
@@ -208,8 +312,8 @@ public class SelectorImpl extends SourceImpl {
         StringBuilder buff = new StringBuilder();
         buff.append(toString());
         buff.append(" /* ");
-        if (index != null) {
-            buff.append(index.getPlan(createFilter(true), rootState));
+        if (getIndex() != null) {
+            buff.append(getIndex().getPlan(createFilter(true), rootState));
         } else {
             buff.append("no-index");
         }
@@ -226,8 +330,9 @@ public class SelectorImpl extends SourceImpl {
      * @param preparing whether a filter for the prepare phase should be made 
      * @return the filter
      */
-    private Filter createFilter(boolean preparing) {
-        FilterImpl f = new FilterImpl(this, query.getStatement(), query.getRootTree());
+    @Override
+    public FilterImpl createFilter(boolean preparing) {
+        FilterImpl f = new FilterImpl(this, query.getStatement());
         f.setPreparing(preparing);
         if (joinCondition != null) {
             joinCondition.restrict(f);
@@ -236,7 +341,7 @@ public class SelectorImpl extends SourceImpl {
         // "rep:excerpt is not null" to let the index know that
         // we will need the excerpt
         for (ColumnImpl c : query.getColumns()) {
-            if (c.getSelector() == this) {
+            if (c.getSelector().equals(this)) {
                 if (c.getColumnName().equals("rep:excerpt")) {
                     f.restrictProperty("rep:excerpt", Operator.NOT_EQUAL, null);
                 }
@@ -257,6 +362,9 @@ public class SelectorImpl extends SourceImpl {
             FullTextExpression ft = queryConstraint.getFullTextConstraint(this);
             f.setFullTextConstraint(ft);
         }
+        if (selectorCondition != null) {
+            selectorCondition.restrict(f);
+        }
 
         return f;
     }
@@ -266,11 +374,32 @@ public class SelectorImpl extends SourceImpl {
         while (cursor != null && cursor.hasNext()) {
             scanCount++;
             currentRow = cursor.next();
-            Tree tree = getTree(currentRow.getPath());
-            if (tree == null || !tree.exists()) {
-                continue;
+            if (isParent) {
+                // we must not check whether the _parent_ is readable
+                // for joins of type
+                // "select [b].[jcr:primaryType]
+                // from [nt:base] as [a] 
+                // inner join [nt:base] as [b] 
+                // on isdescendantnode([b], [a]) 
+                // where [b].[jcr:path] = $path"
+                // because if we did, we would filter out
+                // correct results
+            } else {
+                // we must check whether the _child_ is readable
+                // (even if no properties are read) for joins of type
+                // "select [a].[jcr:primaryType]
+                // from [nt:base] as [a] 
+                // inner join [nt:base] as [b] 
+                // on isdescendantnode([b], [a]) 
+                // where [a].[jcr:path] = $path"
+                // because not checking would reveal existence
+                // of the child node
+                Tree tree = getTree(currentRow.getPath());
+                if (tree == null || !tree.exists()) {
+                    continue;
+                }
             }
-            if (!matchesAllTypes && !evaluateTypeMatch(tree)) {
+            if (!matchesAllTypes && !evaluateTypeMatch()) {
                 continue;
             }
             if (selectorCondition != null && !selectorCondition.evaluate()) {
@@ -286,7 +415,11 @@ public class SelectorImpl extends SourceImpl {
         return false;
     }
 
-    private boolean evaluateTypeMatch(Tree tree) {
+    private boolean evaluateTypeMatch() {
+        Tree tree = getTree(currentRow.getPath());
+        if (tree == null || !tree.exists()) {
+            return false;
+        }
         PropertyState primary = tree.getProperty(JCR_PRIMARYTYPE);
         if (primary != null && primary.getType() == NAME) {
             String name = primary.getValue(NAME);
@@ -308,7 +441,7 @@ public class SelectorImpl extends SourceImpl {
     }
 
     /**
-     * Get the current absolute path (including workspace name)
+     * Get the current absolute Oak path (normalized).
      *
      * @return the path
      */
@@ -316,6 +449,11 @@ public class SelectorImpl extends SourceImpl {
         return cursor == null ? null : currentRow.getPath();
     }
     
+    /**
+     * Get the tree at the current path.
+     * 
+     * @return the current tree, or null
+     */
     public Tree currentTree() {
         String path = currentPath();
         if (path == null) {
@@ -323,12 +461,75 @@ public class SelectorImpl extends SourceImpl {
         }
         return getTree(path);
     }
+    
+    /**
+     * Get the tree at the given path.
+     * 
+     * @param path the path
+     * @return the tree, or null
+     */
+    Tree getTree(String path) {
+        if (lastPath == null || !path.equals(lastPath)) {
+            lastTree = query.getTree(path);
+            lastPath = path;
+        }
+        return lastTree;
+    }
 
+    /**
+     * The value for the given selector for the current node.
+     * 
+     * @param propertyName the JCR (not normalized) property name
+     * @return the property value
+     */
     public PropertyValue currentProperty(String propertyName) {
-        boolean relative = propertyName.indexOf('/') >= 0;
+        String pn = normalizePropertyName(propertyName);
+        return currentOakProperty(pn);
+    }
+
+    /**
+     * The value for the given selector for the current node, filtered by
+     * property type.
+     * 
+     * @param propertyName the JCR (not normalized) property name
+     * @param propertyType only include properties of this type
+     * @return the property value (possibly null)
+     */
+    public PropertyValue currentProperty(String propertyName, int propertyType) {
+        String pn = normalizePropertyName(propertyName);
+        return currentOakProperty(pn, propertyType);
+    }
+
+    /**
+     * Get the property value. The property name may be relative. The special
+     * property names "jcr:path", "jcr:score" and "rep:excerpt" are supported.
+     * 
+     * @param oakPropertyName (must already be normalized)
+     * @return the property value or null if not found
+     */
+    public PropertyValue currentOakProperty(String oakPropertyName) {
+        return currentOakProperty(oakPropertyName, null);
+    }
+
+    private PropertyValue currentOakProperty(String oakPropertyName, Integer propertyType) {
+        boolean asterisk = oakPropertyName.indexOf('*') >= 0;
+        if (asterisk) {
+            Tree t = currentTree();
+            ArrayList<PropertyValue> list = new ArrayList<PropertyValue>();
+            readOakProperties(list, t, oakPropertyName, propertyType);
+            if (list.size() == 0) {
+                return null;
+            }
+            ArrayList<String> strings = new ArrayList<String>();
+            for (PropertyValue p : list) {
+                Iterables.addAll(strings, p.getValue(Type.STRINGS));
+            }
+            return PropertyValues.newString(strings);                    
+        }
+        boolean relative = oakPropertyName.indexOf('/') >= 0;
         Tree t = currentTree();
         if (relative) {
-            for (String p : PathUtils.elements(PathUtils.getParentPath(propertyName))) {
+            for (String p : PathUtils.elements(PathUtils.getParentPath(oakPropertyName))) {
                 if (t == null) {
                     return null;
                 }
@@ -340,30 +541,76 @@ public class SelectorImpl extends SourceImpl {
                     t = t.getChild(p);
                 }
             }
-            propertyName = PathUtils.getName(propertyName);
+            oakPropertyName = PathUtils.getName(oakPropertyName);
         }
+        return currentOakProperty(t, oakPropertyName, propertyType);
+    }
+    
+    private PropertyValue currentOakProperty(Tree t, String oakPropertyName, Integer propertyType) {
+        PropertyValue result;
         if (t == null || !t.exists()) {
             return null;
         }
-        if (propertyName.equals(QueryImpl.JCR_PATH)) {
+        if (oakPropertyName.equals(QueryImpl.JCR_PATH)) {
             String path = currentPath();
             String local = getLocalPath(path);
             if (local == null) {
                 // not a local path
                 return null;
             }
-            return PropertyValues.newString(local);
-        } else if (propertyName.equals(QueryImpl.JCR_SCORE)) {
-            return currentRow.getValue(QueryImpl.JCR_SCORE);
-        } else if (propertyName.equals(QueryImpl.REP_EXCERPT)) {
-            return currentRow.getValue(QueryImpl.REP_EXCERPT);
+            result = PropertyValues.newString(local);
+        } else if (oakPropertyName.equals(QueryImpl.JCR_SCORE)) {
+            result = currentRow.getValue(QueryImpl.JCR_SCORE);
+        } else if (oakPropertyName.equals(QueryImpl.REP_EXCERPT)) {
+            result = currentRow.getValue(QueryImpl.REP_EXCERPT);
+        } else {
+            result = PropertyValues.create(t.getProperty(oakPropertyName));
         }
-        return PropertyValues.create(t.getProperty(propertyName));
+        if (result == null) {
+            return null;
+        }
+        if (propertyType != null && result.getType().tag() != propertyType) {
+            return null;
+        }
+        return result;
     }
-
-    @Override
-    public void init(QueryImpl query) {
-        // nothing to do
+    
+    private void readOakProperties(ArrayList<PropertyValue> target, Tree t, String oakPropertyName, Integer propertyType) {
+        while (true) {
+            if (t == null || !t.exists()) {
+                return;
+            }
+            int slash = oakPropertyName.indexOf('/');
+            if (slash < 0) {
+                break;
+            }
+            String parent = oakPropertyName.substring(0, slash);
+            oakPropertyName = oakPropertyName.substring(slash + 1);
+            if (parent.equals("..")) {
+                t = t.isRoot() ? null : t.getParent();
+            } else if (parent.equals(".")) {
+                // same node
+            } else if (parent.equals("*")) {
+                for (Tree child : t.getChildren()) {
+                    readOakProperties(target, child, oakPropertyName, propertyType);
+                }
+            } else {
+                t = t.getChild(parent);
+            }
+        }
+        if (!"*".equals(oakPropertyName)) {
+            PropertyValue value = currentOakProperty(t, oakPropertyName, propertyType);
+            if (value != null) {
+                target.add(value);
+            }
+            return;
+        }
+          for (PropertyState p : t.getProperties()) {
+              if (propertyType == null || p.getType().tag() == propertyType) {
+                  PropertyValue v = PropertyValues.create(p);
+                  target.add(v);
+              }
+          }
     }
 
     @Override
@@ -399,6 +646,22 @@ public class SelectorImpl extends SourceImpl {
     @Override
     public int hashCode() {
         return selectorName.hashCode();
+    }
+
+    QueryIndex getIndex() {
+        return plan == null ? null : plan.getIndex();
+    }
+
+    @Override
+    public ArrayList<SourceImpl> getInnerJoinSelectors() {
+        ArrayList<SourceImpl> list = new ArrayList<SourceImpl>();
+        list.add(this);
+        return list;
+    }
+
+    @Override
+    public boolean isOuterJoinRightHandSide() {
+        return this.outerJoinRightHandSide;
     }
 
 }

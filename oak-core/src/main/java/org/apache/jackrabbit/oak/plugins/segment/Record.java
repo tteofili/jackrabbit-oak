@@ -20,8 +20,6 @@ import static com.google.common.base.Objects.equal;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.base.Preconditions.checkState;
 
-import java.nio.ByteBuffer;
-import java.util.Collections;
 import java.util.UUID;
 
 import javax.annotation.Nonnull;
@@ -31,13 +29,25 @@ import javax.annotation.Nonnull;
  */
 class Record {
 
+    static boolean fastEquals(Object a, Object b) {
+        return a instanceof Record && fastEquals((Record) a, b);
+    }
+
+    static boolean fastEquals(Record a, Object b) {
+        return b instanceof Record && fastEquals(a, (Record) b);
+    }
+
+    static boolean fastEquals(Record a, Record b) {
+        return a.offset == b.offset && equal(a.uuid, b.uuid);
+    }
+
     /**
      * The segment that contains this record, or initially some other segment
      * in the same store. The reference is lazily updated when the
      * {@link #getSegment()} method is first called to prevent the potentially
      * costly pre-loading of segments that might actually not be needed.
      */
-    private Segment segment;
+    private volatile Segment segment;
 
     /**
      * Identifier of the segment that contains this record. The value of
@@ -45,7 +55,7 @@ class Record {
      * get updated by the {@link #getSegment()} method to indicate that
      * lazy initialization has happened.
      */
-    private UUID uuid;
+    private volatile UUID uuid;
 
     /**
      * Segment offset of this record.
@@ -79,11 +89,14 @@ class Record {
         this.offset = offset;
     }
 
-    // TODO: remove this ugly hack
-    protected Record(SegmentStore store, RecordId id) {
-        this(new Segment(
-                store, UUID.randomUUID(),
-                ByteBuffer.allocate(0), Collections.<UUID>emptyList()), id);
+    /**
+     * Returns the store that contains this record.
+     *
+     * @return containing segment store
+     */
+    @Nonnull
+    protected SegmentStore getStore() {
+        return segment.getStore();
     }
 
     /**
@@ -105,7 +118,7 @@ class Record {
      *
      * @return record identifier
      */
-    public synchronized RecordId getRecordId() {
+    public RecordId getRecordId() {
         return new RecordId(uuid, offset);
     }
 
@@ -142,6 +155,23 @@ class Record {
     }
 
     //------------------------------------------------------------< Object >--
+
+    @Override
+    public boolean equals(Object object) {
+        if (object == this) {
+            return true;
+        } else if (object instanceof Record) {
+            Record that = (Record) object;
+            return offset == that.offset && uuid.equals(that.uuid);
+        } else {
+            return false;
+        }
+    }
+
+    @Override
+    public int hashCode() {
+        return uuid.hashCode() ^ offset;
+    }
 
     @Override
     public String toString() {

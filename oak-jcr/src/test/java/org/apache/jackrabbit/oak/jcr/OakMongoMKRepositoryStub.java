@@ -28,14 +28,16 @@ import javax.jcr.Session;
 import javax.jcr.UnsupportedRepositoryOperationException;
 
 import com.mongodb.BasicDBObject;
+
 import org.apache.jackrabbit.api.JackrabbitSession;
-import org.apache.jackrabbit.oak.plugins.mongomk.MongoMK;
-import org.apache.jackrabbit.oak.plugins.mongomk.util.MongoConnection;
+import org.apache.jackrabbit.oak.kernel.KernelNodeStore;
+import org.apache.jackrabbit.oak.plugins.document.DocumentMK;
+import org.apache.jackrabbit.oak.plugins.document.util.MongoConnection;
 import org.apache.jackrabbit.test.NotExecutableException;
 import org.apache.jackrabbit.test.RepositoryStub;
 
 /**
- * A repository stub implementation for Oak on MongoMK
+ * A repository stub implementation for Oak on DocumentMK
  */
 public class OakMongoMKRepositoryStub extends RepositoryStub {
 
@@ -70,11 +72,7 @@ public class OakMongoMKRepositoryStub extends RepositoryStub {
         Session session = null;
         try {
             this.connection = new MongoConnection(HOST, PORT, DB);
-            MongoMK m = new MongoMK.Builder().setClusterId(1).
-                    memoryCacheSize(64 * 1024 * 1024).
-                    setMongoDB(connection.getDB()).open();
-            Jcr jcr = new Jcr(m);
-            this.repository = jcr.createRepository();
+            this.repository = createRepository(connection);
 
             session = getRepository().login(superuser);
             TestContentLoader loader = new TestContentLoader();
@@ -88,6 +86,15 @@ public class OakMongoMKRepositoryStub extends RepositoryStub {
         }
         Runtime.getRuntime().addShutdownHook(
                 new Thread(new ShutdownHook(connection)));
+    }
+
+    protected Repository createRepository(MongoConnection connection) {
+        DocumentMK m = new DocumentMK.Builder()
+                .setClusterId(1)
+                .memoryCacheSize(64 * 1024 * 1024)
+                .setMongoDB(connection.getDB())
+                .open();
+        return new Jcr(new KernelNodeStore(m)).createRepository();
     }
 
     /**
@@ -113,8 +120,7 @@ public class OakMongoMKRepositoryStub extends RepositoryStub {
     public static boolean isMongoDBAvailable() {
         MongoConnection connection = null;
         try {
-            connection = new MongoConnection(HOST, PORT, DB);
-            connection.getDB().command(new BasicDBObject("ping", 1));
+            connection = createConnection(DB);
             return true;
         } catch (Exception e) {
             return false;
@@ -123,6 +129,20 @@ public class OakMongoMKRepositoryStub extends RepositoryStub {
                 connection.close();
             }
         }
+    }
+
+    static MongoConnection createConnection(String db) throws Exception {
+        boolean success = false;
+        MongoConnection con = new MongoConnection(HOST, PORT, db);
+        try {
+            con.getDB().command(new BasicDBObject("ping", 1));
+            success = true;
+        } finally {
+            if (!success) {
+                con.close();
+            }
+        }
+        return con;
     }
 
     /**

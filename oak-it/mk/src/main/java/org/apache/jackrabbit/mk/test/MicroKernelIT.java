@@ -16,6 +16,13 @@
  */
 package org.apache.jackrabbit.mk.test;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+
 import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -33,13 +40,6 @@ import org.json.simple.JSONObject;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
-
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
 
 /**
  * Integration tests for verifying that a {@code MicroKernel} implementation
@@ -929,6 +929,7 @@ public class MicroKernelIT extends AbstractMicroKernelIT {
         assertFalse(mk.nodeExists("/test", null));
         assertTrue(mk.nodeExists("/moved", null));
         JSONObject obj1 = parseJSONObject(mk.getNodes("/moved", null, 99, 0, -1, null));
+        obj1.remove(":source-path");
         assertEquals(obj, obj1);
     }
 
@@ -937,7 +938,7 @@ public class MicroKernelIT extends AbstractMicroKernelIT {
         mk.commit("", "+\"/test/sub\":{}", null, "");
         try {
             // try to move /test to /test/sub/test
-            mk.commit("/", "> \"test\": \"/test/sub/test\"", null, "");
+            mk.commit("/", "> \"/test\": \"/test/sub/test\"", null, "");
             fail();
         } catch (Exception e) {
             // expected
@@ -1291,6 +1292,45 @@ public class MicroKernelIT extends AbstractMicroKernelIT {
             mk.merge(rev, "");
             fail("Exception expected");
         } catch (Exception expected) {}
+    }
+
+    @Test
+    public void resetToCurrentBranchHead() {
+        String rev = mk.branch(null);
+        rev = addNodes(rev, "/foo");
+        String reset = mk.reset(rev, rev);
+        assertTrue(mk.diff(rev, reset, "/", -1).length() == 0);
+    }
+
+    @Test
+    public void resetTrunk() {
+        String rev = addNodes(null, "/foo");
+        try {
+            mk.reset(rev, rev);
+            fail("MicroKernelException expected");
+        } catch (MicroKernelException expected) {}
+    }
+
+    @Test
+    public void resetNonAncestor() {
+        String rev = mk.getHeadRevision();
+        addNodes(null, "/foo");
+        String branch = mk.branch(null);
+        branch = addNodes(branch, "/bar");
+        try {
+            mk.reset(branch, rev);
+            fail("MicroKernelException expected");
+        } catch (MicroKernelException expected) {}
+    }
+
+    @Test
+    public void resetBranch() {
+        String branch = mk.branch(null);
+        branch = addNodes(branch, "/foo");
+        String head = addNodes(branch, "/bar");
+        assertNodesExist(head, "/bar");
+        head = mk.reset(head, branch);
+        assertNodesNotExist(head, "/bar");
     }
 
     @Test

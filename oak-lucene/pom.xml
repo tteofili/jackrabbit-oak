@@ -23,7 +23,7 @@
   <parent>
     <groupId>org.apache.jackrabbit</groupId>
     <artifactId>oak-parent</artifactId>
-    <version>0.11-SNAPSHOT</version>
+    <version>0.18-SNAPSHOT</version>
     <relativePath>../oak-parent/pom.xml</relativePath>
   </parent>
 
@@ -34,7 +34,7 @@
 
   <properties>
     <tika.version>1.3</tika.version>
-    <lucene.version>4.3.0</lucene.version>
+    <lucene.version>4.6.1</lucene.version>
     <known.issues>
       <!-- Jackrabbit query tests -->
       org.apache.jackrabbit.core.query.ExcerptTest#testMoreTextDotsAtEnd                             <!-- OAK-318 -->
@@ -74,7 +74,6 @@
       org.apache.jackrabbit.core.query.ShareableNodeTest#testPathConstraint                          <!-- OAK-118 -->
       org.apache.jackrabbit.core.observation.ShareableNodesTest#testAddShare                         <!-- OAK-118 workspace support needed -->
       org.apache.jackrabbit.core.observation.ShareableNodesTest#testRemoveShare                      <!-- OAK-118 workspace support needed -->
-      org.apache.jackrabbit.core.query.FulltextQueryTest#testMultiByte                               <!-- OAK-954 -->
       org.apache.jackrabbit.core.query.JoinTest#testJoinWithOR4                                      <!-- OAK-955 -->
       org.apache.jackrabbit.core.query.JoinTest#testJoinWithOR5                                      <!-- OAK-955 -->
       org.apache.jackrabbit.core.query.SQL2NodeLocalNameTest#testLowerLocalNameOrContains            <!-- OAK-957 -->
@@ -106,6 +105,14 @@
               org.apache.jackrabbit.oak.plugins.index.lucene,
               org.apache.jackrabbit.oak.plugins.index.lucene.util
             </Export-Package>
+            <_exportcontents>
+                org.apache.lucene.*;version=${lucene.version};-split-package:=merge-first,
+                org.tartarus.snowball.*;version=${lucene.version};-split-package:=merge-first
+            </_exportcontents>
+            <Import-Package>
+                org.apache.lucene.sandbox.*;resolution:=optional,
+                *
+            </Import-Package>
             <Embed-Dependency>lucene-*;inline=true</Embed-Dependency>
           </instructions>
         </configuration>
@@ -144,7 +151,7 @@
       <scope>provided</scope>
     </dependency>
     <dependency>
-      <groupId>biz.aQute</groupId>
+      <groupId>biz.aQute.bnd</groupId>
       <artifactId>bndlib</artifactId>
       <scope>provided</scope>
     </dependency>
@@ -178,6 +185,18 @@
       <version>${lucene.version}</version>
       <scope>provided</scope>
     </dependency>
+    <dependency>
+      <groupId>org.apache.lucene</groupId>
+      <artifactId>lucene-queryparser</artifactId>
+      <version>${lucene.version}</version>
+      <scope>provided</scope>
+    </dependency>    
+    <dependency>
+      <groupId>org.apache.lucene</groupId>
+      <artifactId>lucene-queries</artifactId>
+      <version>${lucene.version}</version>
+      <scope>provided</scope>
+    </dependency>
 
     <!-- Logging -->
     <dependency>
@@ -189,8 +208,6 @@
     <dependency>
       <groupId>com.google.code.findbugs</groupId>
       <artifactId>jsr305</artifactId>
-      <version>2.0.0</version>
-      <scope>provided</scope>
     </dependency>
 
     <!-- Test Dependencies -->
@@ -219,17 +236,11 @@
       <scope>test</scope>
     </dependency>
     <dependency>
-        <groupId>com.h2database</groupId>
-        <artifactId>h2</artifactId>
-        <version>1.3.158</version>
-        <scope>test</scope>
+      <groupId>org.apache.jackrabbit</groupId>
+      <artifactId>jackrabbit-jcr-tests</artifactId>
+      <version>${jackrabbit.version}</version>
+      <scope>test</scope>
     </dependency>
-     <dependency>
-       <groupId>org.apache.jackrabbit</groupId>
-       <artifactId>jackrabbit-jcr-tests</artifactId>
-       <version>${jackrabbit.version}</version>
-       <scope>test</scope>
-     </dependency>
     <dependency>
       <groupId>org.apache.jackrabbit</groupId>
       <artifactId>jackrabbit-core</artifactId>

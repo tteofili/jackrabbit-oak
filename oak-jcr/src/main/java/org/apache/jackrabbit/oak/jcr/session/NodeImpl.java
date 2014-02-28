@@ -55,7 +55,6 @@ import com.google.common.base.Predicate;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
-
 import org.apache.jackrabbit.JcrConstants;
 import org.apache.jackrabbit.api.JackrabbitNode;
 import org.apache.jackrabbit.commons.ItemNameMatcher;
@@ -65,15 +64,16 @@ import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Tree.Status;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.commons.PathUtils;
-import org.apache.jackrabbit.oak.plugins.identifier.IdentifierManager;
 import org.apache.jackrabbit.oak.jcr.delegate.NodeDelegate;
 import org.apache.jackrabbit.oak.jcr.delegate.PropertyDelegate;
 import org.apache.jackrabbit.oak.jcr.delegate.VersionManagerDelegate;
 import org.apache.jackrabbit.oak.jcr.lock.LockImpl;
 import org.apache.jackrabbit.oak.jcr.lock.LockOperation;
+import org.apache.jackrabbit.oak.jcr.session.operation.ItemOperation;
 import org.apache.jackrabbit.oak.jcr.session.operation.NodeOperation;
 import org.apache.jackrabbit.oak.jcr.version.VersionHistoryImpl;
 import org.apache.jackrabbit.oak.jcr.version.VersionImpl;
+import org.apache.jackrabbit.oak.plugins.identifier.IdentifierManager;
 import org.apache.jackrabbit.oak.plugins.memory.PropertyStates;
 import org.apache.jackrabbit.oak.plugins.nodetype.EffectiveNodeType;
 import org.apache.jackrabbit.oak.spi.security.authorization.permission.Permissions;
@@ -82,12 +82,15 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import static com.google.common.base.Preconditions.checkNotNull;
+import static com.google.common.collect.Iterators.transform;
+import static com.google.common.collect.Sets.newLinkedHashSet;
 import static java.util.Arrays.asList;
 import static java.util.Collections.singleton;
 import static org.apache.jackrabbit.JcrConstants.JCR_MIXINTYPES;
 import static org.apache.jackrabbit.JcrConstants.JCR_PRIMARYTYPE;
 import static org.apache.jackrabbit.oak.api.Type.NAME;
 import static org.apache.jackrabbit.oak.api.Type.NAMES;
+import static org.apache.jackrabbit.oak.util.TreeUtil.getNames;
 
 /**
  * TODO document
@@ -746,7 +749,7 @@ public class NodeImpl<T extends NodeDelegate> extends ItemImpl<T> implements Nod
             public PropertyIterator perform() throws InvalidItemStateException {
                 IdentifierManager idManager = sessionDelegate.getIdManager();
 
-                Set<String> propertyOakPaths = idManager.getReferences(weak, node.getTree(), name); // TODO: oak name?
+                Iterable<String> propertyOakPaths = idManager.getReferences(weak, node.getTree(), name); // TODO: oak name?
                 Iterable<Property> properties = Iterables.transform(
                         propertyOakPaths,
                         new Function<String, Property>() {
@@ -758,7 +761,7 @@ public class NodeImpl<T extends NodeDelegate> extends ItemImpl<T> implements Nod
                         }
                 );
 
-                return new PropertyIteratorAdapter(properties.iterator(), propertyOakPaths.size());
+                return new PropertyIteratorAdapter(sessionDelegate.sync(properties.iterator()));
             }
         });
     }
@@ -795,24 +798,32 @@ public class NodeImpl<T extends NodeDelegate> extends ItemImpl<T> implements Nod
 
     @Override
     public boolean hasNode(String relPath) throws RepositoryException {
-        final String oakPath = getOakPathOrThrow(relPath);
-        return perform(new NodeOperation<Boolean>(dlg) {
-            @Override
-            public Boolean perform() throws RepositoryException {
-                return node.getChild(oakPath) != null;
-            }
-        });
+        try {
+            final String oakPath = getOakPathOrThrow(relPath);
+            return perform(new NodeOperation<Boolean>(dlg) {
+                @Override
+                public Boolean perform() throws RepositoryException {
+                    return node.getChild(oakPath) != null;
+                }
+            });
+        } catch (PathNotFoundException e) {
+            return false;
+        }
     }
 
     @Override
     public boolean hasProperty(String relPath) throws RepositoryException {
-        final String oakPath = getOakPathOrThrow(relPath);
-        return perform(new NodeOperation<Boolean>(dlg) {
-            @Override
-            public Boolean perform() throws RepositoryException {
-                return node.getPropertyOrNull(oakPath) != null;
-            }
-        });
+        try {
+            final String oakPath = getOakPathOrThrow(relPath);
+            return perform(new NodeOperation<Boolean>(dlg) {
+                @Override
+                public Boolean perform() throws RepositoryException {
+                    return node.getPropertyOrNull(oakPath) != null;
+                }
+            });
+        } catch (PathNotFoundException e) {
+            return false;
+        }
     }
 
     @Override
@@ -928,7 +939,7 @@ public class NodeImpl<T extends NodeDelegate> extends ItemImpl<T> implements Nod
     }
 
     @Override
-    public void removeMixin(String mixinName) throws RepositoryException {
+    public void removeMixin(final String mixinName) throws RepositoryException {
         final String oakTypeName = getOakName(checkNotNull(mixinName));
         perform(new ItemWriteOperation<Void>() {
             @Override
@@ -937,6 +948,16 @@ public class NodeImpl<T extends NodeDelegate> extends ItemImpl<T> implements Nod
                 if (!isCheckedOut()) {
                     throw new VersionException(
                             "Cannot remove mixin type. Node is checked in.");
+                }
+
+                // check for NODE_TYPE_MANAGEMENT permission here as we cannot
+                // distinguish between a combination of removeMixin and addMixin
+                // and Node#remove plus subsequent addNode when it comes to
+                // autocreated properties like jcr:create, jcr:uuid and so forth.
+                Set<String> mixins = newLinkedHashSet(getNames(dlg.getTree(), JCR_MIXINTYPES));
+                if (!mixins.isEmpty() && mixins.remove(getOakName(mixinName))) {
+                    PropertyState prop = PropertyStates.createProperty(JCR_MIXINTYPES, mixins, NAMES);
+                    sessionContext.getAccessManager().checkPermissions(dlg.getTree(), prop, Permissions.NODE_TYPE_MANAGEMENT);
                 }
             }
             @Override
@@ -982,26 +1003,41 @@ public class NodeImpl<T extends NodeDelegate> extends ItemImpl<T> implements Nod
 
     @Override
     @Nonnull
-    public String getCorrespondingNodePath(String workspaceName) throws RepositoryException {
-        // TODO: use perform()
-        checkValidWorkspace(workspaceName);
-        throw new UnsupportedRepositoryOperationException("TODO: Node.getCorrespondingNodePath");
+    public String getCorrespondingNodePath(final String workspaceName) throws RepositoryException {
+        return toJcrPath(perform(new ItemOperation<String>(dlg) {
+            @Override
+            public String perform() throws RepositoryException {
+                checkValidWorkspace(workspaceName);
+                if (workspaceName.equals(sessionDelegate.getWorkspaceName())) {
+                    return item.getPath();
+                } else {
+                    throw new UnsupportedRepositoryOperationException("OAK-118: Node.getCorrespondingNodePath");
+                }
+            }
+        }));
     }
 
 
     @Override
-    public void update(String srcWorkspace) throws RepositoryException {
-        // TODO: use perform()
-        checkValidWorkspace(srcWorkspace);
+    public void update(final String srcWorkspace) throws RepositoryException {
+        perform(new ItemWriteOperation<Void>() {
+            @Override
+            public Void perform() throws RepositoryException {
+                checkValidWorkspace(srcWorkspace);
 
-        // check for pending changes
-        if (sessionDelegate.hasPendingChanges()) {
-            String msg = "Unable to perform operation. Session has pending changes.";
-            log.debug(msg);
-            throw new InvalidItemStateException(msg);
-        }
+                // check for pending changes
+                if (sessionDelegate.hasPendingChanges()) {
+                    String msg = "Unable to perform operation. Session has pending changes.";
+                    log.debug(msg);
+                    throw new InvalidItemStateException(msg);
+                }
 
-        // TODO
+                if (!srcWorkspace.equals(sessionDelegate.getWorkspaceName())) {
+                    throw new UnsupportedRepositoryOperationException("OAK-118: Node.update");
+                }
+                return null;
+            }
+        });
     }
 
     /**
@@ -1171,7 +1207,7 @@ public class NodeImpl<T extends NodeDelegate> extends ItemImpl<T> implements Nod
         perform(new LockOperation<Void>(sessionDelegate, dlg) {
             @Override
             public Void perform(NodeDelegate node) throws RepositoryException {
-                if (node.getStatus() != Status.EXISTING) {
+                if (node.getStatus() != Status.UNCHANGED) {
                     throw new LockException(
                             "Unable to lock a node with pending changes");
                 }
@@ -1259,25 +1295,25 @@ public class NodeImpl<T extends NodeDelegate> extends ItemImpl<T> implements Nod
     }
 
     private Iterator<Node> nodeIterator(Iterator<NodeDelegate> childNodes) {
-        return Iterators.transform(
+        return sessionDelegate.sync(transform(
                 childNodes,
                 new Function<NodeDelegate, Node>() {
                     @Override
                     public Node apply(NodeDelegate nodeDelegate) {
                         return new NodeImpl<NodeDelegate>(nodeDelegate, sessionContext);
                     }
-                });
+                }));
     }
 
     private Iterator<Property> propertyIterator(Iterator<PropertyDelegate> properties) {
-        return Iterators.transform(
+        return sessionDelegate.sync(transform(
                 properties,
                 new Function<PropertyDelegate, Property>() {
                     @Override
                     public Property apply(PropertyDelegate propertyDelegate) {
                         return new PropertyImpl(propertyDelegate, sessionContext);
                     }
-                });
+                }));
     }
 
     private void checkValidWorkspace(String workspaceName)
@@ -1404,13 +1440,125 @@ public class NodeImpl<T extends NodeDelegate> extends ItemImpl<T> implements Nod
     }
 
     //-----------------------------------------------------< JackrabbitNode >---
+
+    /**
+     * Simplified implementation of {@link JackrabbitNode#rename(String)}. In
+     * contrast to the implementation in Jackrabbit 2.x which was operating on
+     * the NodeState level directly, this implementation does a move plus
+     * subsequent reorder on the JCR API due to a missing support for renaming
+     * on the OAK API.
+     *
+     * Note, that this also has an impact on how permissions are enforced: In
+     * Jackrabbit 2.x the rename just required permission to modify the child
+     * collection on the parent, whereas a move did the full permission check.
+     * With this simplified implementation that (somewhat inconsistent) difference
+     * has been removed.
+     *
+     * @param newName The new name of this node.
+     * @throws RepositoryException If an error occurs.
+     */
     @Override
-    public void rename(String newName) throws RepositoryException {
-        throw new UnsupportedRepositoryOperationException("TODO: JackrabbitNode.rename (OAK-770");
+    public void rename(final String newName) throws RepositoryException {
+        if (dlg.isRoot()) {
+            throw new RepositoryException("Cannot rename the root node");
+        }
+
+        final String name = getName();
+        if (newName.equals(name)) {
+            // nothing to do
+            return;
+        }
+
+        perform(new ItemWriteOperation<Void>() {
+            @Override
+            public Void perform() throws RepositoryException {
+                Node parent = getParent();
+                String beforeName = null;
+
+                if (isOrderable(parent)) {
+                    // remember position amongst siblings
+                    NodeIterator nit = parent.getNodes();
+                    while (nit.hasNext()) {
+                        Node child = nit.nextNode();
+                        if (name.equals(child.getName())) {
+                            if (nit.hasNext()) {
+                                beforeName = nit.nextNode().getName();
+                            }
+                            break;
+                        }
+                    }
+                }
+
+                String srcPath = getPath();
+                String destPath = '/' + newName;
+                String parentPath = parent.getPath();
+                if (!"/".equals(parentPath)) {
+                    destPath = parentPath + destPath;
+                }
+                sessionContext.getSession().move(srcPath, destPath);
+
+                if (beforeName != null) {
+                    // restore position within siblings
+                    parent.orderBefore(newName, beforeName);
+                }
+                return null;
+            }
+        });
     }
 
+    private static boolean isOrderable(Node node) throws RepositoryException {
+        if (node.getPrimaryNodeType().hasOrderableChildNodes()) {
+            return true;
+        }
+
+        NodeType[] types = node.getMixinNodeTypes();
+        for (NodeType type : types) {
+            if (type.hasOrderableChildNodes()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Simplified implementation of the {@link org.apache.jackrabbit.api.JackrabbitNode#setMixins(String[])}
+     * method that adds all mixin types that are not yet present on this node
+     * and removes all mixins that are no longer contained in the specified
+     * array. Note, that this implementation will not work exactly like the
+     * variant in Jackrabbit 2.x which first created the effective node type
+     * and adjusted the set of child items accordingly.
+     *
+     * @param mixinNames
+     * @throws RepositoryException
+     */
     @Override
-    public void setMixins(String[] strings) throws RepositoryException {
-        throw new UnsupportedRepositoryOperationException("TODO: JackrabbitNode.setMixins (OAK-770");
+    public void setMixins(String[] mixinNames) throws RepositoryException {
+        final Set<String> oakTypeNames = newLinkedHashSet();
+        for (String mixinName : mixinNames) {
+            oakTypeNames.add(getOakName(checkNotNull(mixinName)));
+        }
+        perform(new ItemWriteOperation<Void>() {
+            @Override
+            public void checkPreconditions() throws RepositoryException {
+                super.checkPreconditions();
+                if (!isCheckedOut()) {
+                    throw new VersionException("Cannot set mixin types. Node is checked in.");
+                }
+
+                // check for NODE_TYPE_MANAGEMENT permission here as we cannot
+                // distinguish between a combination of removeMixin and addMixin
+                // and Node#remove plus subsequent addNode when it comes to
+                // autocreated properties like jcr:create, jcr:uuid and so forth.
+                PropertyDelegate mixinProp = dlg.getPropertyOrNull(JCR_MIXINTYPES);
+                if (mixinProp != null) {
+                    sessionContext.getAccessManager().checkPermissions(dlg.getTree(), mixinProp.getPropertyState(), Permissions.NODE_TYPE_MANAGEMENT);
+                }
+            }
+            @Override
+            public Void perform() throws RepositoryException {
+                dlg.setMixins(oakTypeNames);
+                return null;
+            }
+        });
     }
 }

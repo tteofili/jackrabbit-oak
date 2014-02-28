@@ -20,16 +20,17 @@ import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import com.google.common.base.Strings;
 import org.apache.jackrabbit.oak.api.PropertyState;
+import org.apache.jackrabbit.oak.api.Root;
 import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.spi.security.authorization.permission.PermissionConstants;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
-
-import com.google.common.base.Strings;
+import org.apache.jackrabbit.util.Text;
 
 /**
- * PermissionUtil... TODO
+ * Utility methods to evaluate permissions.
  */
 public final class PermissionUtil implements PermissionConstants {
 
@@ -55,13 +56,44 @@ public final class PermissionUtil implements PermissionConstants {
         return String.valueOf(path.hashCode());
     }
 
-    public static boolean checkACLPath(NodeBuilder node, String path) {
+    public static long getNumPermissions(@Nonnull NodeBuilder node) {
+        PropertyState property = node.getProperty(REP_NUM_PERMISSIONS);
+        return property == null ? 0 : property.getValue(Type.LONG);
+    }
+
+    public static long getNumPermissions(@Nonnull Tree node) {
+        PropertyState property = node.getProperty(REP_NUM_PERMISSIONS);
+        return property == null ? 0 : property.getValue(Type.LONG);
+    }
+
+    public static boolean checkACLPath(@Nonnull NodeBuilder node, @Nonnull String path) {
         PropertyState property = node.getProperty(REP_ACCESS_CONTROLLED_PATH);
         return property != null && path.equals(property.getValue(Type.STRING));
     }
 
-    public static boolean checkACLPath(Tree node, String path) {
+    public static boolean checkACLPath(@Nonnull Tree node, @Nonnull String path) {
         PropertyState property = node.getProperty(REP_ACCESS_CONTROLLED_PATH);
         return property != null && path.equals(property.getValue(Type.STRING));
+    }
+
+    @Nonnull
+    public static Tree getPermissionsRoot(@Nonnull Root root, @Nonnull String workspaceName) {
+        return root.getTree(PERMISSIONS_STORE_PATH + '/' + workspaceName);
+    }
+
+    @Nonnull
+    public static Tree getPrincipalRoot(@Nonnull Tree permissionsTree, @Nonnull String principalName) {
+        return permissionsTree.getChild(Text.escapeIllegalJcrChars(principalName));
+    }
+
+    @CheckForNull
+    public static String getPath(@Nullable Tree parentBefore, @Nullable Tree parentAfter) {
+        String path = null;
+        if (parentBefore != null) {
+            path = parentBefore.getPath();
+        } else if (parentAfter != null) {
+            path = parentAfter.getPath();
+        }
+        return path;
     }
 }

@@ -16,10 +16,14 @@
  */
 package org.apache.jackrabbit.oak.plugins.nodetype.write;
 
+import static org.apache.jackrabbit.JcrConstants.JCR_SYSTEM;
+import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.JCR_NODE_TYPES;
+import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.NODE_TYPES_PATH;
+
 import java.util.ArrayList;
 import java.util.List;
+
 import javax.annotation.Nonnull;
-import javax.jcr.AccessDeniedException;
 import javax.jcr.RepositoryException;
 import javax.jcr.nodetype.ConstraintViolationException;
 import javax.jcr.nodetype.NoSuchNodeTypeException;
@@ -35,10 +39,6 @@ import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.api.Root;
 import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.plugins.nodetype.ReadOnlyNodeTypeManager;
-
-import static org.apache.jackrabbit.JcrConstants.JCR_SYSTEM;
-import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.JCR_NODE_TYPES;
-import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.NODE_TYPES_PATH;
 
 /**
  * {@code ReadWriteNodeTypeManager} extends the {@link ReadOnlyNodeTypeManager}
@@ -129,8 +129,6 @@ public abstract class ReadWriteNodeTypeManager extends ReadOnlyNodeTypeManager {
     public final NodeTypeIterator registerNodeTypes(
             NodeTypeDefinition[] ntds, boolean allowUpdate)
             throws RepositoryException {
-        // TODO proper node type registration... (OAK-66, OAK-411)
-        // TODO handle inter-type dependencies (OAK-66, OAK-411)
         Root root = getWriteRoot();
         try {
             Tree tree = getOrCreateNodeTypes(root);

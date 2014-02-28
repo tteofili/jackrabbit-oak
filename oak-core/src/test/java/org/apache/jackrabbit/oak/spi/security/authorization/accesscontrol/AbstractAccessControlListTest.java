@@ -24,24 +24,27 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import javax.jcr.PropertyType;
 import javax.jcr.RepositoryException;
 import javax.jcr.security.Privilege;
 
-import com.google.common.collect.Lists;
-import org.apache.jackrabbit.oak.TestNameMapper;
 import org.apache.jackrabbit.oak.namepath.GlobalNameMapper;
+import org.apache.jackrabbit.oak.namepath.LocalNameMapper;
 import org.apache.jackrabbit.oak.namepath.NameMapper;
 import org.apache.jackrabbit.oak.namepath.NamePathMapper;
 import org.apache.jackrabbit.oak.namepath.NamePathMapperImpl;
-import org.apache.jackrabbit.oak.spi.security.principal.PrincipalImpl;
-import org.apache.jackrabbit.oak.spi.security.privilege.PrivilegeConstants;
 import org.apache.jackrabbit.oak.spi.security.authorization.restriction.RestrictionDefinition;
 import org.apache.jackrabbit.oak.spi.security.authorization.restriction.RestrictionProvider;
+import org.apache.jackrabbit.oak.spi.security.principal.PrincipalImpl;
+import org.apache.jackrabbit.oak.spi.security.privilege.PrivilegeConstants;
 import org.junit.Test;
 
+import com.google.common.collect.Lists;
+
+import static java.util.Collections.singletonMap;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -107,12 +110,8 @@ public abstract class AbstractAccessControlListTest extends AbstractAccessContro
 
     @Test
     public void testGetPath() {
-        NameMapper nameMapper = new GlobalNameMapper() {
-            @Override
-            protected Map<String, String> getNamespaceMap() {
-                return Collections.singletonMap("jr", "http://jackrabbit.apache.org");
-            }
-        };
+        NameMapper nameMapper = new GlobalNameMapper(
+                Collections.singletonMap("jr", "http://jackrabbit.apache.org"));
         NamePathMapper npMapper = new NamePathMapperImpl(nameMapper);
 
         // map of jcr-path to standard jcr-path
@@ -131,16 +130,18 @@ public abstract class AbstractAccessControlListTest extends AbstractAccessContro
 
     @Test
     public void testGetOakPath() {
-        NamePathMapper npMapper = new NamePathMapperImpl(new TestNameMapper());
+        NamePathMapper npMapper = new NamePathMapperImpl(new LocalNameMapper(
+                singletonMap("oak", "http://jackrabbit.apache.org"),
+                singletonMap("jcr", "http://jackrabbit.apache.org")));
         // map of jcr-path to oak path
         Map<String, String> paths = new HashMap<String, String>();
         paths.put(null, null);
         paths.put(getTestPath(), getTestPath());
         paths.put("/", "/");
-        String oakPath = '/' + TestNameMapper.TEST_PREFIX + ":testPath";
-        String jcrPath = '/' + TestNameMapper.TEST_LOCAL_PREFIX + ":testPath";
+        String oakPath = "/oak:testPath";
+        String jcrPath = "/jcr:testPath";
         paths.put(jcrPath, oakPath);
-        jcrPath = "/{" + TestNameMapper.TEST_URI + "}testPath";
+        jcrPath = "/{http://jackrabbit.apache.org}testPath";
         paths.put(jcrPath, oakPath);
 
         // test if oak-path is properly set.

@@ -24,10 +24,13 @@ import java.util.Calendar;
 import javax.jcr.Node;
 import javax.jcr.PathNotFoundException;
 import javax.jcr.PropertyType;
+import javax.jcr.Repository;
 import javax.jcr.RepositoryException;
 import javax.jcr.Session;
 import javax.jcr.Value;
 import javax.jcr.ValueFactory;
+import javax.jcr.nodetype.NodeType;
+import javax.jcr.retention.RetentionPolicy;
 import javax.jcr.security.Privilege;
 
 import com.google.common.base.Charsets;
@@ -36,7 +39,6 @@ import org.apache.jackrabbit.commons.cnd.CndImporter;
 import org.apache.jackrabbit.commons.cnd.ParseException;
 import org.apache.jackrabbit.commons.jackrabbit.authorization.AccessControlUtils;
 import org.apache.jackrabbit.oak.spi.security.principal.EveryonePrincipal;
-import org.apache.jackrabbit.value.BinaryValue;
 
 public class TestContentLoader {
 
@@ -56,17 +58,17 @@ public class TestContentLoader {
         addPropertyTestData(getOrAddNode(data, "property"));
         addQueryTestData(getOrAddNode(data, "query"));
         addNodeTestData(getOrAddNode(data, "node"));
-        // TODO add lifecycle test data
-        // addLifecycleTestData(getOrAddNode(data, "lifecycle"));
+        if (session.getRepository().getDescriptorValue(Repository.OPTION_LIFECYCLE_SUPPORTED).getBoolean()) {
+            addLifecycleTestData(getOrAddNode(data, "lifecycle"));
+        }
         addExportTestData(getOrAddNode(data, "docViewTest"));
 
-        // TODO add retention test data
-        // Node conf = getOrAddNode(session.getRootNode(), "testconf");
-        // addRetentionTestData(getOrAddNode(conf, "retentionTest"));
+        if (session.getRepository().getDescriptorValue(Repository.OPTION_RETENTION_SUPPORTED).getBoolean()) {
+            Node conf = getOrAddNode(session.getRootNode(), "testconf");
+            addRetentionTestData(getOrAddNode(conf, "retentionTest"));
+        }
 
-        // TODO add proper configuration for security setup
         AccessControlUtils.addAccessControlEntry(session, "/", EveryonePrincipal.getInstance(), new String[]{Privilege.JCR_READ}, true);
-
         session.save();
     }
 
@@ -104,14 +106,17 @@ public class TestContentLoader {
         node.setProperty("multi", new String[] { "one", "two", "three" });
     }
 
-    // TODO add retention test data
     /**
      * Creates a node with a RetentionPolicy
      */
-    // private  void addRetentionTestData(Node node) throws RepositoryException {
-    //    RetentionPolicy rp = RetentionPolicyImpl.createRetentionPolicy("testRetentionPolicy", node.getSession());
-    //    node.getSession().getRetentionManager().setRetentionPolicy(node.getPath(), rp);
-    // }
+    private  void addRetentionTestData(Node node) throws RepositoryException {
+        RetentionPolicy rp = createRetentionPolicy("testRetentionPolicy", node.getSession());
+        node.getSession().getRetentionManager().setRetentionPolicy(node.getPath(), rp);
+    }
+
+    private RetentionPolicy createRetentionPolicy(String testRetentionPolicy, Session session) {
+        throw new UnsupportedOperationException("Retention Management not yet implemented");
+    }
 
     /**
      * Creates four nodes under the given node. Each node has a String property
@@ -147,7 +152,7 @@ public class TestContentLoader {
         resource.addMixin("mix:referenceable");
         resource.setProperty("jcr:encoding", ENCODING);
         resource.setProperty("jcr:mimeType", "text/plain");
-        resource.setProperty("jcr:data", new BinaryValue("Hello w\u00F6rld.".getBytes(ENCODING)));
+        resource.setProperty("jcr:data", "Hello w\u00F6rld.", PropertyType.BINARY);
         resource.setProperty("jcr:lastModified", Calendar.getInstance());
 
         Node resReference = getOrAddNode(node, "reference");
@@ -166,21 +171,25 @@ public class TestContentLoader {
         JcrUtils.putFile(node, "testFile", "text/plain", new ByteArrayInputStream("Hello, World!".getBytes("UTF-8")));
     }
 
-    // TODO add lifecycle test data
     /**
      * Creates a lifecycle policy node and another node with a lifecycle
      * referencing that policy.
      */
-    // private  void addLifecycleTestData(Node node) throws RepositoryException {
-    //    Node policy = getOrAddNode(node, "policy");
-    //    policy.addMixin(NodeType.MIX_REFERENCEABLE);
-    //    Node transitions = getOrAddNode(policy, "transitions");
-    //    Node transition = getOrAddNode(transitions, "identity");
-    //    transition.setProperty("from", "identity");
-    //    transition.setProperty("to", "identity");
-    //    Node lifecycle = getOrAddNode(node, "node");
-    //    ((NodeImpl) lifecycle).assignLifecyclePolicy(policy, "identity");
-    //}
+    private  void addLifecycleTestData(Node node) throws RepositoryException {
+        Node policy = getOrAddNode(node, "policy");
+        policy.addMixin(NodeType.MIX_REFERENCEABLE);
+        Node transitions = getOrAddNode(policy, "transitions");
+        Node transition = getOrAddNode(transitions, "identity");
+        transition.setProperty("from", "identity");
+        transition.setProperty("to", "identity");
+        Node lifecycle = getOrAddNode(node, "node");
+        assignLifecyclePolicy(lifecycle, policy, "identity");
+    }
+
+    private void assignLifecyclePolicy(Node lifecycle, Node policy, String identity) {
+        throw new UnsupportedOperationException("Lifecycle Management is not yet implemented");
+
+    }
 
     private static void addExportTestData(Node node) throws RepositoryException, IOException {
         getOrAddNode(node, "invalidXmlName").setProperty("propName", "some text");
@@ -230,8 +239,7 @@ public class TestContentLoader {
         resource = getOrAddNode(node, "invalidBin");
         resource.setProperty("jcr:encoding", ENCODING);
         resource.setProperty("jcr:mimeType", "text/plain");
-        byte[] bytes = "Hello w\u00F6rld.".getBytes(ENCODING);
-        resource.setProperty(name, new BinaryValue(bytes));
+        resource.setProperty(name, "Hello w\u00F6rld.", PropertyType.BINARY);
         resource.setProperty("jcr:lastModified", Calendar.getInstance());
     }
 }

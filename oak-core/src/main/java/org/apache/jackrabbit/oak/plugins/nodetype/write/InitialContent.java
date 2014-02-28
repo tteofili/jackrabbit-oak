@@ -20,17 +20,18 @@ import static org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState.EMPTY_NODE
 
 import com.google.common.collect.ImmutableList;
 
-import org.apache.felix.scr.annotations.Component;
-import org.apache.felix.scr.annotations.Service;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.core.SystemRoot;
 import org.apache.jackrabbit.oak.plugins.index.IndexConstants;
 import org.apache.jackrabbit.oak.plugins.index.IndexUtils;
 import org.apache.jackrabbit.oak.plugins.memory.MemoryNodeStore;
 import org.apache.jackrabbit.oak.plugins.memory.ModifiedNodeState;
+import org.apache.jackrabbit.oak.plugins.name.NamespaceEditorProvider;
+import org.apache.jackrabbit.oak.plugins.name.Namespaces;
 import org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants;
-import org.apache.jackrabbit.oak.plugins.nodetype.RegistrationEditorProvider;
+import org.apache.jackrabbit.oak.plugins.nodetype.TypeEditorProvider;
 import org.apache.jackrabbit.oak.plugins.version.VersionConstants;
+import org.apache.jackrabbit.oak.spi.commit.CompositeEditorProvider;
 import org.apache.jackrabbit.oak.spi.commit.EditorHook;
 import org.apache.jackrabbit.oak.spi.lifecycle.RepositoryInitializer;
 import org.apache.jackrabbit.oak.spi.state.ApplyDiff;
@@ -42,8 +43,6 @@ import org.apache.jackrabbit.oak.spi.state.NodeStore;
  * {@code InitialContent} implements a {@link RepositoryInitializer} and
  * registers built-in node types when the micro kernel becomes available.
  */
-@Component
-@Service(RepositoryInitializer.class)
 public class InitialContent implements RepositoryInitializer, NodeTypeConstants {
 
     public static final NodeState INITIAL_CONTENT = createInitialContent();
@@ -68,6 +67,8 @@ public class InitialContent implements RepositoryInitializer, NodeTypeConstants 
                     .setProperty(JCR_PRIMARYTYPE, NT_REP_NODE_TYPES, Type.NAME);
             system.child(VersionConstants.JCR_ACTIVITIES)
                     .setProperty(JCR_PRIMARYTYPE, VersionConstants.REP_ACTIVITIES, Type.NAME);
+
+            Namespaces.setupNamespaces(system);
         }
 
         if (!builder.hasChildNode(IndexConstants.INDEX_DEFINITIONS_NAME)) {
@@ -80,12 +81,15 @@ public class InitialContent implements RepositoryInitializer, NodeTypeConstants 
                     ImmutableList.of(JCR_PRIMARYTYPE, JCR_MIXINTYPES), null);
             // the cost of using the property index for "@primaryType is not null" is very high
             nt.setProperty(IndexConstants.ENTRY_COUNT_PROPERTY_NAME, Long.valueOf(Long.MAX_VALUE));
+            IndexUtils.createReferenceIndex(index);
         }
 
         NodeState base = builder.getNodeState();
         NodeStore store = new MemoryNodeStore(base);
         BuiltInNodeTypes.register(new SystemRoot(
-                store, new EditorHook(new RegistrationEditorProvider())));
+                store, new EditorHook(new CompositeEditorProvider(
+                        new NamespaceEditorProvider(),
+                        new TypeEditorProvider()))));
         NodeState target = store.getRoot();
         target.compareAgainstBaseState(base, new ApplyDiff(builder));
     }

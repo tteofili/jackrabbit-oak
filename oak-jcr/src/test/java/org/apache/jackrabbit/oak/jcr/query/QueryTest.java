@@ -25,6 +25,8 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.fail;
 
 import java.io.ByteArrayInputStream;
+import java.io.InputStreamReader;
+import java.io.Reader;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.NoSuchElementException;
@@ -35,6 +37,7 @@ import javax.jcr.NodeIterator;
 import javax.jcr.RepositoryException;
 import javax.jcr.Session;
 import javax.jcr.ValueFactory;
+import javax.jcr.nodetype.NodeTypeManager;
 import javax.jcr.query.InvalidQueryException;
 import javax.jcr.query.Query;
 import javax.jcr.query.QueryManager;
@@ -43,8 +46,10 @@ import javax.jcr.query.Row;
 import javax.jcr.query.RowIterator;
 
 import org.apache.jackrabbit.commons.JcrUtils;
+import org.apache.jackrabbit.commons.cnd.CndImporter;
 import org.apache.jackrabbit.oak.jcr.AbstractRepositoryTest;
 import org.apache.jackrabbit.oak.jcr.NodeStoreFixture;
+import org.junit.Ignore;
 import org.junit.Test;
 
 /**
@@ -54,6 +59,61 @@ public class QueryTest extends AbstractRepositoryTest {
 
     public QueryTest(NodeStoreFixture fixture) {
         super(fixture);
+    }
+    
+    @Test
+    public void unicode() throws Exception {
+        Session session = getAdminSession();
+        Node content = session.getRootNode().addNode("test");
+        String[][] list = {
+                {"three", "\u00e4\u00f6\u00fc"}, 
+                {"two", "123456789"}, 
+                {"one", "\u3360\u3361\u3362\u3363\u3364\u3365\u3366\u3367\u3368\u3369"}, 
+        };
+        for (String[] pair : list) {
+            content.addNode(pair[0]).setProperty("prop", 
+                    "propValue testSearch " + pair[1] + " data");
+        }
+        session.save();
+        for (String[] pair : list) {
+            String query = "//*[jcr:contains(., '" + pair[1] + "')]";
+            QueryResult r = session.getWorkspace().
+                    getQueryManager().createQuery(
+                    query, "xpath").execute();
+            NodeIterator it = r.getNodes();
+            assertTrue(it.hasNext());
+            String path = it.nextNode().getPath();
+            assertEquals("/test/" + pair[0], path);
+            assertFalse(it.hasNext());
+        }        
+    }
+    
+    @Test
+    @Ignore("OAK-1215")
+    public void anyChildNodeProperty() throws Exception {
+        Session session = getAdminSession();
+        Node content = session.getRootNode().addNode("test");
+        content.addNode("one").addNode("child").setProperty("prop", "hello");
+        content.addNode("two").addNode("child").setProperty("prop", "hi");
+        session.save();
+        String query = "//*[*/@prop = 'hello']";
+        QueryResult r = session.getWorkspace().getQueryManager().createQuery(
+                query, "xpath").execute();
+        NodeIterator it = r.getNodes();
+        assertTrue(it.hasNext());
+        String path = it.nextNode().getPath();
+        assertEquals("/test/one", path);
+        assertFalse(it.hasNext());
+        
+        query = "//*[*/*/@prop = 'hello']";
+        r = session.getWorkspace().getQueryManager().createQuery(
+                query, "xpath").execute();
+        it = r.getNodes();
+        assertTrue(it.hasNext());
+        path = it.nextNode().getPath();
+        assertEquals("/test", path);
+        assertFalse(it.hasNext());
+
     }
     
     @Test
@@ -71,6 +131,35 @@ public class QueryTest extends AbstractRepositoryTest {
         String path = it.nextNode().getPath();
         assertEquals("/test/two", path);
         assertFalse(it.hasNext());
+    }
+
+    @Test
+    public void doubleQuote() throws RepositoryException {
+        Session session = getAdminSession();
+        Node hello = session.getRootNode().addNode("hello");
+        hello.setProperty("x", 1);
+        Node world = hello.addNode("world");
+        world.setProperty("x", 2);
+        session.save();
+        QueryManager qm = session.getWorkspace().getQueryManager();
+        Query q;
+        q = qm.createQuery(
+                "SELECT * FROM [nt:base] AS s WHERE ISDESCENDANTNODE(s,[/hello])", 
+                Query.JCR_SQL2);
+        assertEquals("/hello/world", getPaths(q));
+        q = qm.createQuery(
+                "SELECT * FROM [nt:base] AS s WHERE ISDESCENDANTNODE(s,\"/hello\")", 
+                Query.JCR_SQL2);
+        assertEquals("/hello/world", getPaths(q));
+        try {
+            q = qm.createQuery(
+                    "SELECT * FROM [nt:base] AS s WHERE ISDESCENDANTNODE(s,[\"/hello\"])", 
+                    Query.JCR_SQL2);
+            getPaths(q);
+            fail();
+        } catch (InvalidQueryException e) {
+            // expected: absolute path
+        }
     }
 
     @SuppressWarnings("deprecation")
@@ -347,6 +436,141 @@ public class QueryTest extends AbstractRepositoryTest {
 
         q = qm.createQuery("//*[fn:name() = '123456_test_name']", Query.XPATH);
         assertEquals("", getPaths(q));
+    }
+
+    /**
+     * OAK-1093
+     */
+    @Test
+    public void getValuesOnMvp() throws RepositoryException {
+        Session session = getAdminSession();
+        Node hello = session.getRootNode().addNode("hello");
+        hello.setProperty("id", "1");
+        hello.setProperty("properties", new String[] { "p1", "p2" });
+        session.save();
+
+        QueryManager qm = session.getWorkspace().getQueryManager();
+        Query q = qm.createQuery("select properties from [nt:base] where id = 1",
+                Query.JCR_SQL2);
+
+        QueryResult r = q.execute();
+        RowIterator it = r.getRows();
+        assertTrue(it.hasNext());
+        Row row = it.nextRow();
+        assertEquals("p1 p2", row.getValues()[0].getString());
+    }
+
+    @SuppressWarnings("deprecation")
+    @Test
+    public void xpathEscapeTest() throws RepositoryException {
+        Session writer = createAdminSession();
+        Session reader = createAdminSession();
+        try {
+            Node rootNode = writer.getRootNode();
+            Node node = rootNode.addNode("test", "nt:unstructured");
+            node.addNode(".tokens");
+            writer.save();
+
+            QueryManager qm = reader.getWorkspace().getQueryManager();
+            Query q = qm.createQuery("/jcr:root//*[_x002e_tokens/@jcr:primaryType]", Query.XPATH);
+            NodeIterator res = q.execute().getNodes();
+            assertEquals(1, res.getSize());
+        } finally {
+            if (reader != null) {
+                reader.logout();
+            }
+            if (writer != null) {
+                writer.logout();
+            }
+        }
+    }
+
+    @Test
+    public void testOak1096() throws RepositoryException {
+        Session writer = createAdminSession();
+        Session reader = createAdminSession();
+        try {
+            Node rootNode = writer.getRootNode();
+            Node node = rootNode.addNode("test", "nt:unstructured");
+            node.setProperty("text", "find me");
+            writer.save();
+
+            QueryManager qm = reader.getWorkspace().getQueryManager();
+            Query q = qm.createQuery("select * from 'nt:base' where contains(*, 'find me')", Query.JCR_SQL2);
+            NodeIterator res = q.execute().getNodes();
+            assertEquals("False amount of hits", 1, res.getSize());
+        } finally {
+            if (reader != null) {
+                reader.logout();
+            }
+            if (writer != null) {
+                writer.logout();
+            }
+        }
+    }
+    
+    @Test
+    public void testOak1128() throws RepositoryException {
+        Session session = createAdminSession();
+        Node p = session.getRootNode().addNode("etc");
+        p.addNode("p1");
+        Node r = p.addNode("p2").addNode("r", "nt:unstructured");
+        r.setProperty("nt:resourceType", "test");
+        session.save();
+        Query q = session.getWorkspace().getQueryManager().createQuery(
+                "/jcr:root/etc//*["+
+                        "(@jcr:primaryType = 'a'  or @jcr:primaryType = 'b') "+
+                        "or @nt:resourceType = 'test']", "xpath");
+        QueryResult qr = q.execute();
+        NodeIterator ni = qr.getNodes();
+        Node n = ni.nextNode();
+        assertEquals("/etc/p2/r", n.getPath());
+    }
+
+    @Test
+    public void testOak1171() throws RepositoryException {
+        Session session = createAdminSession();
+        Node p = session.getRootNode().addNode("etc");
+        p.addNode("p1").setProperty("title", "test");
+        p.addNode("p2").setProperty("title", 1);
+        session.save();
+
+        Query q = session.getWorkspace().getQueryManager()
+                .createQuery("//*[@title = 'test']", "xpath");
+        QueryResult qr = q.execute();
+
+        NodeIterator ni = qr.getNodes();
+        assertTrue(ni.hasNext());
+        Node n = ni.nextNode();
+        assertEquals("/etc/p1", n.getPath());
+        assertFalse(ni.hasNext());
+    }
+
+    @Test
+    public void testOak1354() throws Exception {
+        Session session = createAdminSession();
+        NodeTypeManager manager = session.getWorkspace().getNodeTypeManager();
+
+        if (!manager.hasNodeType("mymixinOak1354")) {
+            StringBuilder defs = new StringBuilder();
+            defs.append("[mymixinOak1354]\n");
+            defs.append("  mixin");
+            Reader cndReader = new InputStreamReader(new ByteArrayInputStream(defs.toString().getBytes()));
+            CndImporter.registerNodeTypes(cndReader, session);
+        }
+        Node p = session.getRootNode().addNode("one");
+        p.addMixin("mymixinOak1354");
+        session.save();
+
+        Query q = session.getWorkspace().getQueryManager()
+                .createQuery("SELECT * FROM [mymixinOak1354]", Query.JCR_SQL2);
+        QueryResult qr = q.execute();
+
+        NodeIterator ni = qr.getNodes();
+        assertTrue(ni.hasNext());
+        Node n = ni.nextNode();
+        assertEquals("/one", n.getPath());
+        assertFalse(ni.hasNext());
     }
 
 }

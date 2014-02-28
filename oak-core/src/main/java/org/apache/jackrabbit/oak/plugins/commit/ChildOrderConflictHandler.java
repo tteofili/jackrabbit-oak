@@ -21,17 +21,16 @@ import java.util.Set;
 import com.google.common.collect.Sets;
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Type;
-import org.apache.jackrabbit.oak.core.AbstractTree;
-import org.apache.jackrabbit.oak.plugins.memory.MemoryPropertyBuilder;
+import org.apache.jackrabbit.oak.plugins.tree.TreeConstants;
+import org.apache.jackrabbit.oak.plugins.memory.PropertyBuilder;
 import org.apache.jackrabbit.oak.spi.commit.ConflictHandler;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
-import org.apache.jackrabbit.oak.spi.state.PropertyBuilder;
 
 /**
  * This conflict handler instance takes care of properly merging conflicts
  * occurring by concurrent reorder operations.
  *
- * @see AbstractTree#OAK_CHILD_ORDER
+ * @see org.apache.jackrabbit.oak.plugins.tree.TreeConstants#OAK_CHILD_ORDER
  */
 public class ChildOrderConflictHandler extends ConflictHandlerWrapper {
 
@@ -46,7 +45,8 @@ public class ChildOrderConflictHandler extends ConflictHandlerWrapper {
         if (isChildOrderProperty(ours)) {
             // two sessions concurrently called orderBefore() on a Tree
             // that was previously unordered.
-            return Resolution.THEIRS;
+            merge(parent, ours, theirs);
+            return Resolution.MERGED;
         } else {
             return handler.addExistingProperty(parent, ours, theirs);
         }
@@ -76,12 +76,11 @@ public class ChildOrderConflictHandler extends ConflictHandlerWrapper {
     }
 
     private static void merge(NodeBuilder parent, PropertyState ours, PropertyState theirs) {
-        Set<String> theirOrder = Sets.newHashSet(theirs.getValue(Type.STRINGS));
-        PropertyBuilder<String> merged = MemoryPropertyBuilder.array(Type.STRING)
-                .assignFrom(theirs);
+        Set<String> theirOrder = Sets.newHashSet(theirs.getValue(Type.NAMES));
+        PropertyBuilder<String> merged = PropertyBuilder.array(Type.NAME).assignFrom(theirs);
 
         // Append child node names from ours that are not in theirs
-        for (String ourChild : ours.getValue(Type.STRINGS)) {
+        for (String ourChild : ours.getValue(Type.NAMES)) {
             if (!theirOrder.contains(ourChild)) {
                 merged.addValue(ourChild);
             }
@@ -122,7 +121,7 @@ public class ChildOrderConflictHandler extends ConflictHandlerWrapper {
     //----------------------------< internal >----------------------------------
 
     private static boolean isChildOrderProperty(PropertyState p) {
-        return AbstractTree.OAK_CHILD_ORDER.equals(p.getName());
+        return TreeConstants.OAK_CHILD_ORDER.equals(p.getName());
     }
 }
 

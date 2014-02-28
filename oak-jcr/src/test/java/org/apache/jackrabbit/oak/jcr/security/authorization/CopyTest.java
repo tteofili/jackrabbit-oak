@@ -24,7 +24,6 @@ import org.apache.jackrabbit.oak.spi.security.authorization.accesscontrol.Access
 import org.apache.jackrabbit.oak.spi.security.privilege.PrivilegeConstants;
 import org.apache.jackrabbit.util.Text;
 import org.junit.Before;
-import org.junit.Ignore;
 import org.junit.Test;
 
 /**
@@ -79,11 +78,12 @@ public class CopyTest extends AbstractEvaluationTest {
         assertTrue(testSession.nodeExists(destPath));
     }
 
-    @Ignore("OAK-920") // FIXME
     @Test
     public void testCopyInvisibleSubTree() throws Exception {
         deny(childNPath, privilegesFromName(Privilege.JCR_READ));
         allow(targetPath, privilegesFromName(Privilege.JCR_ALL));
+
+        assertFalse(testSession.nodeExists(childNPath));
 
         testSession.getWorkspace().copy(path, destPath);
 
@@ -96,7 +96,6 @@ public class CopyTest extends AbstractEvaluationTest {
         assertFalse(superuser.nodeExists(destPath + '/' + childName));
     }
 
-    @Ignore("OAK-920") // FIXME
     @Test
     public void testCopyInvisibleProperty() throws Exception {
         deny(childNPath, privilegesFromName(PrivilegeConstants.REP_READ_PROPERTIES));
@@ -113,11 +112,10 @@ public class CopyTest extends AbstractEvaluationTest {
         assertFalse(superuser.nodeExists(destPath + '/' + childName + '/' + propertyName1));
     }
 
-    @Ignore("OAK-920") // FIXME
     @Test
     public void testCopyInvisibleAcContent() throws Exception {
-        deny(childNPath, privilegesFromName(Privilege.JCR_LOCK_MANAGEMENT));
-        allow(targetPath, privilegesFromName(PrivilegeConstants.REP_WRITE));
+        deny(childNPath, privilegesFromName(Privilege.JCR_READ_ACCESS_CONTROL));
+        allow(targetPath, privilegesFromName(PrivilegeConstants.JCR_ALL));
 
         testSession.getWorkspace().copy(path, destPath);
 

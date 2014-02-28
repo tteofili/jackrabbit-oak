@@ -113,13 +113,13 @@ public class OrImpl extends ConstraintImpl {
             return m2;
         }
         Map<DynamicOperandImpl, Set<StaticOperandImpl>> result = Maps.newHashMap();
-        result.putAll(m1);
         for (Entry<DynamicOperandImpl, Set<StaticOperandImpl>> e2 : m2.entrySet()) {
             Set<StaticOperandImpl> l2 = e2.getValue();
             Set<StaticOperandImpl> l1 = m1.get(e2.getKey());
-            // l1 might be null (l2 not, as it's from the iterator)
-            Set<StaticOperandImpl> list = l1 == null ? l2 : Sets.union(l1, l2);
-            result.put(e2.getKey(), list);
+            if (l1 != null && !l1.isEmpty() && !l2.isEmpty()) {
+                Set<StaticOperandImpl> list = Sets.union(l1, l2);
+                result.put(e2.getKey(), list);
+            }
         }
         return result;
     }    
@@ -210,7 +210,7 @@ public class OrImpl extends ConstraintImpl {
         } else {
             // exactly one selector: check if it's the right one
             SelectorImpl s2 = set.iterator().next();
-            if (s2 != s) {
+            if (!s2.equals(s)) {
                 // a different selector
                 return false;
             }

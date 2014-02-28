@@ -18,12 +18,12 @@ package org.apache.jackrabbit.oak.jcr;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 
+import java.util.concurrent.Executor;
 import java.util.concurrent.ScheduledExecutorService;
 
 import javax.annotation.Nonnull;
 import javax.jcr.Repository;
 
-import org.apache.jackrabbit.mk.api.MicroKernel;
 import org.apache.jackrabbit.oak.Oak;
 import org.apache.jackrabbit.oak.jcr.repository.RepositoryImpl;
 import org.apache.jackrabbit.oak.plugins.commit.ConflictValidatorProvider;
@@ -32,9 +32,11 @@ import org.apache.jackrabbit.oak.plugins.index.IndexEditorProvider;
 import org.apache.jackrabbit.oak.plugins.index.nodetype.NodeTypeIndexProvider;
 import org.apache.jackrabbit.oak.plugins.index.property.PropertyIndexEditorProvider;
 import org.apache.jackrabbit.oak.plugins.index.property.PropertyIndexProvider;
+import org.apache.jackrabbit.oak.plugins.index.reference.ReferenceEditorProvider;
+import org.apache.jackrabbit.oak.plugins.index.reference.ReferenceIndexProvider;
+import org.apache.jackrabbit.oak.plugins.itemsave.ItemSaveValidatorProvider;
 import org.apache.jackrabbit.oak.plugins.name.NameValidatorProvider;
-import org.apache.jackrabbit.oak.plugins.name.NamespaceValidatorProvider;
-import org.apache.jackrabbit.oak.plugins.nodetype.RegistrationEditorProvider;
+import org.apache.jackrabbit.oak.plugins.name.NamespaceEditorProvider;
 import org.apache.jackrabbit.oak.plugins.nodetype.TypeEditorProvider;
 import org.apache.jackrabbit.oak.plugins.nodetype.write.InitialContent;
 import org.apache.jackrabbit.oak.plugins.version.VersionEditorProvider;
@@ -65,11 +67,13 @@ public class Jcr {
 
         with(new SecurityProviderImpl());
 
+        with(new ItemSaveValidatorProvider());
         with(new NameValidatorProvider());
-        with(new NamespaceValidatorProvider());
+        with(new NamespaceEditorProvider());
         with(new TypeEditorProvider());
-        with(new RegistrationEditorProvider());
         with(new ConflictValidatorProvider());
+        with(new ReferenceEditorProvider());
+        with(new ReferenceIndexProvider());
 
         with(new PropertyIndexEditorProvider());
 
@@ -79,10 +83,6 @@ public class Jcr {
 
     public Jcr() {
         this(new Oak());
-    }
-
-    public Jcr(MicroKernel kernel) {
-        this(new Oak(kernel));
     }
 
     public Jcr(NodeStore store) {
@@ -140,6 +140,12 @@ public class Jcr {
 
     @Nonnull
     public final Jcr with(@Nonnull ScheduledExecutorService executor) {
+        oak.with(checkNotNull(executor));
+        return this;
+    }
+
+    @Nonnull
+    public final Jcr with(@Nonnull Executor executor) {
         oak.with(checkNotNull(executor));
         return this;
     }

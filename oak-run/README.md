@@ -1,16 +1,55 @@
 Oak Runnable Jar
 ================
 
-Standalone server mode
-----------------------
+This jar contains everything you need for a simple Oak installation.
+The following three runmodes are available:
 
-TODO
+    * Oak server
+    * MicroKernel server
+    * benchmark
+
+See the subsections below for more details on how to use these modes.
+
+Oak server mode
+---------------
+
+The Oak server mode starts a full Oak instance with the standard JCR plugins
+and makes it available over a simple HTTP mapping defined in the `oak-http`
+component. To start this mode, use:
+
+    $ java -jar oak-run-*.jar [/path/to/mk...]
+
+If no arguments are specified, the command starts an in-memory repository
+and makes it available at http://localhost:8080/. Possible path arguments
+specify the locations of on-disk MicroKernel backends that are each opened
+and mapped to URLs under http://localhost:8080/.
+
+See the documentation in the `oak-http` component for details about the
+available functionality.
+
+MicroKernel server mode
+-----------------------
+
+The MicroKernel server mode starts a MicroKernel instance and makes it
+available over HTTP mapping defined in the `oak-mk-remote` component.
+To start this mode, use:
+
+    $ java -jar oak-run-*.jar mk /path/to/mk [port] [bindaddr]
+
+The given path specific the directory that contains the MicroKernel backend.
+The optional `port` and `bindaddr` arguments can be used to control the
+address of the HTTP mapping.
+
+The resulting web interface at http://localhost:8080/ (with default
+`bindaddr` and `port` values) maps simple HTTP forms to the respective
+MicroKernel methods. See the javadocs of the MicroKernel interface for
+more details.
 
 Benchmark mode
 --------------
 
-The oak-run jar has a "benchmark" mode for executing various micro-benchmarks.
-It can be invoked like this:
+The benchmark mode is used for executing various micro-benchmarks. It can
+be invoked like this:
 
     $ java -jar oak-run-*.jar benchmark [options] [testcases] [fixtures]
 
@@ -25,8 +64,9 @@ The following benchmark options (with default values) are currently supported:
     --wikipedia <file>     - Wikipedia dump
     --runAsAdmin false     - Run test as admin session
     --itemsToRead 1000     - Number of items to read
-    --bgReaders 20         - Number of background readers
     --report false         - Whether to output intermediate results
+    --csvFile <file>       - Optional csv file to report the benchmark results
+    --concurrency <levels> - Comma separated list of concurrency levels
 
 These options are passed to the test cases and repository fixtures
 that need them. For example the Wikipedia dump option is needed by the
@@ -35,6 +75,8 @@ MongoMK and SegmentMK -based repository fixtures. The cache setting
 controls the bundle cache size in Jackrabbit, the KernelNodeState
 cache size in MongoMK and the default H2 MK, and the segment cache
 size in SegmentMK.
+
+The `--concurrency` levels can be specified as comma separated list of values, eg: `--concurrency 1,4,8`, which will execute the same test with the number of respective threads. Note that the `beforeSuite()` and `afterSuite()` are executed before and after the concurrency loop. eg. in the example above, the execution order is: `beforeSuite()`, 1x `runTest()`, 4x `runTest()`, 8x `runTest()`, `afterSuite()`. Tests that create their own background threads, should be executed with `--concurrency 1` which is the default.
 
 You can use extra JVM options like `-Xmx` settings to better control the
 benchmark environment. It's also possible to attach the JVM to a
@@ -70,8 +112,7 @@ Finally the benchmark runner supports the following repository fixtures:
 | Oak-Memory  | Oak with the default MK using in-memory storage       |
 | Oak-Default | Oak with the default MK using embedded H2 database    |
 | Oak-Mongo   | Oak with the new MongoMK                              |
-| Oak-Segment | Oak with MongoDB-based SegmentMK                      |
-| Oak-Tar     | Oak with Tar file -based SegmentMK                    |
+| Oak-Tar     | Oak with the TarMK                                    |
 
 Once started, the benchmark runner will execute each listed test case
 against all the listed repository fixtures. After starting up the
@@ -84,6 +125,7 @@ reported:
 
 | Column      | Description                                           |
 |-------------|-------------------------------------------------------|
+| C           | concurrency level                                     |
 | min         | minimum time (in ms) taken by a test run              |
 | 10%         | time (in ms) in which the fastest 10% of test runs    |
 | 50%         | time (in ms) taken by the median test run             |

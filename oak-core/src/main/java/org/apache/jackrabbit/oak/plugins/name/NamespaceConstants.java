@@ -68,4 +68,13 @@ public interface NamespaceConstants {
             NAMESPACE_REP,
             NAMESPACE_SV
     ));
+
+    // index nodes for faster lookup
+
+    String REP_NSDATA = "rep:nsdata";
+
+    String REP_URIS = "rep:uris";
+
+    String REP_PREFIXES = "rep:prefixes";
+
 }

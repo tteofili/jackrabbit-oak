@@ -16,6 +16,9 @@
  */
 package org.apache.jackrabbit.oak.plugins.value;
 
+import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.base.Preconditions.checkState;
+
 import java.io.InputStream;
 import java.math.BigDecimal;
 import java.util.Calendar;
@@ -26,19 +29,21 @@ import javax.jcr.RepositoryException;
 import javax.jcr.Value;
 import javax.jcr.ValueFormatException;
 
+import com.google.common.base.Objects;
+import org.apache.jackrabbit.oak.api.Blob;
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.namepath.NamePathMapper;
-
-import com.google.common.base.Objects;
-
-import static com.google.common.base.Preconditions.checkArgument;
-import static com.google.common.base.Preconditions.checkState;
 
 /**
  * Implementation of {@link Value} based on {@code PropertyState}.
  */
 public class ValueImpl implements Value {
+
+    public static Blob getBlob(Value value) {
+        checkState(value instanceof ValueImpl);
+        return ((ValueImpl) value).getBlob();
+    }
 
     private final PropertyState propertyState;
     private final int index;
@@ -70,6 +75,10 @@ public class ValueImpl implements Value {
      */
     ValueImpl(PropertyState property, NamePathMapper namePathMapper) {
         this(checkSingleValued(property), 0, namePathMapper);
+    }
+
+    Blob getBlob() {
+        return propertyState.getValue(Type.BINARY, index);
     }
 
     /**
@@ -120,11 +129,11 @@ public class ValueImpl implements Value {
             switch (getType()) {
                 case PropertyType.STRING:
                 case PropertyType.BINARY:
-                    long value = propertyState.getValue(Type.DATE, index);
+                case PropertyType.DATE:
+                    String value = propertyState.getValue(Type.DATE, index);
                     return Conversions.convert(value).toCalendar();
                 case PropertyType.LONG:
                 case PropertyType.DOUBLE:
-                case PropertyType.DATE:
                 case PropertyType.DECIMAL:
                     return Conversions.convert(propertyState.getValue(Type.LONG, index)).toCalendar();
                 default:
@@ -201,7 +210,7 @@ public class ValueImpl implements Value {
             }
         }
         catch (IllegalArgumentException e) {
-            throw new ValueFormatException("Error converting value to double", e);
+            throw new ValueFormatException("Error converting value to long", e);
         }
     }
 
@@ -236,17 +245,9 @@ public class ValueImpl implements Value {
     @Override
     public InputStream getStream() throws IllegalStateException {
         if (stream == null) {
-            stream = getNewStream();
+            stream = getBlob().getNewStream();
         }
         return stream;
-    }
-
-    InputStream getNewStream() {
-        return propertyState.getValue(Type.BINARY, index).getNewStream();
-    }
-
-    long getStreamLength() {
-        return propertyState.getValue(Type.BINARY, index).length();
     }
 
     /**

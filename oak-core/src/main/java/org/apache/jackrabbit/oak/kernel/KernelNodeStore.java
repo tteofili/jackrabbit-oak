@@ -19,6 +19,7 @@ package org.apache.jackrabbit.oak.kernel;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.concurrent.ExecutionException;
@@ -27,8 +28,8 @@ import java.util.concurrent.locks.ReentrantLock;
 
 import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
-import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
 import com.google.common.cache.Weigher;
@@ -36,35 +37,29 @@ import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.SettableFuture;
 import org.apache.jackrabbit.mk.api.MicroKernel;
 import org.apache.jackrabbit.mk.api.MicroKernelException;
+import org.apache.jackrabbit.oak.api.Blob;
 import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.cache.CacheLIRS;
 import org.apache.jackrabbit.oak.cache.CacheStats;
+import org.apache.jackrabbit.oak.spi.commit.ChangeDispatcher;
 import org.apache.jackrabbit.oak.spi.commit.CommitHook;
-import org.apache.jackrabbit.oak.spi.commit.EmptyObserver;
+import org.apache.jackrabbit.oak.spi.commit.CommitInfo;
+import org.apache.jackrabbit.oak.spi.commit.Observable;
 import org.apache.jackrabbit.oak.spi.commit.Observer;
-import org.apache.jackrabbit.oak.spi.commit.PostCommitHook;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.apache.jackrabbit.oak.spi.state.NodeStore;
-import org.apache.jackrabbit.oak.spi.state.NodeStoreBranch;
 
 /**
  * {@code NodeStore} implementations against {@link MicroKernel}.
  */
-public class KernelNodeStore implements NodeStore {
-
-    private static final long DEFAULT_CACHE_SIZE = 16 * 1024 * 1024;
+public class KernelNodeStore implements NodeStore, Observable {
+    public static final long DEFAULT_CACHE_SIZE = 16 * 1024 * 1024;
 
     /**
      * The {@link MicroKernel} instance used to store the content tree.
      */
     private final MicroKernel kernel;
-
-    /**
-     * Change observer.
-     */
-    @Nonnull
-    private volatile Observer observer = EmptyObserver.INSTANCE;
 
     private final LoadingCache<String, KernelNodeState> cache;
 
@@ -74,6 +69,8 @@ public class KernelNodeStore implements NodeStore {
      * Lock passed to branches for coordinating merges
      */
     private final Lock mergeLock = new ReentrantLock();
+
+    private final ChangeDispatcher changeDispatcher;
 
     /**
      * State of the current root node.
@@ -121,19 +118,11 @@ public class KernelNodeStore implements NodeStore {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+        changeDispatcher = new ChangeDispatcher(root);
     }
 
     public KernelNodeStore(MicroKernel kernel) {
         this(kernel, DEFAULT_CACHE_SIZE);
-    }
-
-    @Nonnull
-    public Observer getObserver() {
-        return observer;
-    }
-
-    public void setObserver(@Nonnull Observer observer) {
-        this.observer = checkNotNull(observer);
     }
 
     /**
@@ -144,29 +133,35 @@ public class KernelNodeStore implements NodeStore {
         return getRoot().toString();
     }
 
+    //------------------------------------------------------------< Observable >---
+
+    @Override
+    public Closeable addObserver(Observer observer) {
+        return changeDispatcher.addObserver(observer);
+    }
+
     //----------------------------------------------------------< NodeStore >---
 
     @Override
     public synchronized KernelNodeState getRoot() {
         String revision = kernel.getHeadRevision();
         if (!revision.equals(root.getRevision())) {
-            NodeState before = root;
             root = getRootState(revision);
-            observer.contentChanged(before, root);
         }
         return root;
     }
 
     /**
-     * This implementation delegates to {@link KernelRootBuilder#merge(CommitHook, PostCommitHook)}
+     * This implementation delegates to {@link KernelRootBuilder#merge(CommitHook, CommitInfo)}
      * if {@code builder} is a {@link KernelNodeBuilder} instance. Otherwise it throws
      * an {@code IllegalArgumentException}.
      */
     @Override
-    public NodeState merge(@Nonnull NodeBuilder builder, @Nonnull CommitHook commitHook,
-            PostCommitHook committed) throws CommitFailedException {
+    public NodeState merge(
+            @Nonnull NodeBuilder builder, @Nonnull CommitHook commitHook,
+            @Nullable CommitInfo info) throws CommitFailedException {
         checkArgument(builder instanceof KernelRootBuilder);
-        return ((KernelRootBuilder) builder).merge(commitHook, committed);
+        return ((KernelRootBuilder) builder).merge(checkNotNull(commitHook), info);
     }
 
     /**
@@ -208,6 +203,16 @@ public class KernelNodeStore implements NodeStore {
         }
     }
 
+    @Override
+    public Blob getBlob(@Nonnull String reference) {
+        try {
+            kernel.getLength(reference);  // throws if reference doesn't resolve
+            return new KernelBlob(reference, kernel);
+        } catch (MicroKernelException e) {
+            return null;
+        }
+    }
+
     @Override @Nonnull
     public String checkpoint(long lifetime) {
         checkArgument(lifetime > 0);
@@ -238,8 +243,8 @@ public class KernelNodeStore implements NodeStore {
         }
     }
 
-    NodeStoreBranch createBranch(NodeState base) {
-        return new KernelNodeStoreBranch(this, mergeLock, (KernelNodeState) base);
+    KernelNodeStoreBranch createBranch(KernelNodeState base) {
+        return new KernelNodeStoreBranch(this, changeDispatcher, mergeLock, base);
     }
 
     MicroKernel getKernel() {
@@ -247,6 +252,10 @@ public class KernelNodeStore implements NodeStore {
     }
 
     KernelNodeState commit(String jsop, KernelNodeState base) {
+        if (jsop.isEmpty()) {
+            // nothing to commit
+            return base;
+        }
         KernelNodeState rootState = getRootState(kernel.commit("", jsop, base.getRevision(), null));
         if (base.isBranch()) {
             rootState.setBranch();
@@ -262,8 +271,12 @@ public class KernelNodeStore implements NodeStore {
         return getRootState(kernel.rebase(branchHead.getRevision(), base.getRevision())).setBranch();
     }
 
-    NodeState merge(KernelNodeState branchHead) {
+    KernelNodeState merge(KernelNodeState branchHead) {
         return getRootState(kernel.merge(branchHead.getRevision(), null));
     }
 
+    KernelNodeState reset(KernelNodeState branchHead, KernelNodeState ancestor) {
+        return getRootState(kernel.reset(
+                branchHead.getRevision(), ancestor.getRevision()));
+    }
 }

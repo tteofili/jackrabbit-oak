@@ -31,6 +31,7 @@ import javax.annotation.Nonnull;
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.spi.state.AbstractNodeState;
 import org.apache.jackrabbit.oak.spi.state.ChildNodeEntry;
+import org.apache.jackrabbit.oak.spi.state.EqualsDiff;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.apache.jackrabbit.oak.spi.state.NodeStateDiff;
@@ -89,13 +90,18 @@ class MutableNodeState extends AbstractNodeState {
      *   child.reset(state);
      *   return child;
      * </pre>
+     *
+     * @throws IllegalArgumentException if the given name string is empty
+     *                                  or contains the forward slash character
      */
     @Nonnull
-    MutableNodeState setChildNode(String name, NodeState state) {
+    MutableNodeState setChildNode(String name, NodeState state)
+            throws IllegalArgumentException {
         assert base != null;
 
         MutableNodeState child = nodes.get(name);
         if (child == null) {
+            checkValidName(name);
             child = new MutableNodeState(state);
             nodes.put(name, child);
         } else {
@@ -120,7 +126,7 @@ class MutableNodeState extends AbstractNodeState {
         if (!exists()) {
             return false;
         } else if (nodes.isEmpty() && properties.isEmpty()) {
-            return false;
+            return EqualsDiff.modified(before, base);
         }
 
         // was a child node added or removed?
@@ -140,7 +146,15 @@ class MutableNodeState extends AbstractNodeState {
         }
 
         return false;
+    }
 
+    boolean isReplaced(NodeState before) {
+        return base != before;
+    }
+
+    boolean isReplaced(NodeState before, String name) {
+        return before.hasProperty(name)
+                && (base != before || properties.containsKey(name));
     }
 
     /**
@@ -181,7 +195,9 @@ class MutableNodeState extends AbstractNodeState {
      * Set the value of a property
      */
     void setProperty(PropertyState property) {
-        properties.put(property.getName(), property);
+        String name = property.getName();
+        checkValidName(name);
+        properties.put(name, property);
     }
 
     @Override
@@ -242,8 +258,6 @@ class MutableNodeState extends AbstractNodeState {
     @Override
     public boolean hasChildNode(String name) {
         assert base != null;
-        checkNotNull(name);
-        // checkArgument(!name.isEmpty()); TODO: should be caught earlier
         NodeState child = nodes.get(name);
         if (child != null) {
             return child.exists();
@@ -299,4 +313,5 @@ class MutableNodeState extends AbstractNodeState {
     public NodeBuilder builder() {
         throw new UnsupportedOperationException();
     }
+
 }

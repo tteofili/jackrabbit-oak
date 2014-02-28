@@ -16,40 +16,46 @@
  */
 package org.apache.jackrabbit.oak.plugins.segment.file;
 
-import static com.google.common.base.Charsets.UTF_8;
+import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.base.Preconditions.checkState;
-import static com.google.common.collect.Lists.newArrayListWithCapacity;
+import static com.google.common.collect.Lists.newArrayList;
 import static com.google.common.collect.Lists.newLinkedList;
-import static com.google.common.collect.Maps.newHashMap;
+import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState.EMPTY_NODE;
+import static org.apache.jackrabbit.oak.plugins.segment.SegmentIdFactory.isBulkSegmentId;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicReference;
 
+import javax.annotation.Nonnull;
+
+import org.apache.jackrabbit.oak.api.Blob;
 import org.apache.jackrabbit.oak.plugins.segment.AbstractStore;
 import org.apache.jackrabbit.oak.plugins.segment.Journal;
 import org.apache.jackrabbit.oak.plugins.segment.RecordId;
 import org.apache.jackrabbit.oak.plugins.segment.Segment;
-import org.apache.jackrabbit.oak.plugins.segment.SegmentNodeState;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
+import org.apache.jackrabbit.oak.spi.state.NodeState;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class FileStore extends AbstractStore {
 
-    private static final int DEFAULT_MEMORY_CACHE_SIZE = 1 << 28; // 256MB
+    private static final Logger log = LoggerFactory.getLogger(FileStore.class);
 
-    private static final long SEGMENT_MAGIC = 0x4f616b0a527845ddL;
+    private static final int DEFAULT_MEMORY_CACHE_SIZE = 256;
 
-    private static final long JOURNAL_MAGIC = 0xdf36544212c0cb24L;
+    private static final String FILE_NAME_FORMAT = "%s%05d.tar";
 
-    static final UUID JOURNALS_UUID = new UUID(0, 0);
-
-    private static final String FILE_NAME_FORMAT = "data%05d.tar";
+    private static final String JOURNAL_FILE_NAME = "journal.log";
 
     private final File directory;
 
@@ -57,100 +63,234 @@ public class FileStore extends AbstractStore {
 
     private final boolean memoryMapping;
 
-    private final LinkedList<TarFile> files = newLinkedList();
+    private final LinkedList<TarFile> bulkFiles = newLinkedList();
 
-    private final Map<String, Journal> journals = newHashMap();
+    private final LinkedList<TarFile> dataFiles = newLinkedList();
 
-    public FileStore(File directory, int maxFileSize, boolean memoryMapping)
+    private final RandomAccessFile journalFile;
+
+    /**
+     * The latest head of the root journal.
+     */
+    private final AtomicReference<RecordId> head;
+
+    /**
+     * The persisted head of the root journal, used to determine whether the
+     * latest {@link #head} value should be written to the disk.
+     */
+    private final AtomicReference<RecordId> persistedHead;
+
+    /**
+     * The background flush thread. Automatically flushes the TarMK state
+     * once every five seconds.
+     */
+    private final Thread flushThread;
+
+    /**
+     * Synchronization aid used by the background flush thread to stop itself
+     * as soon as the {@link #close()} method is called.
+     */
+    private final CountDownLatch timeToClose = new CountDownLatch(1);
+
+    public FileStore(File directory, int maxFileSizeMB, boolean memoryMapping)
             throws IOException {
-        super(DEFAULT_MEMORY_CACHE_SIZE);
+        this(directory, EMPTY_NODE, maxFileSizeMB, DEFAULT_MEMORY_CACHE_SIZE, memoryMapping);
+    }
+
+    public FileStore(File directory, int maxFileSizeMB, int cacheSizeMB,
+            boolean memoryMapping) throws IOException {
+        this(directory, EMPTY_NODE, maxFileSizeMB, cacheSizeMB, memoryMapping);
+    }
+
+    public FileStore(
+            final File directory, NodeState initial, int maxFileSizeMB,
+            int cacheSizeMB, boolean memoryMapping) throws IOException {
+        super(cacheSizeMB);
         checkNotNull(directory).mkdirs();
         this.directory = directory;
-        this.maxFileSize = maxFileSize;
+        this.maxFileSize = maxFileSizeMB * MB;
         this.memoryMapping = memoryMapping;
 
         for (int i = 0; true; i++) {
-            String name = String.format(FILE_NAME_FORMAT, i);
+            String name = String.format(FILE_NAME_FORMAT, "bulk", i);
             File file = new File(directory, name);
             if (file.isFile()) {
-                files.add(new TarFile(file, maxFileSize, memoryMapping));
+                bulkFiles.add(new TarFile(file, maxFileSize, memoryMapping));
             } else {
                 break;
             }
         }
 
-        Segment segment = getWriter().getDummySegment();
-        for (TarFile tar : files) {
-            ByteBuffer buffer = tar.readEntry(JOURNALS_UUID);
-            if (buffer != null) {
-                checkState(JOURNAL_MAGIC == buffer.getLong());
-                int count = buffer.getInt();
-                for (int i = 0; i < count; i++) {
-                    byte[] b = new byte[buffer.getInt()];
-                    buffer.get(b);
-                    String name = new String(b, UTF_8);
-                    RecordId recordId = new RecordId(
-                            new UUID(buffer.getLong(), buffer.getLong()),
-                            buffer.getInt());
-                    journals.put(name, new FileJournal(
-                            this, new SegmentNodeState(segment, recordId)));
-                }
+        for (int i = 0; true; i++) {
+            String name = String.format(FILE_NAME_FORMAT, "data", i);
+            File file = new File(directory, name);
+            if (file.isFile()) {
+                dataFiles.add(new TarFile(file, maxFileSize, memoryMapping));
+            } else {
+                break;
             }
         }
 
-        if (!journals.containsKey("root")) {
+        journalFile = new RandomAccessFile(
+                new File(directory, JOURNAL_FILE_NAME), "rw");
+
+        RecordId id = null;
+        String line = journalFile.readLine();
+        while (line != null) {
+            int space = line.indexOf(' ');
+            if (space != -1) {
+                id = RecordId.fromString(line.substring(0, space));
+            }
+            line = journalFile.readLine();
+        }
+
+        if (id != null) {
+            head = new AtomicReference<RecordId>(id);
+            persistedHead = new AtomicReference<RecordId>(id);
+        } else {
             NodeBuilder builder = EMPTY_NODE.builder();
-            builder.setChildNode("root", EMPTY_NODE);
-            journals.put("root", new FileJournal(this, builder.getNodeState()));
+            builder.setChildNode("root", initial);
+            head = new AtomicReference<RecordId>(
+                    getWriter().writeNode(builder.getNodeState()).getRecordId());
+            persistedHead = new AtomicReference<RecordId>(null);
         }
-    }
 
-    @Override
-    public synchronized void close() {
-        try {
-            super.close();
-            for (TarFile file : files) {
-                file.close();
-            }
-            files.clear();
-            System.gc(); // for any memory-mappings that are no longer used
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    @Override
-    public synchronized Journal getJournal(final String name) {
-        Journal journal = journals.get(name);
-        if (journal == null) {
-            journal = new FileJournal(this, "root");
-            journals.put(name, journal);
-        }
-        return journal;
-    }
-
-    @Override
-    protected Segment loadSegment(UUID id) throws Exception {
-        for (TarFile file : files) {
-            ByteBuffer buffer = file.readEntry(id);
-            if (buffer != null) {
-                checkState(SEGMENT_MAGIC == buffer.getLong());
-                int length = buffer.getInt();
-                int count = buffer.getInt();
-
-                checkState(id.equals(new UUID(
-                        buffer.getLong(), buffer.getLong())));
-
-                List<UUID> referencedIds = newArrayListWithCapacity(count);
-                for (int i = 0; i < count; i++) {
-                    referencedIds.add(new UUID(
-                            buffer.getLong(), buffer.getLong()));
+        this.flushThread = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    timeToClose.await(1, SECONDS);
+                    while (timeToClose.getCount() > 0) {
+                        try {
+                            flush();
+                        } catch (IOException e) {
+                            log.warn("Failed to flush the TarMK at" +
+                                    directory, e);
+                        }
+                        timeToClose.await(5, SECONDS);
+                    }
+                } catch (InterruptedException e) {
+                    log.warn("TarMK flush thread interrupted");
                 }
+            }
+        });
+        flushThread.setName("TarMK flush thread: " + directory);
+        flushThread.setDaemon(true);
+        flushThread.setPriority(Thread.MIN_PRIORITY);
+        flushThread.start();
+    }
 
-                buffer.limit(buffer.position() + length);
-                return new Segment(
-                        FileStore.this, id,
-                        buffer.slice(), referencedIds);
+    public void flush() throws IOException {
+        synchronized (persistedHead) {
+            RecordId before = persistedHead.get();
+            RecordId after = head.get();
+            if (!after.equals(before)) {
+                // needs to happen outside the synchronization block below to
+                // avoid a deadlock with another thread flushing the writer
+                getWriter().flush();
+
+                synchronized (this) {
+                    for (TarFile file : bulkFiles) {
+                        file.flush();
+                    }
+                    for (TarFile file : dataFiles) {
+                        file.flush();
+                    }
+                    journalFile.writeBytes(after + " root\n");
+                    journalFile.getChannel().force(false);
+                    persistedHead.set(after);
+                }
+            }
+        }
+
+        for (Segment segment : segments.asMap().values().toArray(new Segment[0])) {
+            segment.dropOldCacheEntries();
+        }
+    }
+
+    public Iterable<UUID> getSegmentIds() {
+        List<UUID> ids = newArrayList();
+        for (TarFile file : dataFiles) {
+            ids.addAll(file.getUUIDs());
+        }
+        for (TarFile file : bulkFiles) {
+            ids.addAll(file.getUUIDs());
+        }
+        return ids;
+    }
+
+    @Override
+    public void close() {
+        try {
+            // avoid deadlocks while joining the flush thread
+            timeToClose.countDown();
+            try {
+                flushThread.join();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.warn("Interrupted while joining the TarMK flush thread", e);
+            }
+
+            synchronized (this) {
+                super.close();
+
+                flush();
+
+                journalFile.close();
+
+                for (TarFile file : bulkFiles) {
+                    file.close();
+                }
+                bulkFiles.clear();
+                for (TarFile file : dataFiles) {
+                    file.close();
+                }
+                dataFiles.clear();
+
+                System.gc(); // for any memory-mappings that are no longer used
+            }
+        } catch (IOException e) {
+            throw new RuntimeException(
+                    "Failed to close the TarMK at " + directory, e);
+        }
+    }
+
+    @Override
+    public Journal getJournal(String name) {
+        checkArgument("root".equals(name)); // only root supported for now
+        return new Journal() {
+            @Override
+            public RecordId getHead() {
+                return head.get();
+            }
+            @Override
+            public boolean setHead(RecordId before, RecordId after) {
+                RecordId id = head.get();
+                return id.equals(before) && head.compareAndSet(id, after);
+            }
+            @Override
+            public void merge() {
+                throw new UnsupportedOperationException();
+            }
+        };
+    }
+
+    @Override @Nonnull
+    protected Segment loadSegment(UUID id) {
+        LinkedList<TarFile> files = dataFiles;
+        if (isBulkSegmentId(id)) {
+            files = bulkFiles;
+        }
+
+        for (TarFile file : files) {
+            try {
+                ByteBuffer buffer = file.readEntry(id);
+                if (buffer != null) {
+                    return createSegment(id, buffer);
+                }
+            } catch (IOException e) {
+                throw new RuntimeException(
+                        "Failed to access file " + file, e);
             }
         }
 
@@ -159,42 +299,26 @@ public class FileStore extends AbstractStore {
 
     @Override
     public synchronized void writeSegment(
-            UUID segmentId, byte[] data, int offset, int length,
-            List<UUID> referencedSegmentIds) {
-        int size = 8 + 4 + 4 + 16 + 16 * referencedSegmentIds.size() + length;
-        ByteBuffer buffer = ByteBuffer.allocate(size);
-
-        buffer.putLong(SEGMENT_MAGIC);
-        buffer.putInt(length);
-        buffer.putInt(referencedSegmentIds.size());
-        buffer.putLong(segmentId.getMostSignificantBits());
-        buffer.putLong(segmentId.getLeastSignificantBits());
-        for (UUID referencedSegmentId : referencedSegmentIds) {
-            buffer.putLong(referencedSegmentId.getMostSignificantBits());
-            buffer.putLong(referencedSegmentId.getLeastSignificantBits());
+            UUID segmentId, byte[] data, int offset, int length) {
+        // select whether to write a data or a bulk segment
+        LinkedList<TarFile> files = dataFiles;
+        String base = "data";
+        if (isBulkSegmentId(segmentId)) {
+            files = bulkFiles;
+            base = "bulk";
         }
-
-        int pos = buffer.position();
-        buffer.put(data, offset, length);
 
         try {
-            writeEntry(segmentId, buffer.array());
+            if (files.isEmpty() || !files.getLast().writeEntry(
+                    segmentId, data, offset, length)) {
+                String name = String.format(FILE_NAME_FORMAT, base, files.size());
+                File file = new File(directory, name);
+                TarFile last = new TarFile(file, maxFileSize, memoryMapping);
+                checkState(last.writeEntry(segmentId, data, offset, length));
+                files.add(last);
+            }
         } catch (IOException e) {
             throw new RuntimeException(e);
-        }
-
-        buffer.position(pos);
-    }
-
-    private void writeEntry(UUID segmentId, byte[] buffer)
-            throws IOException {
-        if (files.isEmpty() || !files.getLast().writeEntry(
-                segmentId, buffer, 0, buffer.length)) {
-            String name = String.format(FILE_NAME_FORMAT, files.size());
-            File file = new File(directory, name);
-            TarFile last = new TarFile(file, maxFileSize, memoryMapping);
-            checkState(last.writeEntry(segmentId, buffer, 0, buffer.length));
-            files.add(last);
         }
     }
 
@@ -204,26 +328,9 @@ public class FileStore extends AbstractStore {
         super.deleteSegment(segmentId);
     }
 
-    synchronized void writeJournals() throws IOException {
-        int size = 8 + 4;
-        for (String name : journals.keySet()) {
-            size += 4 + name.getBytes(UTF_8).length + 16 + 4;
-        }
-
-        ByteBuffer buffer = ByteBuffer.allocate(size);
-        buffer.putLong(JOURNAL_MAGIC);
-        buffer.putInt(journals.size());
-        for (Map.Entry<String, Journal> entry : journals.entrySet()) {
-            byte[] name = entry.getKey().getBytes(UTF_8);
-            buffer.putInt(name.length);
-            buffer.put(name);
-            RecordId head = entry.getValue().getHead();
-            buffer.putLong(head.getSegmentId().getMostSignificantBits());
-            buffer.putLong(head.getSegmentId().getLeastSignificantBits());
-            buffer.putInt(head.getOffset());
-        }
-
-        writeEntry(JOURNALS_UUID, buffer.array());
+    @Override
+    public Blob readBlob(String reference) {
+        return new FileBlob(reference); // FIXME: proper reference lookup
     }
 
 }

@@ -16,15 +16,24 @@
  */
 package org.apache.jackrabbit.oak;
 
+import static com.google.common.base.Preconditions.checkNotNull;
+import static com.google.common.collect.Lists.newArrayList;
+
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+
 import javax.annotation.Nonnull;
 import javax.jcr.NoSuchWorkspaceException;
 import javax.management.JMException;
@@ -34,25 +43,30 @@ import javax.security.auth.login.LoginException;
 
 import com.google.common.base.Function;
 import com.google.common.collect.Iterables;
-import org.apache.jackrabbit.mk.api.MicroKernel;
-import org.apache.jackrabbit.mk.core.MicroKernelImpl;
+import com.google.common.io.Closer;
+
 import org.apache.jackrabbit.oak.api.ContentRepository;
 import org.apache.jackrabbit.oak.api.ContentSession;
 import org.apache.jackrabbit.oak.api.Root;
+import org.apache.jackrabbit.oak.api.jmx.IndexStatsMBean;
 import org.apache.jackrabbit.oak.core.ContentRepositoryImpl;
-import org.apache.jackrabbit.oak.kernel.KernelNodeStore;
 import org.apache.jackrabbit.oak.plugins.commit.ConflictHook;
 import org.apache.jackrabbit.oak.plugins.index.AsyncIndexUpdate;
 import org.apache.jackrabbit.oak.plugins.index.CompositeIndexEditorProvider;
 import org.apache.jackrabbit.oak.plugins.index.IndexEditorProvider;
 import org.apache.jackrabbit.oak.plugins.index.IndexUpdateProvider;
+import org.apache.jackrabbit.oak.plugins.memory.MemoryNodeStore;
+import org.apache.jackrabbit.oak.spi.commit.BackgroundObserver;
 import org.apache.jackrabbit.oak.spi.commit.CommitHook;
+import org.apache.jackrabbit.oak.spi.commit.CommitInfo;
 import org.apache.jackrabbit.oak.spi.commit.CompositeEditorProvider;
 import org.apache.jackrabbit.oak.spi.commit.CompositeHook;
 import org.apache.jackrabbit.oak.spi.commit.ConflictHandler;
 import org.apache.jackrabbit.oak.spi.commit.Editor;
 import org.apache.jackrabbit.oak.spi.commit.EditorHook;
 import org.apache.jackrabbit.oak.spi.commit.EditorProvider;
+import org.apache.jackrabbit.oak.spi.commit.Observable;
+import org.apache.jackrabbit.oak.spi.commit.Observer;
 import org.apache.jackrabbit.oak.spi.lifecycle.CompositeInitializer;
 import org.apache.jackrabbit.oak.spi.lifecycle.OakInitializer;
 import org.apache.jackrabbit.oak.spi.lifecycle.RepositoryInitializer;
@@ -64,12 +78,13 @@ import org.apache.jackrabbit.oak.spi.security.SecurityProvider;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.apache.jackrabbit.oak.spi.state.NodeStore;
+import org.apache.jackrabbit.oak.spi.whiteboard.DefaultWhiteboard;
 import org.apache.jackrabbit.oak.spi.whiteboard.Registration;
 import org.apache.jackrabbit.oak.spi.whiteboard.Whiteboard;
+import org.apache.jackrabbit.oak.spi.whiteboard.WhiteboardAware;
 import org.apache.jackrabbit.oak.spi.whiteboard.WhiteboardUtils;
-
-import static com.google.common.base.Preconditions.checkNotNull;
-import static com.google.common.collect.Lists.newArrayList;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Builder class for constructing {@link ContentRepository} instances with
@@ -80,6 +95,7 @@ import static com.google.common.collect.Lists.newArrayList;
  * @since Oak 0.6
  */
 public class Oak {
+    private static final Logger LOG = LoggerFactory.getLogger(Oak.class);
 
     /**
      * Constant for the default workspace name
@@ -100,7 +116,9 @@ public class Oak {
 
     private SecurityProvider securityProvider;
 
-    private ScheduledExecutorService executor = defaultExecutor();
+    private ScheduledExecutorService scheduledExecutor = defaultScheduledExecutor();
+
+    private Executor executor = defaultExecutorService();
 
     /**
      * Default {@code ScheduledExecutorService} used for scheduling background tasks.
@@ -108,7 +126,7 @@ public class Oak {
      * threads are pruned after one minute.
      * @return  fresh ScheduledExecutorService
      */
-    public static ScheduledExecutorService defaultExecutor() {
+    public static ScheduledExecutorService defaultScheduledExecutor() {
         ScheduledThreadPoolExecutor executor = new ScheduledThreadPoolExecutor(32, new ThreadFactory() {
             private final AtomicInteger counter = new AtomicInteger();
 
@@ -116,6 +134,34 @@ public class Oak {
             public Thread newThread(Runnable r) {
                 Thread thread = new Thread(r, createName());
                 thread.setDaemon(true);
+                return thread;
+            }
+
+            private String createName() {
+                return "oak-scheduled-executor-" + counter.getAndIncrement();
+            }
+        });
+        executor.setKeepAliveTime(1, TimeUnit.MINUTES);
+        executor.allowCoreThreadTimeOut(true);
+        return executor;
+    }
+
+    /**
+     * Default {@code ExecutorService} used for scheduling concurrent tasks.
+     * This default spawns as many threads as required with a priority of
+     * {@code Thread.MIN_PRIORITY}. Idle threads are pruned after one minute.
+     * @return  fresh ExecutorService
+     */
+    public static ExecutorService defaultExecutorService() {
+        ThreadPoolExecutor executor = new ThreadPoolExecutor(0, Integer.MAX_VALUE, 60L, TimeUnit.SECONDS,
+                new SynchronousQueue<Runnable>(), new ThreadFactory() {
+            private final AtomicInteger counter = new AtomicInteger();
+
+            @Override
+            public Thread newThread(Runnable r) {
+                Thread thread = new Thread(r, createName());
+                thread.setDaemon(true);
+                thread.setPriority(Thread.MIN_PRIORITY);
                 return thread;
             }
 
@@ -148,27 +194,35 @@ public class Oak {
         return getValue(properties, name, type, null);
     }
 
-    private Whiteboard whiteboard = new Whiteboard() {
+    private Whiteboard whiteboard = new DefaultWhiteboard() {
         @Override
         public <T> Registration register(
                 Class<T> type, T service, Map<?, ?> properties) {
+            final Registration registration =
+                    super.register(type, service, properties);
+
+            final Closer observerSubscription = Closer.create();
             Future<?> future = null;
-            if (executor != null && type == Runnable.class) {
+            if (scheduledExecutor != null && type == Runnable.class) {
                 Runnable runnable = (Runnable) service;
-                Long period =
-                        getValue(properties, "scheduler.period", Long.class);
+                Long period = getValue(properties, "scheduler.period", Long.class);
                 if (period != null) {
                     Boolean concurrent = getValue(
                             properties, "scheduler.concurrent",
                             Boolean.class, Boolean.FALSE);
                     if (concurrent) {
-                        future = executor.scheduleAtFixedRate(
+                        future = scheduledExecutor.scheduleAtFixedRate(
                                 runnable, period, period, TimeUnit.SECONDS);
                     } else {
-                        future = executor.scheduleWithFixedDelay(
+                        future = scheduledExecutor.scheduleWithFixedDelay(
                                 runnable, period, period, TimeUnit.SECONDS);
                     }
                 }
+            } else if (type == Observer.class && store instanceof Observable) {
+                BackgroundObserver backgroundObserver =
+                        new BackgroundObserver((Observer) service, executor);
+                observerSubscription.register(backgroundObserver);
+                observerSubscription.register(((Observable) store).addObserver(backgroundObserver));
             }
 
             ObjectName objectName = null;
@@ -201,6 +255,13 @@ public class Oak {
                             // ignore
                         }
                     }
+                    try {
+                        observerSubscription.close();
+                    } catch (IOException e) {
+                        LOG.warn("Unexpected IOException while unsubscribing observer", e);
+                    }
+
+                    registration.unregister();
                 }
             };
         }
@@ -217,15 +278,10 @@ public class Oak {
         this.store = checkNotNull(store);
     }
 
-    public Oak(MicroKernel kernel) {
-        this(new KernelNodeStore(checkNotNull(kernel)));
-    }
-
     public Oak() {
-        this(new MicroKernelImpl());
-        // this(new MongoMK.Builder().open());
-        // this(new LogWrapper(new MicroKernelImpl()));
-        // this(new LogWrapper(new MongoMK.Builder().open()));
+        this(new MemoryNodeStore());
+        // this(new DocumentMK.Builder().open());
+        // this(new LogWrapper(new DocumentMK.Builder().open()));
     }
 
     /**
@@ -238,7 +294,7 @@ public class Oak {
      */
     @Nonnull
     public Oak with(@Nonnull String defaultWorkspaceName) {
-        this.defaultWorkspaceName = defaultWorkspaceName;
+        this.defaultWorkspaceName = checkNotNull(defaultWorkspaceName);
         return this;
     }
 
@@ -257,7 +313,7 @@ public class Oak {
      */
     @Nonnull
     public Oak with(@Nonnull QueryIndexProvider provider) {
-        queryIndexProviders.add(provider);
+        queryIndexProviders.add(checkNotNull(provider));
         return this;
     }
 
@@ -270,7 +326,7 @@ public class Oak {
      */
     @Nonnull
     public Oak with(@Nonnull IndexEditorProvider provider) {
-        indexEditorProviders.add(provider);
+        indexEditorProviders.add(checkNotNull(provider));
         return this;
     }
 
@@ -282,6 +338,7 @@ public class Oak {
      */
     @Nonnull
     public Oak with(@Nonnull CommitHook hook) {
+        checkNotNull(hook);
         withEditorHook();
         commitHooks.add(hook);
         return this;
@@ -327,7 +384,8 @@ public class Oak {
         return with(new EditorProvider() {
             @Override @Nonnull
             public Editor getRootEditor(
-                    NodeState before, NodeState after, NodeBuilder builder) {
+                    NodeState before, NodeState after,
+                    NodeBuilder builder, CommitInfo info) {
                 return editor;
             }
         });
@@ -336,6 +394,9 @@ public class Oak {
     @Nonnull
     public Oak with(@Nonnull SecurityProvider securityProvider) {
         this.securityProvider = checkNotNull(securityProvider);
+        if (securityProvider instanceof WhiteboardAware) {
+            ((WhiteboardAware) securityProvider).setWhiteboard(whiteboard);
+        }
         for (SecurityConfiguration sc : securityProvider.getConfigurations()) {
             RepositoryInitializer ri = sc.getRepositoryInitializer();
             if (ri != RepositoryInitializer.DEFAULT) {
@@ -353,26 +414,37 @@ public class Oak {
      */
     @Nonnull
     public Oak with(@Nonnull ConflictHandler conflictHandler) {
+        checkNotNull(conflictHandler);
         withEditorHook();
         commitHooks.add(new ConflictHook(conflictHandler));
         return this;
     }
 
     @Nonnull
-    public Oak with(@Nonnull ScheduledExecutorService executorService) {
-        this.executor = executorService;
+    public Oak with(@Nonnull ScheduledExecutorService scheduledExecutor) {
+        this.scheduledExecutor = checkNotNull(scheduledExecutor);
+        return this;
+    }
+
+    @Nonnull
+    public Oak with(@Nonnull Executor executor) {
+        this.executor = checkNotNull(executor);
         return this;
     }
 
     @Nonnull
     public Oak with(@Nonnull MBeanServer mbeanServer) {
-        this.mbeanServer = mbeanServer;
+        this.mbeanServer = checkNotNull(mbeanServer);
         return this;
     }
 
     @Nonnull
     public Oak with(@Nonnull Whiteboard whiteboard) {
-        this.whiteboard = whiteboard;
+        this.whiteboard = checkNotNull(whiteboard);
+        if (securityProvider instanceof WhiteboardAware) {
+            ((WhiteboardAware) securityProvider).setWhiteboard(whiteboard);
+        }
+
         return this;
     }
 
@@ -405,8 +477,12 @@ public class Oak {
                 .compose(editorProviders)));
 
         if (asyncIndexing) {
-            Runnable task = new AsyncIndexUpdate("async", store, indexEditors);
-            WhiteboardUtils.scheduleWithFixedDelay(whiteboard, task, 5);
+            String name = "async";
+            AsyncIndexUpdate task = new AsyncIndexUpdate(name, store,
+                    indexEditors);
+            WhiteboardUtils.scheduleWithFixedDelay(whiteboard, task, 5, true);
+            WhiteboardUtils.registerMBean(whiteboard, IndexStatsMBean.class,
+                    task.getIndexStats(), IndexStatsMBean.TYPE, name);
         }
 
         // FIXME: OAK-810 move to proper workspace initialization

@@ -28,9 +28,6 @@ import javax.security.auth.login.LoginException;
 import org.apache.jackrabbit.oak.api.AuthInfo;
 import org.apache.jackrabbit.oak.api.ContentSession;
 import org.apache.jackrabbit.oak.api.Root;
-import org.apache.jackrabbit.oak.plugins.observation.ChangeDispatcher;
-import org.apache.jackrabbit.oak.plugins.observation.ChangeDispatcher.Listener;
-import org.apache.jackrabbit.oak.plugins.observation.Observable;
 import org.apache.jackrabbit.oak.spi.commit.CommitHook;
 import org.apache.jackrabbit.oak.spi.query.QueryIndexProvider;
 import org.apache.jackrabbit.oak.spi.security.SecurityProvider;
@@ -42,7 +39,7 @@ import org.slf4j.LoggerFactory;
 /**
  * {@code MicroKernel}-based implementation of the {@link ContentSession} interface.
  */
-class ContentSessionImpl implements ContentSession, Observable {
+class ContentSessionImpl implements ContentSession {
 
     private static final Logger log = LoggerFactory.getLogger(ContentSessionImpl.class);
 
@@ -56,7 +53,6 @@ class ContentSessionImpl implements ContentSession, Observable {
     private final String workspaceName;
     private final NodeStore store;
     private final CommitHook hook;
-    private final ChangeDispatcher changeDispatcher;
     private final QueryIndexProvider indexProvider;
     private final String sessionName;
 
@@ -67,14 +63,12 @@ class ContentSessionImpl implements ContentSession, Observable {
                               @Nonnull String workspaceName,
                               @Nonnull NodeStore store,
                               @Nonnull CommitHook hook,
-                              @Nonnull ChangeDispatcher changeDispatcher,
                               @Nonnull QueryIndexProvider indexProvider) {
         this.loginContext = loginContext;
         this.securityProvider = securityProvider;
         this.workspaceName = workspaceName;
         this.store = store;
         this.hook = hook;
-        this.changeDispatcher = changeDispatcher;
         this.indexProvider = indexProvider;
         this.sessionName = "session-" + SESSION_COUNTER.incrementAndGet();
     }
@@ -105,8 +99,8 @@ class ContentSessionImpl implements ContentSession, Observable {
     @Override
     public Root getLatestRoot() {
         checkLive();
-        return new AbstractRoot(store, hook, changeDispatcher.newHook(ContentSessionImpl.this), workspaceName,
-                loginContext.getSubject(), securityProvider, indexProvider) {
+        return new AbstractRoot(store, hook, workspaceName, loginContext.getSubject(),
+                securityProvider, indexProvider) {
             @Override
             protected void checkLive() {
                 ContentSessionImpl.this.checkLive();
@@ -117,11 +111,6 @@ class ContentSessionImpl implements ContentSession, Observable {
             	return ContentSessionImpl.this;
             }
         };
-    }
-
-    @Override
-    public Listener newListener() {
-        return changeDispatcher.newListener();
     }
 
     //-----------------------------------------------------------< Closable >---
@@ -139,4 +128,5 @@ class ContentSessionImpl implements ContentSession, Observable {
     public String toString() {
         return sessionName;
     }
+
 }

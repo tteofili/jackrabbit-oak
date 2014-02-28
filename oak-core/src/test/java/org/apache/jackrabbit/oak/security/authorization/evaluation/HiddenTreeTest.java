@@ -55,6 +55,7 @@ public class HiddenTreeTest extends AbstractOakCoreTest {
         Tree hidden = parent.getChild(hiddenName);
         assertNotNull(hidden);
         assertFalse(hidden.exists());
+        assertEquals(0, hidden.getChildrenCount(1));
     }
 
     @Test
@@ -96,5 +97,16 @@ public class HiddenTreeTest extends AbstractOakCoreTest {
     @Test
     public void testGetHiddenChildrenCount() {
         assertEquals(0, parent.getChildrenCount(1));
+    }
+
+    @Test
+    public void testCreateHiddenChild() {
+        try {
+            Tree hidden = parent.addChild(":hiddenChild");
+            root.commit();
+            fail();
+        } catch (Exception e) {
+            // success
+        }
     }
 }

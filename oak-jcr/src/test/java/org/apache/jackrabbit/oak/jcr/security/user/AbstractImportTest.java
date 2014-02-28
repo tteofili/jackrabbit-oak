@@ -18,18 +18,21 @@ package org.apache.jackrabbit.oak.jcr.security.user;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
+import java.lang.reflect.Method;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.Set;
+
+import javax.annotation.CheckForNull;
 import javax.jcr.ImportUUIDBehavior;
 import javax.jcr.Node;
-import javax.jcr.NodeIterator;
 import javax.jcr.Repository;
 import javax.jcr.RepositoryException;
 import javax.jcr.Session;
 import javax.jcr.SimpleCredentials;
 
-import com.google.common.collect.ImmutableMap;
 import org.apache.jackrabbit.JcrConstants;
 import org.apache.jackrabbit.api.JackrabbitSession;
 import org.apache.jackrabbit.api.security.user.Authorizable;
@@ -46,7 +49,11 @@ import org.apache.jackrabbit.oak.spi.xml.ProtectedItemImporter;
 import org.apache.jackrabbit.test.NotExecutableException;
 import org.junit.After;
 import org.junit.Before;
+import org.junit.Test;
 
+import com.google.common.collect.ImmutableMap;
+
+import static org.apache.jackrabbit.oak.jcr.AbstractRepositoryTest.dispose;
 import static org.junit.Assert.assertFalse;
 
 /**
@@ -59,19 +66,18 @@ public abstract class AbstractImportTest {
     protected static final String GROUPPATH = "/rep:security/rep:authorizables/rep:groups";
 
     private Repository repo;
+
+    protected SecurityProvider securityProvider;
+
     protected Session adminSession;
     protected UserManager userMgr;
 
+    private Set<String> preTestAuthorizables = new HashSet<String>();
+
     @Before
     public void before() throws Exception {
-
-        String importBehavior = getImportBehavior();
-        SecurityProvider securityProvider;
-        if (importBehavior != null) {
-            Map<String, String> userParams = new HashMap();
-            userParams.put(ProtectedItemImporter.PARAM_IMPORT_BEHAVIOR, getImportBehavior());
-            ConfigurationParameters config = ConfigurationParameters.of(ImmutableMap.of(UserConfiguration.NAME, ConfigurationParameters.of(userParams)));
-
+        ConfigurationParameters config = getConfigurationParameters();
+        if (config != null) {
             securityProvider = new SecurityProviderImpl(config);
         } else {
             securityProvider = new SecurityProviderImpl();
@@ -86,11 +92,17 @@ public abstract class AbstractImportTest {
         }
         userMgr = ((JackrabbitSession) adminSession).getUserManager();
 
+        preTestAuthorizables.clear();
+        Iterator<Authorizable> iter = userMgr.findAuthorizables("rep:principalName", null);
+        while (iter.hasNext()) {
+            String id = iter.next().getID();
+            preTestAuthorizables.add(id);
+        }
+
         // make sure the target node for group-import exists
         Authorizable administrators = userMgr.getAuthorizable(ADMINISTRATORS);
-        if (administrators == null) {
-            administrators = userMgr.createGroup(new PrincipalImpl(ADMINISTRATORS));
-            adminSession.save();
+        if (userMgr.getAuthorizable(ADMINISTRATORS) == null) {
+            userMgr.createGroup(new PrincipalImpl(ADMINISTRATORS));
         } else if (!administrators.isGroup()) {
             throw new NotExecutableException("Expected " + administrators.getID() + " to be a group.");
         }
@@ -101,24 +113,44 @@ public abstract class AbstractImportTest {
     public void after() throws Exception {
         try {
             adminSession.refresh(false);
-            NodeIterator intermediateNodes = adminSession.getNode(GROUPPATH).getNodes();
-            while (intermediateNodes.hasNext()) {
-                intermediateNodes.nextNode().remove();
+            if (userMgr.isAutoSave()) {
+                try {
+                    userMgr.autoSave(false);
+                } catch (Exception e) {
+                    // ignore
+                }
             }
-            String builtinPath = USERPATH + "/a";
-            intermediateNodes = adminSession.getNode(USERPATH).getNodes();
-            while (intermediateNodes.hasNext()) {
-                Node n = intermediateNodes.nextNode();
-                if (!builtinPath.equals(n.getPath())) {
-                    n.remove();
+
+            Iterator<Authorizable> iter = userMgr.findAuthorizables("rep:principalName", null);
+            while (iter.hasNext()) {
+                String id = iter.next().getID();
+                if (!preTestAuthorizables.remove(id)) {
+                    try {
+                        userMgr.getAuthorizable(id).remove();
+                    } catch (RepositoryException e) {
+                        // ignore
+                        System.out.println("error removing " + id + ":" + e);
+                    }
                 }
             }
             adminSession.save();
         } finally {
             if (getImportBehavior() != null) {
                 adminSession.logout();
-                repo = null;
+                repo = dispose(repo);
             }
+        }
+    }
+
+    @CheckForNull
+    protected ConfigurationParameters getConfigurationParameters() {
+        String importBehavior = getImportBehavior();
+        if (importBehavior != null) {
+            Map<String, String> userParams = new HashMap<String, String>();
+            userParams.put(ProtectedItemImporter.PARAM_IMPORT_BEHAVIOR, getImportBehavior());
+            return ConfigurationParameters.of(ImmutableMap.of(UserConfiguration.NAME, ConfigurationParameters.of(userParams)));
+        } else {
+            return null;
         }
     }
 
@@ -133,6 +165,7 @@ public abstract class AbstractImportTest {
     protected String getExistingUUID() throws RepositoryException {
         Node n = adminSession.getRootNode();
         n.addMixin(JcrConstants.MIX_REFERENCEABLE);
+        //noinspection deprecation
         return n.getUUID();
     }
 
@@ -141,8 +174,21 @@ public abstract class AbstractImportTest {
     }
 
     protected void doImport(String parentPath, String xml, int importUUIDBehavior) throws Exception {
-        InputStream in = new ByteArrayInputStream(xml.getBytes("UTF-8"));
-        adminSession.importXML(parentPath, in, importUUIDBehavior);
+        InputStream in;
+        if (xml.charAt(0) == '<') {
+            in = new ByteArrayInputStream(xml.getBytes());
+            // uncomment to dump include XMLs
+            // FileOutputStream out = new FileOutputStream(getTestXml());
+            // out.write(xml.getBytes());
+            // out.close();
+        } else {
+            in = getClass().getResourceAsStream(xml);
+        }
+        try {
+            adminSession.importXML(parentPath, in, importUUIDBehavior);
+        } finally {
+            in.close();
+        }
     }
 
     protected static void assertNotDeclaredMember(Group gr, String potentialID, Session session) throws RepositoryException {
@@ -152,5 +198,25 @@ public abstract class AbstractImportTest {
             Authorizable member = it.next();
             assertFalse(potentialID.equals(session.getNode(member.getPath()).getIdentifier()));
         }
+    }
+
+    private String getTestXml() {
+        StackTraceElement[] stackTraceElements = Thread.currentThread().getStackTrace();
+        for (StackTraceElement element : stackTraceElements) {
+            try {
+                Class<?> clazz = Class.forName(element.getClassName());
+                for (Method method : clazz.getMethods()){
+                    if(method.getName().equals(element.getMethodName())){
+                        if (method.getAnnotation(Test.class) != null) {
+                            return clazz.getSimpleName() + "-" + method.getName() + ".xml";
+                        }
+                    }
+
+                }
+            } catch (Exception e) {
+                //  oops do something here
+            }
+        }
+        throw new IllegalArgumentException("no import xml given.");
     }
 }

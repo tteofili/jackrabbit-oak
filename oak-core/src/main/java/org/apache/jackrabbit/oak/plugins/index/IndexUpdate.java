@@ -23,8 +23,6 @@ import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.ASYNC_PROPE
 import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.INDEX_DEFINITIONS_NAME;
 import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.REINDEX_PROPERTY_NAME;
 import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.TYPE_PROPERTY_NAME;
-import static org.apache.jackrabbit.oak.plugins.index.IndexUtils.getBoolean;
-import static org.apache.jackrabbit.oak.plugins.index.IndexUtils.getString;
 import static org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState.MISSING_NODE;
 
 import java.util.List;
@@ -63,13 +61,20 @@ class IndexUpdate implements Editor {
      */
     private final List<Editor> reindex = newArrayList();
 
+    /**
+     * Callback for the update events of the indexing job
+     */
+    private final IndexUpdateCallback updateCallback;
+
     IndexUpdate(
             IndexEditorProvider provider, String async,
-            NodeState root, NodeBuilder builder) {
+            NodeState root, NodeBuilder builder,
+            IndexUpdateCallback updateCallback) {
         this.provider = checkNotNull(provider);
         this.async = async;
         this.root = checkNotNull(root);
         this.builder = checkNotNull(builder);
+        this.updateCallback = checkNotNull(updateCallback);
     }
 
     private IndexUpdate(IndexUpdate parent, String name) {
@@ -78,6 +83,7 @@ class IndexUpdate implements Editor {
         this.async = parent.async;
         this.root = parent.root;
         this.builder = parent.builder.child(checkNotNull(name));
+        this.updateCallback = parent.updateCallback;
     }
 
     @Override
@@ -101,13 +107,13 @@ class IndexUpdate implements Editor {
             throws CommitFailedException {
         for (String name : definitions.getChildNodeNames()) {
             NodeBuilder definition = definitions.getChildNode(name);
-            if (Objects.equal(async, getString(definition, ASYNC_PROPERTY_NAME))) {
-                String type = getString(definition, TYPE_PROPERTY_NAME);
-                Editor editor = provider.getIndexEditor(type, definition, root);
+            if (Objects.equal(async, definition.getString(ASYNC_PROPERTY_NAME))) {
+                String type = definition.getString(TYPE_PROPERTY_NAME);
+                Editor editor = provider.getIndexEditor(type, definition, root, updateCallback);
                 if (editor == null) {
                     // trigger reindexing when an indexer becomes available
                     definition.setProperty(REINDEX_PROPERTY_NAME, true);
-                } else if (getBoolean(definition, REINDEX_PROPERTY_NAME)) {
+                } else if (definition.getBoolean(REINDEX_PROPERTY_NAME)) {
                     definition.setProperty(REINDEX_PROPERTY_NAME, false);
                     // as we don't know the index content node name
                     // beforehand, we'll remove all child nodes

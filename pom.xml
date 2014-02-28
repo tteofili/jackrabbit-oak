@@ -23,7 +23,7 @@
   <parent>
     <groupId>org.apache.jackrabbit</groupId>
     <artifactId>oak-parent</artifactId>
-    <version>0.11-SNAPSHOT</version>
+    <version>0.18-SNAPSHOT</version>
     <relativePath>oak-parent/pom.xml</relativePath>
   </parent>
 
@@ -37,20 +37,21 @@
 
   <modules>
     <module>oak-parent</module>
-    <module>oak-doc</module>
     <module>oak-commons</module>
+    <module>oak-blob</module>
     <module>oak-mk-api</module>
     <module>oak-mk</module>
     <module>oak-mk-remote</module>
     <module>oak-core</module>
     <module>oak-jcr</module>
     <module>oak-upgrade</module>
-    <module>oak-sling</module>
     <module>oak-http</module>
     <module>oak-lucene</module>
     <module>oak-solr-core</module>
     <module>oak-solr-remote</module>
     <module>oak-solr-embedded</module>
+    <module>oak-auth-external</module>
+    <module>oak-auth-ldap</module>
     <module>oak-run</module>
     <module>oak-it</module>
     <!-- <module>oak-mk-perf</module> -->
@@ -74,7 +75,10 @@
               <exclude>.git/**</exclude>
               <exclude>.idea/**</exclude>
               <exclude>.gitignore</exclude>
-              <exclude>doc/*.uxf</exclude>
+              <exclude>oak-doc/*.uxf</exclude>
+              <exclude>oak-doc/.*/**</exclude>
+              <exclude>oak-doc/*.iml</exclude>
+              <exclude>oak-doc/target/**</exclude>
               <exclude>oak-js/package.json</exclude>
               <exclude>oak-mk-perf/.*/**</exclude>
               <exclude>oak-mk-perf/target/**</exclude>

@@ -22,10 +22,10 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import org.apache.jackrabbit.oak.api.PropertyState;
-import org.apache.jackrabbit.oak.api.Tree;
-import org.apache.jackrabbit.oak.core.ImmutableTree;
-import org.apache.jackrabbit.oak.spi.security.authorization.permission.ReadStatus;
-import org.apache.jackrabbit.oak.spi.security.privilege.PrivilegeBitsProvider;
+import org.apache.jackrabbit.oak.core.ImmutableRoot;
+import org.apache.jackrabbit.oak.plugins.tree.ImmutableTree;
+import org.apache.jackrabbit.oak.spi.security.authorization.permission.RepositoryPermission;
+import org.apache.jackrabbit.oak.spi.security.authorization.permission.TreePermission;
 
 /**
  * Implementation of the {@code CompiledPermission} interface that denies all permissions.
@@ -42,22 +42,22 @@ public final class NoPermissions implements CompiledPermissions {
     }
 
     @Override
-    public void refresh(@Nonnull ImmutableTree permissionsTree, @Nonnull PrivilegeBitsProvider bitsProvider) {
+    public void refresh(@Nonnull ImmutableRoot root, @Nonnull String workspaceName) {
         // nop
     }
 
     @Override
-    public ReadStatus getReadStatus(@Nonnull Tree tree, @Nullable PropertyState property) {
-        return ReadStatus.DENY_ALL;
+    public RepositoryPermission getRepositoryPermission() {
+        return RepositoryPermission.EMPTY;
     }
 
     @Override
-    public boolean isGranted(long permissions) {
-        return false;
+    public TreePermission getTreePermission(@Nonnull ImmutableTree tree, @Nonnull TreePermission parentPermission) {
+        return TreePermission.EMPTY;
     }
 
     @Override
-    public boolean isGranted(@Nonnull Tree parent, @Nullable PropertyState property, long permissions) {
+    public boolean isGranted(@Nonnull ImmutableTree parent, @Nullable PropertyState property, long permissions) {
         return false;
     }
 
@@ -67,12 +67,12 @@ public final class NoPermissions implements CompiledPermissions {
     }
 
     @Override
-    public Set<String> getPrivileges(@Nullable Tree tree) {
+    public Set<String> getPrivileges(@Nullable ImmutableTree tree) {
         return Collections.emptySet();
     }
 
     @Override
-    public boolean hasPrivileges(@Nullable Tree tree, String... privilegeNames) {
+    public boolean hasPrivileges(@Nullable ImmutableTree tree, String... privilegeNames) {
         return false;
     }
 }

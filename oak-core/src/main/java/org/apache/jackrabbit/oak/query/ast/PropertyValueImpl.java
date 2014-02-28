@@ -18,7 +18,6 @@
  */
 package org.apache.jackrabbit.oak.query.ast;
 
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
@@ -26,17 +25,12 @@ import java.util.Set;
 
 import javax.jcr.PropertyType;
 
-import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.PropertyValue;
-import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.api.Type;
-import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.query.QueryImpl;
 import org.apache.jackrabbit.oak.query.SQL2Parser;
 import org.apache.jackrabbit.oak.query.index.FilterImpl;
-import org.apache.jackrabbit.oak.spi.query.PropertyValues;
-
-import com.google.common.collect.Iterables;
+import org.apache.jackrabbit.oak.spi.query.Filter.PathRestriction;
 
 /**
  * A property expression.
@@ -107,57 +101,13 @@ public class PropertyValueImpl extends DynamicOperandImpl {
 
     @Override
     public PropertyValue currentProperty() {
-        boolean asterisk = PathUtils.getName(propertyName).equals("*");
-        if (!asterisk) {
-            PropertyValue p = selector.currentProperty(propertyName);
-            return matchesPropertyType(p) ? p : null;
-        }
-        Tree tree = getTree(selector.currentPath());
-        if (tree == null || !tree.exists()) {
-            return null;
-        }
-        if (!asterisk) {
-            String name = PathUtils.getName(propertyName);
-            if (!tree.hasProperty(name)) {
-                return null;
-            }
-            PropertyState p = tree.getProperty(name);
-            return matchesPropertyType(p) ? PropertyValues.create(p) : null;
-        }
-        // asterisk - create a multi-value property
-        // warning: the returned property state may have a mixed type
-        // (not all values may have the same type)
-
-        // TODO currently all property values are converted to strings - 
-        // this doesn't play well with the idea that the types may be different
-        List<String> values = new ArrayList<String>();
-        for (PropertyState p : tree.getProperties()) {
-            if (matchesPropertyType(p)) {
-                Iterables.addAll(values, p.getValue(Type.STRINGS));
-            }
-        }
-        // "*"
-        return PropertyValues.newString(values);
-    }
-
-    private boolean matchesPropertyType(PropertyValue value) {
-        if (value == null) {
-            return false;
-        }
+        PropertyValue p;
         if (propertyType == PropertyType.UNDEFINED) {
-            return true;
+            p = selector.currentProperty(propertyName);
+        } else {
+            p = selector.currentProperty(propertyName, propertyType);
         }
-        return value.getType().tag() == propertyType;
-    }
-
-    private boolean matchesPropertyType(PropertyState state) {
-        if (state == null) {
-            return false;
-        }
-        if (propertyType == PropertyType.UNDEFINED) {
-            return true;
-        }
-        return state.getType().tag() == propertyType;
+        return p;        
     }
 
     public void bindSelector(SourceImpl source) {
@@ -166,28 +116,36 @@ public class PropertyValueImpl extends DynamicOperandImpl {
 
     @Override
     public void restrict(FilterImpl f, Operator operator, PropertyValue v) {
-        if (f.getSelector() == selector) {
+        if (f.getSelector().equals(selector)) {
             if (operator == Operator.NOT_EQUAL && v != null) {
                 // not supported
                 return;
             }
-            f.restrictProperty(propertyName, operator, v);
-            if (propertyType != PropertyType.UNDEFINED) {
-                f.restrictPropertyType(propertyName, operator, propertyType);
+            String pn = normalizePropertyName(propertyName);
+            if (pn.equals(QueryImpl.JCR_PATH)) {
+                if (operator == Operator.EQUAL) {
+                    f.restrictPath(v.getValue(Type.STRING), PathRestriction.EXACT);
+                }
+            } else {
+                f.restrictProperty(pn, operator, v);
+                if (propertyType != PropertyType.UNDEFINED) {
+                    f.restrictPropertyType(pn, operator, propertyType);
+                }
             }
         }
     }
     
     @Override
     public void restrictList(FilterImpl f, List<PropertyValue> list) {
-        if (f.getSelector() == selector) {
-            f.restrictPropertyAsList(propertyName, list);
+        if (f.getSelector().equals(selector)) {
+            String pn = normalizePropertyName(propertyName);            
+            f.restrictPropertyAsList(pn, list);
         }
     }
 
     @Override
     public boolean canRestrictSelector(SelectorImpl s) {
-        return s == selector;
+        return s.equals(selector);
     }
     
     @Override

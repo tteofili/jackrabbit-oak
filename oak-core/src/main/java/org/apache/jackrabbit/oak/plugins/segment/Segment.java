@@ -19,13 +19,24 @@ package org.apache.jackrabbit.oak.plugins.segment;
 import static com.google.common.base.Objects.equal;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.base.Preconditions.checkPositionIndexes;
+import static com.google.common.base.Preconditions.checkState;
+import static com.google.common.collect.Maps.newConcurrentMap;
+import static org.apache.jackrabbit.oak.plugins.segment.SegmentIdFactory.isDataSegmentId;
 import static org.apache.jackrabbit.oak.plugins.segment.SegmentWriter.BLOCK_SIZE;
 
+import java.io.IOException;
+import java.io.OutputStream;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.nio.ByteBuffer;
+import java.nio.channels.Channels;
+import java.nio.channels.WritableByteChannel;
 import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentMap;
+
+import javax.annotation.Nonnull;
 
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Type;
@@ -46,16 +57,20 @@ public class Segment {
     /**
      * The limit on segment references within one segment. Since record
      * identifiers use one byte to indicate the referenced segment, a single
-     * segment can hold references to up to 256 segments.
+     * segment can hold references to up to 255 segments plus itself.
      */
-    static final int SEGMENT_REFERENCE_LIMIT = 1 << 8; // 256
+    static final int SEGMENT_REFERENCE_LIMIT = (1 << 8) - 1; // 255
 
     /**
      * The number of bytes (or bits of address space) to use for the
      * alignment boundary of segment records.
      */
-    static final int RECORD_ALIGN_BITS = 2;
-    static final int RECORD_ALIGN_BYTES = 1 << RECORD_ALIGN_BITS; // 4
+    static final int RECORD_ALIGN_BITS = 2; // align at the four-byte boundary
+
+    static int align(int value) {
+        int mask = -1 << RECORD_ALIGN_BITS;
+        return (value + ~mask) & mask;
+    }
 
     /**
      * Maximum segment size. Record identifiers are stored as three-byte
@@ -64,7 +79,7 @@ public class Segment {
      * at four-byte boundaries, the two bytes can address up to 256kB of
      * record data.
      */
-    static final int MAX_SEGMENT_SIZE = 1 << (16 + RECORD_ALIGN_BITS); // 256kB
+    public static final int MAX_SEGMENT_SIZE = 1 << (16 + RECORD_ALIGN_BITS); // 256kB
 
     /**
      * The size limit for small values. The variable length of small values
@@ -90,20 +105,83 @@ public class Segment {
                 }
             };
 
-    final SegmentStore store; // TODO: should be private
+    private static final UUID[] NO_REFS = new UUID[0];
+
+    private final SegmentStore store;
 
     private final UUID uuid;
 
+    private final UUID[] refids;
+
     private final ByteBuffer data;
 
-    private final List<UUID> uuids;
+    private final boolean current;
+
+    /**
+     * String records read from segment. Used to avoid duplicate
+     * copies and repeated parsing of the same strings.
+     */
+    private final ConcurrentMap<Integer, String> strings = newConcurrentMap();
+
+    /**
+     * Template records read from segment. Used to avoid duplicate
+     * copies and repeated parsing of the same templates.
+     */
+    private final ConcurrentMap<Integer, Template> templates = newConcurrentMap();
+
+    private final byte[] recentCacheHits;
 
     public Segment(
-            SegmentStore store, UUID uuid, ByteBuffer data, List<UUID> uuids) {
+            SegmentStore store, SegmentIdFactory factory,
+            UUID uuid, ByteBuffer data) {
         this.store = checkNotNull(store);
         this.uuid = checkNotNull(uuid);
         this.data = checkNotNull(data);
-        this.uuids = checkNotNull(uuids);
+
+        int refpos = data.position();
+        if (isDataSegmentId(uuid)) {
+            int refs = data.get(refpos) & 0xff;
+            int roots = data.getShort(refpos + 1) & 0xffff;
+            refpos += align(3 + roots * 3);
+            refids = new UUID[refs];
+            for (int i = 0; i < refs; i++) {
+                refids[i] = factory.getSegmentId(
+                        data.getLong(refpos + i * 16),
+                        data.getLong(refpos + i * 16 + 8));
+            }
+            recentCacheHits = new byte[(data.remaining() + 16 * 8 - 1) / (16 * 8)];
+        } else {
+            recentCacheHits = null;
+            refids = NO_REFS;
+        }
+
+        this.current = false;
+    }
+
+    Segment(SegmentStore store, UUID uuid, UUID[] refids, ByteBuffer data) {
+        this.store = checkNotNull(store);
+        this.uuid = checkNotNull(uuid);
+        this.refids = checkNotNull(refids);
+        this.data = checkNotNull(data);
+        this.recentCacheHits = new byte[(data.remaining() + 16 * 8 - 1) / (16 * 8)];
+        this.current = true;
+    }
+
+    public void dropOldCacheEntries() {
+        checkState(recentCacheHits != null);
+        for (Integer key : strings.keySet().toArray(new Integer[0])) {
+            int bitpos = (pos(key, 1) - data.position()) / 16;
+            if ((recentCacheHits[bitpos / 8] & (0x80 >>> (bitpos % 8))) == 0) {
+                strings.remove(key);
+            }
+        }
+        for (Integer key : templates.keySet().toArray(new Integer[0])) {
+            int bitpos = (pos(key, 1) - data.position()) / 16;
+            if ((recentCacheHits[bitpos / 8] & (0x80 >>> (bitpos % 8))) == 0) {
+                templates.remove(key);
+            }
+        }
+        Arrays.fill(recentCacheHits, (byte) 0);
     }
 
     /**
@@ -116,25 +194,62 @@ public class Segment {
      * @return position within the data array
      */
     private int pos(int offset, int length) {
-        int pos = offset - (MAX_SEGMENT_SIZE - size());
-        checkPositionIndexes(pos, pos + length, size());
-        return data.position() + pos;
+        checkPositionIndexes(offset, offset + length, MAX_SEGMENT_SIZE);
+        int pos = data.limit() - MAX_SEGMENT_SIZE + offset;
+        checkState(pos >= data.position());
+        return pos;
+    }
+
+    /**
+     * Returns the store that contains this segment.
+     *
+     * @return containing segment store
+     */
+    @Nonnull
+    SegmentStore getStore() {
+        return store;
     }
 
     public UUID getSegmentId() {
         return uuid;
     }
 
-    public ByteBuffer getData() {
-        return data;
+    public List<UUID> getReferencedIds() {
+        return Arrays.asList(refids);
     }
 
     public int size() {
         return data.remaining();
     }
 
+    /**
+     * Writes this segment to the given output stream.
+     *
+     * @param stream stream to which this segment will be written
+     * @throws IOException on an IO error
+     */
+    public void writeTo(OutputStream stream) throws IOException {
+        ByteBuffer buffer = data.duplicate();
+        WritableByteChannel channel = Channels.newChannel(stream);
+        while (buffer.hasRemaining()) {
+            channel.write(buffer);
+        }
+    }
+
     byte readByte(int offset) {
         return data.get(pos(offset, 1));
+    }
+
+    short readShort(int offset) {
+        return data.getShort(pos(offset, 2));
+    }
+
+    int readInt(int offset) {
+        return data.getInt(pos(offset, 4));
+    }
+
+    long readLong(int offset) {
+        return data.getLong(pos(offset, 8));
     }
 
     /**
@@ -143,12 +258,14 @@ public class Segment {
      * @param uuid segment identifier
      * @return identified segment
      */
+    @Nonnull
     Segment getSegment(UUID uuid) {
         if (equal(uuid, this.uuid)) {
             return this; // optimization for the common case (OAK-1031)
-        } else {
-            return store.readSegment(uuid);
         }
+        Segment segment = store.readSegment(uuid);
+        checkState(segment != null); // sanity check
+        return segment;
     }
 
     /**
@@ -160,7 +277,6 @@ public class Segment {
     Segment getSegment(RecordId id) {
         return getSegment(checkNotNull(id).getSegmentId());
     }
-
 
     /**
      * Reads the given number of bytes starting from the given position
@@ -185,30 +301,37 @@ public class Segment {
     }
 
     private RecordId internalReadRecordId(int pos) {
-        return new RecordId(
-                uuids.get(data.get(pos) & 0xff),
-                (data.get(pos + 1) & 0xff) << (8 + Segment.RECORD_ALIGN_BITS)
-                | (data.get(pos + 2) & 0xff) << Segment.RECORD_ALIGN_BITS);
-    }
+        UUID refid;
+        int refpos = data.get(pos) & 0xff;
+        if (refpos != 0xff) {
+            refid = refids[refpos];
+        } else {
+            refid = uuid;
+        }
 
-    int readInt(int offset) {
-        int pos = pos(offset, 4);
-        return (data.get(pos) & 0xff) << 24
-                | (data.get(pos + 1) & 0xff) << 16
-                | (data.get(pos + 2) & 0xff) << 8
-                | (data.get(pos + 3) & 0xff);
+        int offset =
+                (((data.get(pos + 1) & 0xff) << 8) | (data.get(pos + 2) & 0xff))
+                << RECORD_ALIGN_BITS;
+
+        return new RecordId(refid, offset);
     }
 
     String readString(final RecordId id) {
-        return store.getRecord(id, new Callable<String>() {
-            @Override
-            public String call() {
-                return getSegment(id).readString(id.getOffset());
-            }
-        });
+        return getSegment(id).readString(id.getOffset());
     }
 
-    String readString(int offset) {
+    private String readString(int offset) {
+        String string = strings.get(offset);
+        if (string == null) {
+            string = loadString(offset);
+            strings.putIfAbsent(offset, string); // only keep the first copy
+        }
+        int bitpos = (pos(offset, 1) - data.position()) / 16;
+        recentCacheHits[bitpos / 8] |= 0x80 >>> (bitpos % 8);
+        return string;
+    }
+
+    private String loadString(int offset) {
         int pos = pos(offset, 1);
         long length = internalReadLength(pos);
         if (length < SMALL_LIMIT) {
@@ -244,15 +367,21 @@ public class Segment {
     }
 
     Template readTemplate(final RecordId id) {
-        return store.getRecord(id, new Callable<Template>() {
-            @Override
-            public Template call() {
-                return getSegment(id).readTemplate(id.getOffset());
-            }
-        });
+        return getSegment(id).readTemplate(id.getOffset());
     }
 
-    Template readTemplate(int offset) {
+    private Template readTemplate(int offset) {
+        Template template = templates.get(offset);
+        if (template == null) {
+            template = loadTemplate(offset);
+            templates.putIfAbsent(offset, template); // only keep the first copy
+        }
+        int bitpos = (pos(offset, 1) - data.position()) / 16;
+        recentCacheHits[bitpos / 8] |= 0x80 >>> (bitpos % 8);
+        return template;
+    }
+
+    private Template loadTemplate(int offset) {
         int head = readInt(offset);
         boolean hasPrimaryType = (head & (1 << 31)) != 0;
         boolean hasMixinTypes = (head & (1 << 30)) != 0;
@@ -335,26 +464,72 @@ public class Segment {
         }
     }
 
-    SegmentStream readStream(int offset) {
-        RecordId id = new RecordId(uuid, offset);
-        int pos = pos(offset, 1);
-        long length = internalReadLength(pos);
-        if (length < Segment.MEDIUM_LIMIT) {
-            byte[] inline = new byte[(int) length];
-            ByteBuffer buffer = data.duplicate();
-            if (length < Segment.SMALL_LIMIT) {
-                buffer.position(pos + 1);
-            } else {
-                buffer.position(pos + 2);
-            }
-            buffer.get(inline);
-            return new SegmentStream(id, inline);
-        } else {
-            int size = (int) ((length + BLOCK_SIZE - 1) / BLOCK_SIZE);
-            ListRecord list =
-                    new ListRecord(this, internalReadRecordId(pos + 8), size);
-            return new SegmentStream(store, id, list, length);
+    long readBlobLength(int offset) {
+        long high = readInt(offset + 2);
+        long low = readInt(offset + 6);
+        return high << 32 | low;
+    }
+
+    //------------------------------------------------------------< Object >--
+
+    @Override
+    public String toString() {
+        StringWriter string = new StringWriter();
+        PrintWriter writer = new PrintWriter(string);
+
+        int rootcount = 0;
+        int length = data.remaining();
+        if (!current) {
+            rootcount = data.getShort(data.position() + 1) &0xffff;
+            length -= (align(3 + rootcount * 3) + refids.length * 16);
         }
+
+        writer.format(
+                "Segment %s (%d bytes, %d ref%s, %d root%s)%n",
+                uuid, length,
+                refids.length, (refids.length != 1 ? "s" : ""),
+                rootcount, (rootcount != 1 ? "s" : ""));
+        writer.println("--------------------------------------------------------------------------");
+        if (refids.length > 0) {
+            for (int i = 0; i < refids.length; i++) {
+                writer.format("reference %02x: %s%n", i, refids[i]);
+            }
+            writer.println("--------------------------------------------------------------------------");
+        }
+        int pos = data.limit() - ((length + 15) & ~15);
+        while (pos < data.limit()) {
+            writer.format("%04x: ", (MAX_SEGMENT_SIZE - data.limit() + pos) >> RECORD_ALIGN_BITS);
+            for (int i = 0; i < 16; i++) {
+                if (i > 0 && i % 4 == 0) {
+                    writer.append(' ');
+                }
+                if (pos + i >= data.position()) {
+                    byte b = data.get(pos + i);
+                    writer.format("%02x ", b & 0xff);
+                } else {
+                    writer.append("   ");
+                }
+            }
+            writer.append(' ');
+            for (int i = 0; i < 16; i++) {
+                if (pos + i >= data.position()) {
+                    byte b = data.get(pos + i);
+                    if (b >= ' ' && b < 127) {
+                        writer.append((char) b);
+                    } else {
+                        writer.append('.');
+                    }
+                } else {
+                    writer.append(' ');
+                }
+            }
+            writer.println();
+            pos += 16;
+        }
+        writer.println("--------------------------------------------------------------------------");
+
+        writer.close();
+        return string.toString();
     }
 
 }

@@ -17,12 +17,16 @@
 package org.apache.jackrabbit.oak.jcr.delegate;
 
 import static com.google.common.base.Preconditions.checkNotNull;
-import static com.google.common.collect.Lists.newArrayList;
+import static org.apache.jackrabbit.api.stats.RepositoryStatistics.Type.SESSION_READ_COUNTER;
+import static org.apache.jackrabbit.api.stats.RepositoryStatistics.Type.SESSION_READ_DURATION;
+import static org.apache.jackrabbit.api.stats.RepositoryStatistics.Type.SESSION_WRITE_COUNTER;
+import static org.apache.jackrabbit.api.stats.RepositoryStatistics.Type.SESSION_WRITE_DURATION;
 import static org.apache.jackrabbit.oak.commons.PathUtils.denotesRoot;
-import static org.apache.jackrabbit.oak.commons.PathUtils.elements;
 
 import java.io.IOException;
-import java.util.List;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 
 import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
@@ -31,27 +35,20 @@ import javax.jcr.PathNotFoundException;
 import javax.jcr.RepositoryException;
 import javax.jcr.nodetype.ConstraintViolationException;
 
+import com.google.common.collect.Maps;
 import org.apache.jackrabbit.oak.api.AuthInfo;
 import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.api.ContentSession;
-import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.QueryEngine;
 import org.apache.jackrabbit.oak.api.Root;
 import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.commons.PathUtils;
-import org.apache.jackrabbit.oak.jcr.security.AccessManager;
+import org.apache.jackrabbit.oak.jcr.observation.EventFactory;
 import org.apache.jackrabbit.oak.jcr.session.RefreshStrategy;
+import org.apache.jackrabbit.oak.jcr.session.SessionStats;
 import org.apache.jackrabbit.oak.jcr.session.operation.SessionOperation;
 import org.apache.jackrabbit.oak.plugins.identifier.IdentifierManager;
-import org.apache.jackrabbit.oak.spi.commit.Editor;
-import org.apache.jackrabbit.oak.spi.commit.EditorHook;
-import org.apache.jackrabbit.oak.spi.commit.EditorProvider;
-import org.apache.jackrabbit.oak.spi.commit.FailingValidator;
-import org.apache.jackrabbit.oak.spi.commit.SubtreeExcludingValidator;
-import org.apache.jackrabbit.oak.spi.commit.Validator;
-import org.apache.jackrabbit.oak.spi.security.authorization.permission.Permissions;
-import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
-import org.apache.jackrabbit.oak.spi.state.NodeState;
+import org.apache.jackrabbit.oak.stats.StatisticManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.Marker;
@@ -69,10 +66,18 @@ public class SessionDelegate {
 
     private final Root root;
     private final IdentifierManager idManager;
+    private final SessionStats sessionStats;
+
+    private final AtomicLong readCounter;
+    private final AtomicLong readDuration;
+    private final AtomicLong writeCounter;
+    private final AtomicLong writeDuration;
 
     private boolean isAlive = true;
     private int sessionOpCount;
     private long updateCount = 0;
+
+    private String userData = null;
 
     /**
      * Create a new session delegate for a {@code ContentSession}. The refresh behaviour of the
@@ -84,16 +89,42 @@ public class SessionDelegate {
      *
      * @param contentSession  the content session
      * @param refreshStrategy  the refresh strategy used for auto refreshing this session
+     * @param statisticManager the statistics manager for tracking session operations
      */
-    public SessionDelegate(@Nonnull ContentSession contentSession, RefreshStrategy refreshStrategy) {
+    public SessionDelegate(
+            @Nonnull ContentSession contentSession,
+            @Nonnull RefreshStrategy refreshStrategy,
+            @Nonnull StatisticManager statisticManager) {
         this.contentSession = checkNotNull(contentSession);
         this.refreshStrategy = checkNotNull(refreshStrategy);
         this.root = contentSession.getLatestRoot();
         this.idManager = new IdentifierManager(root);
+        this.sessionStats = new SessionStats(this);
+        checkNotNull(statisticManager);
+        readCounter = statisticManager.getCounter(SESSION_READ_COUNTER);
+        readDuration = statisticManager.getCounter(SESSION_READ_DURATION);
+        writeCounter = statisticManager.getCounter(SESSION_WRITE_COUNTER);
+        writeDuration = statisticManager.getCounter(SESSION_WRITE_DURATION);
+    }
+
+    @Nonnull
+    public SessionStats getSessionStats() {
+        return sessionStats;
     }
 
     public void refreshAtNextAccess() {
         refreshStrategy.refreshAtNextAccess();
+    }
+
+    /**
+     * Wrap the passed {@code iterator} in an iterator that synchronizes
+     * all access to the underlying session.
+     * @param iterator  iterator to synchronized
+     * @param <T>
+     * @return  synchronized iterator
+     */
+    public <T> Iterator<T> sync(Iterator<T> iterator) {
+        return new SynchronizedIterator<T>(iterator);
     }
 
     /**
@@ -120,15 +151,24 @@ public class SessionDelegate {
             }
             sessionOperation.checkPreconditions();
         }
+        long t0 = System.nanoTime();
         try {
             sessionOpCount++;
             T result =  sessionOperation.perform();
             logOperationDetails(sessionOperation);
             return result;
         } finally {
+            long dt = System.nanoTime() - t0;
             sessionOpCount--;
             if (sessionOperation.isUpdate()) {
+                sessionStats.write();
+                writeCounter.incrementAndGet();
+                writeDuration.addAndGet(dt);
                 updateCount++;
+            } else {
+                sessionStats.read();
+                readCounter.incrementAndGet();
+                readDuration.addAndGet(dt);
             }
             if (sessionOperation.isSave()) {
                 refreshStrategy.saved();
@@ -188,6 +228,34 @@ public class SessionDelegate {
      */
     public long getUpdateCount() {
         return updateCount;
+    }
+
+    public void setUserData(String userData) {
+        this.userData = userData;
+    }
+
+    /**
+     * Commits the changes currently in the transient space.
+     * TODO: Consolidate with save().
+     *
+     * @throws CommitFailedException if the commit failed
+     */
+    public void commit() throws CommitFailedException {
+        commit(root);
+    }
+
+    /**
+     * Commits the changes applied to the given root. The user data (if any)
+     * currently attached to this session is passed as the commit message.
+     * Used both for normal save() calls and for the various
+     * direct-to-workspace operations.
+     *
+     * @throws CommitFailedException if the commit failed
+     */
+    public void commit(Root root) throws CommitFailedException {
+        Map<String, Object> info = Maps.newHashMap();
+        info.put(EventFactory.USER_DATA, userData);
+        root.commit(info);
     }
 
     public void checkProtectedNode(String path) throws RepositoryException {
@@ -294,10 +362,13 @@ public class SessionDelegate {
     }
 
     public void save() throws RepositoryException {
+        sessionStats.save();
         try {
-            root.commit();
+            commit();
         } catch (CommitFailedException e) {
-            throw newRepositoryException(e);
+            RepositoryException repositoryException = newRepositoryException(e);
+            sessionStats.failedSave(repositoryException);
+            throw repositoryException;
         }
     }
 
@@ -312,23 +383,22 @@ public class SessionDelegate {
      * @throws RepositoryException
      */
     public void save(final String path) throws RepositoryException {
+        sessionStats.save();
         if (denotesRoot(path)) {
             save();
         } else {
             try {
-                root.commit(new EditorHook(new EditorProvider() {
-                    @Override
-                    public Editor getRootEditor(NodeState before, NodeState after, NodeBuilder builder) {
-                        return new ItemSaveValidator(path);
-                    }
-                }));
+                root.commit(path);
             } catch (CommitFailedException e) {
-                throw newRepositoryException(e);
+                RepositoryException repositoryException = newRepositoryException(e);
+                sessionStats.failedSave(repositoryException);
+                throw repositoryException;
             }
         }
     }
 
     public void refresh(boolean keepChanges) {
+        sessionStats.refresh();
         if (keepChanges && hasPendingChanges()) {
             root.rebase();
         } else {
@@ -345,12 +415,13 @@ public class SessionDelegate {
 
     /**
      * Move a node
+     *
      * @param srcPath  oak path to the source node to copy
      * @param destPath  oak path to the destination
      * @param transientOp  whether or not to perform the move in transient space
      * @throws RepositoryException
      */
-    public void move(String srcPath, String destPath, boolean transientOp, AccessManager accessManager)
+    public void move(String srcPath, String destPath, boolean transientOp)
             throws RepositoryException {
 
         Root moveRoot = transientOp ? root : contentSession.getLatestRoot();
@@ -374,14 +445,13 @@ public class SessionDelegate {
             throw new PathNotFoundException(srcPath);
         }
 
-        accessManager.checkPermissions(destPath, Permissions.getString(Permissions.NODE_TYPE_MANAGEMENT));
-
         try {
             if (!moveRoot.move(srcPath, destPath)) {
                 throw new RepositoryException("Cannot move node at " + srcPath + " to " + destPath);
             }
             if (!transientOp) {
-                moveRoot.commit();
+                sessionStats.save();
+                commit(moveRoot);
                 refresh(true);
             }
         } catch (CommitFailedException e) {
@@ -419,7 +489,7 @@ public class SessionDelegate {
             String desc = ops.description();
             if(desc != null){
                 Marker sessionMarker = MarkerFactory.getMarker(this.toString());
-                operationLogger.debug(sessionMarker,desc);
+                operationLogger.debug(sessionMarker,String.format("[%s] %s",toString(),desc));
             }
         }
     }
@@ -437,49 +507,42 @@ public class SessionDelegate {
         return exception.asRepositoryException();
     }
 
+    //------------------------------------------------------------< SynchronizedIterator >---
+
     /**
-     * This validator checks that all changes are contained within the subtree
-     * rooted at a given path.
+     * This iterator delegates to a backing iterator and synchronises
+     * all calls to the backing iterator on this {@code SessionDelegate}
+     * instance.
+     *
+     * @param <T>
      */
-    private static class ItemSaveValidator extends SubtreeExcludingValidator {
+    private final class SynchronizedIterator<T> implements Iterator<T> {
+        private final Iterator<T> iterator;
 
-        /**
-         * Name of the property whose {@link #propertyChanged(PropertyState, PropertyState)} to
-         * ignore or {@code null} if no property should be ignored.
-         */
-        private final String ignorePropertyChange;
-
-        /**
-         * Create a new validator that only throws a {@link CommitFailedException} whenever
-         * there are changes not contained in the subtree rooted at {@code path}.
-         * @param path
-         */
-        public ItemSaveValidator(String path) {
-            this(new FailingValidator(CommitFailedException.UNSUPPORTED, 0,
-                    "Failed to save subtree at " + path + ". There are " +
-                            "transient modifications outside that subtree."),
-                    newArrayList(elements(path)));
-        }
-
-        private ItemSaveValidator(Validator validator, List<String> path) {
-            super(validator, path);
-            // Ignore property changes if this is the head of the path.
-            // This allows for calling save on a changed property.
-            ignorePropertyChange = path.size() == 1 ? path.get(0) : null;
+        SynchronizedIterator(Iterator<T> iterator) {
+            this.iterator = iterator;
         }
 
         @Override
-        public void propertyChanged(PropertyState before, PropertyState after)
-                throws CommitFailedException {
-            if (!before.getName().equals(ignorePropertyChange)) {
-                super.propertyChanged(before, after);
+        public boolean hasNext() {
+            synchronized (SessionDelegate.this) {
+                return iterator.hasNext();
             }
         }
 
         @Override
-        protected SubtreeExcludingValidator createValidator(
-                Validator validator, final List<String> path) {
-            return new ItemSaveValidator(validator, path);
+        public T next() {
+            synchronized (SessionDelegate.this) {
+                return iterator.next();
+            }
+        }
+
+        @Override
+        public void remove() {
+            synchronized (SessionDelegate.this) {
+                iterator.remove();
+            }
         }
     }
+
 }

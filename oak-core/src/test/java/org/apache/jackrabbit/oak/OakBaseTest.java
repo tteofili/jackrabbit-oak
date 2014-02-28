@@ -28,9 +28,6 @@ import org.junit.Before;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
-/**
- * OakBaseTest... TODO
- */
 @RunWith(Parameterized.class)
 public abstract class OakBaseTest {
 
@@ -39,6 +36,7 @@ public abstract class OakBaseTest {
         Object[][] fixtures = new Object[][] {
                 {NodeStoreFixture.MK_IMPL},
                 {NodeStoreFixture.MONGO_MK},
+                {NodeStoreFixture.MONGO_NS},
                 {NodeStoreFixture.SEGMENT_MK},
         };
         return Arrays.asList(fixtures);

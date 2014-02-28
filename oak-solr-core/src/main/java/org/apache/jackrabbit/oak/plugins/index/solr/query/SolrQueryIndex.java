@@ -17,14 +17,16 @@
 package org.apache.jackrabbit.oak.plugins.index.solr.query;
 
 import java.util.Collection;
-
+import javax.annotation.CheckForNull;
 import org.apache.jackrabbit.oak.api.PropertyValue;
+import org.apache.jackrabbit.oak.plugins.index.aggregate.NodeAggregator;
 import org.apache.jackrabbit.oak.plugins.index.solr.configuration.OakSolrConfiguration;
 import org.apache.jackrabbit.oak.spi.query.Cursor;
 import org.apache.jackrabbit.oak.spi.query.Filter;
 import org.apache.jackrabbit.oak.spi.query.IndexRow;
 import org.apache.jackrabbit.oak.spi.query.PropertyValues;
 import org.apache.jackrabbit.oak.spi.query.QueryIndex;
+import org.apache.jackrabbit.oak.spi.query.QueryIndex.FulltextQueryIndex;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.apache.solr.client.solrj.SolrQuery;
 import org.apache.solr.client.solrj.SolrServer;
@@ -37,19 +39,26 @@ import org.slf4j.LoggerFactory;
 /**
  * A Solr based {@link QueryIndex}
  */
-public class SolrQueryIndex implements QueryIndex {
+public class SolrQueryIndex implements FulltextQueryIndex {
 
-    private static final Logger log = LoggerFactory.getLogger(SolrQueryIndex.class);
+    private static final String NATIVE_SOLR_QUERY = "native*solr";
+
     public static final String TYPE = "solr";
+
+    private final Logger log = LoggerFactory.getLogger(SolrQueryIndex.class);
 
     private final String name;
     private final SolrServer solrServer;
     private final OakSolrConfiguration configuration;
 
+    private final NodeAggregator aggregator;
+
     public SolrQueryIndex(String name, SolrServer solrServer, OakSolrConfiguration configuration) {
         this.name = name;
         this.solrServer = solrServer;
         this.configuration = configuration;
+        // TODO this index should support aggregation in the same way as the Lucene index
+        this.aggregator = null;
     }
 
     @Override
@@ -63,6 +72,21 @@ public class SolrQueryIndex implements QueryIndex {
         return (filter.getPropertyRestrictions() != null ? filter.getPropertyRestrictions().size() * 0.1 : 0)
                 + (filter.getFulltextConditions() != null ? filter.getFulltextConditions().size() * 0.01 : 0)
                 + (filter.getPathRestriction() != null ? 0.2 : 0);
+//        
+//        FullTextExpression ft = filter.getFullTextConstraint();
+//        if (ft == null) {
+//            // TODO solr should only be triggered for full-text conditions
+//            // return Double.POSITIVE_INFINITY;
+//        }
+//        int cost = 10;
+//        Collection<PropertyRestriction> restrictions = filter.getPropertyRestrictions();
+//        if (restrictions != null) {
+//            cost /= 2;
+//        }
+//        if (filter.getPathRestriction() != null) {
+//            cost /= 2;
+//        }
+//        return cost;
     }
 
     @Override
@@ -77,7 +101,78 @@ public class SolrQueryIndex implements QueryIndex {
 
         StringBuilder queryBuilder = new StringBuilder();
 
-        // TODO : handle node type restriction
+        Collection<Filter.PropertyRestriction> propertyRestrictions = filter.getPropertyRestrictions();
+        if (propertyRestrictions != null && !propertyRestrictions.isEmpty()) {
+            for (Filter.PropertyRestriction pr : propertyRestrictions) {
+                // native query support
+                if (NATIVE_SOLR_QUERY.equals(pr.propertyName)) {
+                    String nativeQueryString = String.valueOf(pr.first.getValue(pr.first.getType()));
+                    if (isHttpRequest(nativeQueryString)) {
+                        // pass through the native HTTP Solr request
+                        String requestHandlerString = nativeQueryString.substring(0, nativeQueryString.indexOf('?'));
+                        if (!"select".equals(requestHandlerString)) {
+                            solrQuery.setRequestHandler(requestHandlerString);
+                        }
+                        String parameterString = nativeQueryString.substring(nativeQueryString.indexOf('?') + 1);
+                        for (String param : parameterString.split("&")) {
+                            String[] kv = param.split("=");
+                            if (kv.length != 2) {
+                                throw new RuntimeException("Unparsable native HTTP Solr query");
+                            } else {
+                                solrQuery.setParam(kv[0], kv[1]);
+                            }
+                        }
+                        return solrQuery; // every other restriction is not considered
+                    } else {
+                        queryBuilder.append(nativeQueryString);
+                    }
+                } else {
+                    if (pr.propertyName.contains("/")) {
+                        // cannot handle child-level property restrictions
+                        continue;
+                    }
+                    String first = null;
+                    if (pr.first != null) {
+                        first = partialEscape(String.valueOf(pr.first.getValue(pr.first.getType()))).toString();
+                    }
+                    String last = null;
+                    if (pr.last != null) {
+                        last = partialEscape(String.valueOf(pr.last.getValue(pr.last.getType()))).toString();
+                    }
+
+                    String prField = configuration.getFieldForPropertyRestriction(pr);
+                    CharSequence fieldName = partialEscape(prField != null ?
+                            prField : pr.propertyName);
+                    if ("jcr\\:path".equals(fieldName.toString())) {
+                        queryBuilder.append(configuration.getPathField());
+                        queryBuilder.append(':');
+                        queryBuilder.append(first);
+                    } else {
+                        queryBuilder.append(fieldName).append(':');
+                        if (pr.first != null && pr.last != null && pr.first.equals(pr.last)) {
+                            queryBuilder.append(first);
+                        } else if (pr.first == null && pr.last == null) {
+                            queryBuilder.append('*');
+                        } else if ((pr.first != null && pr.last == null) || (pr.last != null && pr.first == null) || (!pr.first.equals(pr.last))) {
+                            // TODO : need to check if this works for all field types (most likely not!)
+                            queryBuilder.append(createRangeQuery(first, last, pr.firstIncluding, pr.lastIncluding));
+                        } else if (pr.isLike) {
+                            // TODO : the current parameter substitution is not expected to work well
+                            queryBuilder.append(partialEscape(String.valueOf(pr.first.getValue(pr.first.getType())).replace('%', '*').replace('_', '?')));
+                        } else {
+                            throw new RuntimeException("[unexpected!] not handled case");
+                        }
+                    }
+                }
+                queryBuilder.append(" ");
+            }
+        }
+
+        for (String pt : filter.getPrimaryTypes()) {
+            queryBuilder.append("jcr\\:primaryType").append(':').append(partialEscape(pt));
+        }
+
+
         Filter.PathRestriction pathRestriction = filter.getPathRestriction();
         if (pathRestriction != null) {
             String path = purgePath(filter);
@@ -86,58 +181,6 @@ public class SolrQueryIndex implements QueryIndex {
                 queryBuilder.append(fieldName);
                 queryBuilder.append(':');
                 queryBuilder.append(path);
-                if (!path.equals("\\/")) {
-                    queryBuilder.append("\\/");
-                }
-                // TODO: Also handle other path restriction types
-                if (pathRestriction.equals(Filter.PathRestriction.ALL_CHILDREN)) {
-                    queryBuilder.append("*");
-                }
-                queryBuilder.append(" ");
-            }
-        }
-        Collection<Filter.PropertyRestriction> propertyRestrictions = filter.getPropertyRestrictions();
-        if (propertyRestrictions != null && !propertyRestrictions.isEmpty()) {
-            for (Filter.PropertyRestriction pr : propertyRestrictions) {
-                if (pr.propertyName.contains("/")) {
-                    // lucene cannot handle child-level property restrictions
-                    continue;
-                }
-                String first = null;
-                if (pr.first != null) {
-                    first = partialEscape(String.valueOf(pr.first.getValue(pr.first.getType()))).toString();
-                }
-                String last = null;
-                if (pr.last != null) {
-                    last = partialEscape(String.valueOf(pr.last.getValue(pr.last.getType()))).toString();
-                }
-
-                String prField = configuration.getFieldForPropertyRestriction(pr);
-                CharSequence fieldName = partialEscape(prField != null ?
-                        prField : pr.propertyName);
-                if ("jcr\\:path".equals(fieldName.toString())) {
-                    queryBuilder.append(configuration.getPathField());
-                    queryBuilder.append(':');
-                    queryBuilder.append(first);
-                    if (first!= null && !"\\/".equals(first)) {
-                        queryBuilder.append("\\/");
-                    }
-                } else {
-                    queryBuilder.append(fieldName).append(':');
-                    if (pr.first != null && pr.last != null && pr.first.equals(pr.last)) {
-                        queryBuilder.append(first);
-                    } else if (pr.first == null && pr.last == null) {
-                        queryBuilder.append('*');
-                    } else if ((pr.first != null && pr.last == null) || (pr.last != null && pr.first == null) || (!pr.first.equals(pr.last))) {
-                        // TODO : need to check if this works for all field types (most likely not!)
-                        queryBuilder.append(createRangeQuery(first, last, pr.firstIncluding, pr.lastIncluding));
-                    } else if (pr.isLike) {
-                        // TODO : the current parameter substitution is not expected to work well
-                        queryBuilder.append(partialEscape(String.valueOf(pr.first.getValue(pr.first.getType())).replace('%', '*').replace('_', '?')));
-                    } else {
-                        throw new RuntimeException("[unexpected!] not handled case");
-                    }
-                }
                 queryBuilder.append(" ");
             }
         }
@@ -146,18 +189,22 @@ public class SolrQueryIndex implements QueryIndex {
         for (String fulltextCondition : fulltextConditions) {
             queryBuilder.append(fulltextCondition).append(" ");
         }
-        if(queryBuilder.length() == 0) {
+        if (queryBuilder.length() == 0) {
             queryBuilder.append("*:*");
         }
         String escapedQuery = queryBuilder.toString();
         solrQuery.setQuery(escapedQuery);
 
         if (log.isDebugEnabled()) {
-            log.debug(new StringBuilder("JCR query: \n" + filter.getQueryStatement() + " \nhas been converted to Solr query: \n").
-                    append(solrQuery.toString()).toString());
+            log.debug("JCR query {} has been converted to Solr query {}",
+                    filter.getQueryStatement(), solrQuery.toString());
         }
 
         return solrQuery;
+    }
+
+    private boolean isHttpRequest(String nativeQueryString) {
+        return nativeQueryString.matches("\\w+\\?.*"); // the query string starts with ${handler.selector}?
     }
 
     private void setDefaults(SolrQuery solrQuery) {
@@ -172,12 +219,7 @@ public class SolrQueryIndex implements QueryIndex {
 
     private static String createRangeQuery(String first, String last, boolean firstIncluding, boolean lastIncluding) {
         // TODO : handle inclusion / exclusion of bounds
-        StringBuilder rangeQueryBuilder = new StringBuilder("[");
-        rangeQueryBuilder.append(first != null ? first : "*");
-        rangeQueryBuilder.append(" TO ");
-        rangeQueryBuilder.append(last != null ? last : "*");
-        rangeQueryBuilder.append("]");
-        return rangeQueryBuilder.toString();
+        return "[" + (first != null ? first : "*") + " TO " + (last != null ? last : "*") + "]";
     }
 
     private static String purgePath(Filter filter) {
@@ -206,7 +248,13 @@ public class SolrQueryIndex implements QueryIndex {
         Cursor cursor;
         try {
             SolrQuery query = getQuery(filter);
+            if (log.isDebugEnabled()) {
+                log.debug("sending query {}", query);
+            }
             QueryResponse queryResponse = solrServer.query(query);
+            if (log.isDebugEnabled()) {
+                log.debug("getting response {}", queryResponse);
+            }
             cursor = new SolrCursor(queryResponse);
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -243,13 +291,8 @@ public class SolrQueryIndex implements QueryIndex {
                 return new IndexRow() {
                     @Override
                     public String getPath() {
-                        String path = String.valueOf(doc.getFieldValue(
+                        return String.valueOf(doc.getFieldValue(
                                 configuration.getPathField()));
-                        if ("/".equals(path)) {
-                            return "/";
-                        } else {
-                            return path.substring(0, path.length() - 1);
-                        }
                     }
 
                     @Override
@@ -264,4 +307,12 @@ public class SolrQueryIndex implements QueryIndex {
             }
         }
     }
+
+
+    @Override
+    @CheckForNull
+    public NodeAggregator getNodeAggregator() {
+        return aggregator;
+    }
+
 }

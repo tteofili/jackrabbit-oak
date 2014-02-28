@@ -22,7 +22,7 @@ import java.util.List;
 import javax.annotation.Nonnull;
 
 import com.google.common.collect.ImmutableList;
-import org.apache.jackrabbit.oak.TestNameMapper;
+
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.plugins.memory.PropertyStates;
@@ -48,7 +48,7 @@ public class RestrictionImplTest extends AbstractAccessControlTest {
     public void before() throws Exception {
         super.before();
 
-        name = TestNameMapper.TEST_PREFIX + ":defName";
+        name = "test:defName";
         PropertyState property = createProperty(name, value);
         restriction = new RestrictionImpl(property, true);
     }
@@ -94,7 +94,7 @@ public class RestrictionImplTest extends AbstractAccessControlTest {
         // - different type
         rs.add(new RestrictionImpl(PropertyStates.createProperty(name, value, Type.STRING), true));
         // - different multi-value status
-        rs.add(new RestrictionImpl(PropertyStates.createProperty(name, ImmutableList.of(value), Type.STRINGS), true));
+        rs.add(new RestrictionImpl(PropertyStates.createProperty(name, ImmutableList.of(value), Type.NAMES), true));
         // - different name
         rs.add(new RestrictionImpl(createProperty("otherName", value), true));
         // - different value

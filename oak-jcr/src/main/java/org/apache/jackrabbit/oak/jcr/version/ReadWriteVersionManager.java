@@ -26,38 +26,40 @@ import javax.jcr.version.LabelExistsVersionException;
 import javax.jcr.version.VersionException;
 
 import org.apache.jackrabbit.oak.api.CommitFailedException;
+import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Root;
 import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.commons.PathUtils;
+import org.apache.jackrabbit.oak.jcr.delegate.SessionDelegate;
 import org.apache.jackrabbit.oak.namepath.NamePathMapper;
 import org.apache.jackrabbit.oak.plugins.nodetype.ReadOnlyNodeTypeManager;
 import org.apache.jackrabbit.oak.plugins.version.ReadOnlyVersionManager;
 import org.apache.jackrabbit.oak.util.TreeUtil;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.jackrabbit.util.ISO8601;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.base.Preconditions.checkState;
+import static org.apache.jackrabbit.JcrConstants.JCR_CREATED;
 import static org.apache.jackrabbit.JcrConstants.JCR_ISCHECKEDOUT;
 import static org.apache.jackrabbit.JcrConstants.JCR_VERSIONLABELS;
 import static org.apache.jackrabbit.oak.plugins.version.VersionConstants.REP_ADD_VERSION_LABELS;
 import static org.apache.jackrabbit.oak.plugins.version.VersionConstants.REP_REMOVE_VERSION_LABELS;
+import static org.apache.jackrabbit.oak.plugins.version.VersionConstants.REP_REMOVE_VERSION;
 
 /**
  * {@code ReadWriteVersionManager}...
  */
 public class ReadWriteVersionManager extends ReadOnlyVersionManager {
 
-    private static final Logger log = LoggerFactory.getLogger(ReadWriteVersionManager.class);
-    private final VersionStorage versionStorage;
-    private final Root workspaceRoot;
+    private final SessionDelegate sessionDelegate;
 
-    public ReadWriteVersionManager(@Nonnull VersionStorage versionStorage,
-                                   @Nonnull Root workspaceRoot) {
-        this.versionStorage = checkNotNull(versionStorage);
-        this.workspaceRoot = checkNotNull(workspaceRoot);
+    private final VersionStorage versionStorage;
+
+    public ReadWriteVersionManager(@Nonnull SessionDelegate sessionDelegate) {
+        this.sessionDelegate = sessionDelegate;
+        this.versionStorage = new VersionStorage(sessionDelegate.getRoot());
     }
 
     /**
@@ -69,7 +71,7 @@ public class ReadWriteVersionManager extends ReadOnlyVersionManager {
      * @throws RepositoryException if the session could not be refreshed
      */
     protected void refresh() throws RepositoryException {
-        // do nothing
+        sessionDelegate.refresh(true);
     }
 
     @Override
@@ -81,14 +83,14 @@ public class ReadWriteVersionManager extends ReadOnlyVersionManager {
     @Override
     @Nonnull
     protected Root getWorkspaceRoot() {
-        return workspaceRoot;
+        return sessionDelegate.getRoot();
     }
 
     @Override
     @Nonnull
     protected ReadOnlyNodeTypeManager getNodeTypeManager() {
         return ReadOnlyNodeTypeManager.getInstance(
-                workspaceRoot, NamePathMapper.DEFAULT);
+                sessionDelegate.getRoot(), NamePathMapper.DEFAULT);
     }
 
     /**
@@ -109,7 +111,7 @@ public class ReadWriteVersionManager extends ReadOnlyVersionManager {
     public Tree checkin(@Nonnull Tree versionable)
             throws RepositoryException, InvalidItemStateException,
             UnsupportedRepositoryOperationException {
-        if (workspaceRoot.hasPendingChanges()) {
+        if (sessionDelegate.hasPendingChanges()) {
             throw new InvalidItemStateException("Unable to perform checkin. " +
                     "Session has pending changes.");
         }
@@ -120,11 +122,20 @@ public class ReadWriteVersionManager extends ReadOnlyVersionManager {
         if (isCheckedOut(versionable)) {
             versionable.setProperty(JCR_ISCHECKEDOUT,
                     Boolean.FALSE, Type.BOOLEAN);
+            Tree baseVersion = getBaseVersion(versionable);
+            PropertyState created = baseVersion.getProperty(JCR_CREATED);
+            if (created != null) {
+                long c = ISO8601.parse(created.getValue(Type.DATE)).getTimeInMillis();
+                while (System.currentTimeMillis() == c) {
+                    // busy-wait for System.currentTimeMillis to change
+                    // so that the new version has a distinct timestamp
+                }
+            }
             try {
-                getWorkspaceRoot().commit();
+                sessionDelegate.commit();
                 refresh();
             } catch (CommitFailedException e) {
-                getWorkspaceRoot().refresh();
+                sessionDelegate.refresh(true);
                 throw e.asRepositoryException();
             }
         }
@@ -193,7 +204,7 @@ public class ReadWriteVersionManager extends ReadOnlyVersionManager {
         versionStorage.getTree().setProperty(REP_ADD_VERSION_LABELS,
                 Collections.singleton(labelPath), Type.PATHS);
         try {
-            checkNotNull(versionStorage).commit();
+            sessionDelegate.commit(versionStorage.getRoot());
             refresh();
         } catch (CommitFailedException e) {
             versionStorage.refresh();
@@ -217,7 +228,30 @@ public class ReadWriteVersionManager extends ReadOnlyVersionManager {
         versionStorage.getTree().setProperty(REP_REMOVE_VERSION_LABELS,
                 Collections.singleton(labelPath), Type.PATHS);
         try {
-            checkNotNull(versionStorage).commit();
+            sessionDelegate.commit(versionStorage.getRoot());
+            refresh();
+        } catch (CommitFailedException e) {
+            versionStorage.refresh();
+            throw e.asRepositoryException();
+        }
+    }
+
+    public void removeVersion(@Nonnull VersionStorage versionStorage,
+                              @Nonnull String versionHistoryOakRelPath,
+                              @Nonnull String oakVersionName)
+            throws RepositoryException {
+        Tree versionHistory = TreeUtil.getTree(versionStorage.getTree(), versionHistoryOakRelPath);
+        if (!versionHistory.exists()) {
+            throw new VersionException("Version history " + versionHistoryOakRelPath + " does not exist on this version storage");
+        }
+        Tree version = versionHistory.getChild(oakVersionName);
+        if (!version.exists()) {
+            throw new VersionException("Version " + oakVersionName + " does not exist on this version history");
+        }
+        String versionPath = PathUtils.concat(versionHistoryOakRelPath, oakVersionName);
+        versionStorage.getTree().setProperty(REP_REMOVE_VERSION, Collections.singleton(versionPath), Type.PATHS);
+        try {
+            sessionDelegate.commit(versionStorage.getRoot());
             refresh();
         } catch (CommitFailedException e) {
             versionStorage.refresh();

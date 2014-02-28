@@ -18,6 +18,8 @@
  */
 package org.apache.jackrabbit.oak.plugins.memory;
 
+import static com.google.common.base.Preconditions.checkArgument;
+
 import java.math.BigDecimal;
 import java.util.List;
 
@@ -30,8 +32,6 @@ import com.google.common.collect.Lists;
 import org.apache.jackrabbit.oak.api.Blob;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.plugins.value.Conversions.Converter;
-
-import static com.google.common.base.Preconditions.checkArgument;
 
 /**
  * Abstract base class for multi valued {@code PropertyState} implementations.
@@ -89,9 +89,9 @@ abstract class MultiPropertyState<T> extends EmptyPropertyState {
                     }
                 });
             case PropertyType.DATE:
-                return (S) Iterables.transform(values, new Function<T, Long>() {
+                return (S) Iterables.transform(values, new Function<T, String>() {
                     @Override
-                    public Long apply(T value) {
+                    public String apply(T value) {
                         return getConverter(value).toDate();
                     }
                 });
@@ -172,7 +172,7 @@ abstract class MultiPropertyState<T> extends EmptyPropertyState {
             case PropertyType.BINARY: return (S) getConverter(values.get(index)).toBinary();
             case PropertyType.LONG: return (S) (Long) getConverter(values.get(index)).toLong();
             case PropertyType.DOUBLE: return (S) (Double) getConverter(values.get(index)).toDouble();
-            case PropertyType.DATE: return (S) getConverter(values.get(index)).toDate();
+            case PropertyType.DATE: return (S) getConverter(values.get(index)).toString();
             case PropertyType.BOOLEAN: return (S) (Boolean) getConverter(values.get(index)).toBoolean();
             case PropertyType.NAME: return (S) getConverter(values.get(index)).toString();
             case PropertyType.PATH: return (S) getConverter(values.get(index)).toString();

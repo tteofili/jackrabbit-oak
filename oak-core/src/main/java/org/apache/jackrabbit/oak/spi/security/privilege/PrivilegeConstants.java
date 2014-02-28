@@ -69,6 +69,11 @@ public interface PrivilegeConstants {
     String NT_REP_PRIVILEGE = "rep:Privilege";
 
     /**
+     * Node type names associated with privilege content
+     */
+    Set<String> PRIVILEGE_NODETYPE_NAMES = ImmutableSet.of(NT_REP_PRIVILEGES, NT_REP_PRIVILEGE);
+
+    /**
      * Name of the privilege definition property that stores the internal representation
      * of this privilege.
      */
@@ -211,4 +216,11 @@ public interface PrivilegeConstants {
      * @since OAK 1.0
      */
     String REP_REMOVE_PROPERTIES = "rep:removeProperties";
+
+    /**
+     * Internal (oak) name of the rep:indexDefinitionManagement privilege
+     *
+     * @since OAK 1.0
+     */
+    String REP_INDEX_DEFINITION_MANAGEMENT = "rep:indexDefinitionManagement";
 }

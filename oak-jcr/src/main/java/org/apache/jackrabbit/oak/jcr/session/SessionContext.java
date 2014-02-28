@@ -16,11 +16,17 @@
  */
 package org.apache.jackrabbit.oak.jcr.session;
 
+import static com.google.common.base.Preconditions.checkNotNull;
+import static com.google.common.collect.Sets.newHashSet;
+import static com.google.common.collect.Sets.newTreeSet;
+
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicLong;
+
 import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
 import javax.jcr.PathNotFoundException;
@@ -37,7 +43,7 @@ import org.apache.jackrabbit.api.security.JackrabbitAccessControlManager;
 import org.apache.jackrabbit.api.security.authorization.PrivilegeManager;
 import org.apache.jackrabbit.api.security.principal.PrincipalManager;
 import org.apache.jackrabbit.api.security.user.UserManager;
-import org.apache.jackrabbit.oak.api.ContentSession;
+import org.apache.jackrabbit.api.stats.RepositoryStatistics.Type;
 import org.apache.jackrabbit.oak.jcr.delegate.AccessControlManagerDelegator;
 import org.apache.jackrabbit.oak.jcr.delegate.JackrabbitAccessControlManagerDelegator;
 import org.apache.jackrabbit.oak.jcr.delegate.NodeDelegate;
@@ -48,12 +54,9 @@ import org.apache.jackrabbit.oak.jcr.delegate.UserManagerDelegator;
 import org.apache.jackrabbit.oak.jcr.observation.ObservationManagerImpl;
 import org.apache.jackrabbit.oak.jcr.security.AccessManager;
 import org.apache.jackrabbit.oak.jcr.session.operation.SessionOperation;
-import org.apache.jackrabbit.oak.namepath.LocalNameMapper;
 import org.apache.jackrabbit.oak.namepath.NamePathMapper;
 import org.apache.jackrabbit.oak.namepath.NamePathMapperImpl;
-import org.apache.jackrabbit.oak.plugins.name.Namespaces;
 import org.apache.jackrabbit.oak.plugins.nodetype.ReadOnlyNodeTypeManager;
-import org.apache.jackrabbit.oak.plugins.observation.Observable;
 import org.apache.jackrabbit.oak.plugins.value.ValueFactoryImpl;
 import org.apache.jackrabbit.oak.spi.security.SecurityConfiguration;
 import org.apache.jackrabbit.oak.spi.security.SecurityProvider;
@@ -64,12 +67,9 @@ import org.apache.jackrabbit.oak.spi.security.privilege.PrivilegeConfiguration;
 import org.apache.jackrabbit.oak.spi.security.user.UserConfiguration;
 import org.apache.jackrabbit.oak.spi.whiteboard.Whiteboard;
 import org.apache.jackrabbit.oak.spi.xml.ProtectedItemImporter;
+import org.apache.jackrabbit.oak.stats.StatisticManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import static com.google.common.base.Preconditions.checkNotNull;
-import static com.google.common.collect.Sets.newHashSet;
-import static com.google.common.collect.Sets.newTreeSet;
 
 /**
  * Instances of this class are passed to all JCR implementation classes
@@ -79,11 +79,10 @@ import static com.google.common.collect.Sets.newTreeSet;
  */
 public class SessionContext implements NamePathMapper {
 
-    /** Logger instance */
-    private static final Logger log =
-            LoggerFactory.getLogger(SessionContext.class);
+    private static final Logger log = LoggerFactory.getLogger(SessionContext.class);
 
     private final Repository repository;
+    private final StatisticManager statisticManager;
     private final SecurityProvider securityProvider;
     private final Whiteboard whiteboard;
     private final Map<String, Object> attributes;
@@ -96,6 +95,7 @@ public class SessionContext implements NamePathMapper {
     private SessionImpl session = null;
     private WorkspaceImpl workspace = null;
 
+    private PermissionProvider permissionProvider;
     private AccessControlManager accessControlManager;
     private AccessManager accessManager;
     private PrincipalManager principalManager;
@@ -110,31 +110,23 @@ public class SessionContext implements NamePathMapper {
     private final Set<String> sessionScopedLocks = newHashSet();
 
     public SessionContext(
-            @Nonnull Repository repository, @Nonnull SecurityProvider securityProvider,
-            @Nonnull Whiteboard whiteboard, @Nonnull Map<String, Object> attributes,
-            @Nonnull final SessionDelegate delegate) {
+            @Nonnull Repository repository, @Nonnull StatisticManager statisticManager,
+            @Nonnull SecurityProvider securityProvider, @Nonnull Whiteboard whiteboard,
+            @Nonnull Map<String, Object> attributes, @Nonnull final SessionDelegate delegate) {
         this.repository = checkNotNull(repository);
+        this.statisticManager = statisticManager;
         this.securityProvider = checkNotNull(securityProvider);
         this.whiteboard = checkNotNull(whiteboard);
         this.attributes = checkNotNull(attributes);
         this.delegate = checkNotNull(delegate);
+        SessionStats sessionStats = delegate.getSessionStats();
+        sessionStats.setAttributes(attributes);
 
-        this.namespaces = new SessionNamespaces(this);
-        LocalNameMapper nameMapper = new LocalNameMapper() {
-            @Override
-            protected Map<String, String> getNamespaceMap() {
-                return Namespaces.getNamespaceMap(delegate.getRoot().getTree("/"));
-            }
-
-            @Override
-            protected Map<String, String> getSessionLocalMappings() {
-                return namespaces.getSessionLocalMappings();
-            }
-        };
+        this.namespaces = new SessionNamespaces(delegate.getRoot());
         this.namePathMapper = new NamePathMapperImpl(
-                nameMapper, delegate.getIdManager());
+                namespaces, delegate.getIdManager());
         this.valueFactory = new ValueFactoryImpl(
-                delegate.getRoot().getBlobFactory(), namePathMapper);
+                delegate.getRoot(), namePathMapper);
     }
 
     public final Map<String, Object> getAttributes() {
@@ -178,6 +170,16 @@ public class SessionContext implements NamePathMapper {
     }
 
     @Nonnull
+    public StatisticManager getStatisticManager() {
+        return statisticManager;
+    }
+
+    @Nonnull
+    public AtomicLong getCounter(Type type) {
+        return statisticManager.getCounter(type);
+    }
+
+    @Nonnull
     public Repository getRepository() {
         return repository;
     }
@@ -189,6 +191,12 @@ public class SessionContext implements NamePathMapper {
 
     SessionNamespaces getNamespaces() {
         return namespaces;
+    }
+
+    @Override
+    @Nonnull
+    public Map<String, String> getSessionLocalMappings() {
+        return namespaces.getSessionLocalMappings();
     }
 
     public ValueFactory getValueFactory() {
@@ -253,15 +261,11 @@ public class SessionContext implements NamePathMapper {
     @Nonnull
     public ObservationManager getObservationManager() throws UnsupportedRepositoryOperationException {
         if (observationManager == null) {
-            ContentSession contentSession = getSessionDelegate().getContentSession();
-            if (!(contentSession instanceof Observable)) {
-                throw new UnsupportedRepositoryOperationException("Observation not supported for session " + contentSession);
-            }
-
             observationManager = new ObservationManagerImpl(
-                delegate,
+                this,
                 ReadOnlyNodeTypeManager.getInstance(delegate.getRoot(), namePathMapper),
-                namePathMapper, whiteboard);
+                getPermissionProvider(),
+                whiteboard);
         }
         return observationManager;
     }
@@ -286,11 +290,6 @@ public class SessionContext implements NamePathMapper {
     @CheckForNull
     public String getOakNameOrNull(@Nonnull String jcrName) {
         return namePathMapper.getOakNameOrNull(jcrName);
-    }
-
-    @Override
-    public boolean hasSessionLocalMappings() {
-        return !namespaces.getSessionLocalMappings().isEmpty();
     }
 
     @Override
@@ -330,7 +329,13 @@ public class SessionContext implements NamePathMapper {
         if (oakPath != null) {
             return oakPath;
         } else {
-            throw new RepositoryException("Invalid name or path: " + jcrPath);
+            // check if the path is an SNS path with an index > 1 and throw a PathNotFoundException instead (see OAK-1216)
+            if (getOakPathKeepIndex(jcrPath) != null) {
+                throw new PathNotFoundException(jcrPath);
+            } else {
+                throw new RepositoryException("Invalid name or path: " + jcrPath);
+            }
+
         }
     }
 
@@ -355,10 +360,7 @@ public class SessionContext implements NamePathMapper {
     @Nonnull
     public AccessManager getAccessManager() throws RepositoryException {
         if (accessManager == null) {
-            PermissionProvider pp = checkNotNull(securityProvider)
-                    .getConfiguration(AuthorizationConfiguration.class)
-                    .getPermissionProvider(delegate.getRoot(), delegate.getAuthInfo().getPrincipals());
-            accessManager = new AccessManager(delegate, pp);
+            accessManager = new AccessManager(delegate, getPermissionProvider());
         }
         return accessManager;
     }
@@ -413,6 +415,18 @@ public class SessionContext implements NamePathMapper {
     @Nonnull
     private <T> T getConfig(Class<T> clss) {
         return securityProvider.getConfiguration(clss);
+    }
+
+    private PermissionProvider getPermissionProvider() {
+        // FIXME: review whether 'auto-refresh' should rather be made on a wrapping
+        //        permission provider instead of doing this in the access manager
+        //        since this permission provider is also passed to the observation manager.
+        if (permissionProvider == null) {
+            permissionProvider = checkNotNull(securityProvider)
+                    .getConfiguration(AuthorizationConfiguration.class)
+                    .getPermissionProvider(delegate.getRoot(), delegate.getWorkspaceName(), delegate.getAuthInfo().getPrincipals());
+        }
+        return permissionProvider;
     }
 
 }

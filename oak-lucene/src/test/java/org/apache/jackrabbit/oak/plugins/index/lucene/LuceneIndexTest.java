@@ -33,6 +33,7 @@ import org.apache.jackrabbit.oak.plugins.index.IndexUpdateProvider;
 import org.apache.jackrabbit.oak.query.ast.Operator;
 import org.apache.jackrabbit.oak.query.ast.SelectorImpl;
 import org.apache.jackrabbit.oak.query.index.FilterImpl;
+import org.apache.jackrabbit.oak.spi.commit.CommitInfo;
 import org.apache.jackrabbit.oak.spi.commit.EditorHook;
 import org.apache.jackrabbit.oak.spi.query.Cursor;
 import org.apache.jackrabbit.oak.spi.query.Filter;
@@ -67,7 +68,7 @@ public class LuceneIndexTest {
         builder.setProperty("foo", "bar");
         NodeState after = builder.getNodeState();
 
-        NodeState indexed = HOOK.processCommit(before, after);
+        NodeState indexed = HOOK.processCommit(before, after, CommitInfo.EMPTY);
 
         QueryIndex queryIndex = new LuceneIndex(analyzer, null);
         FilterImpl filter = createFilter(NT_BASE);
@@ -93,7 +94,7 @@ public class LuceneIndexTest {
 
         NodeState after = builder.getNodeState();
 
-        NodeState indexed = HOOK.processCommit(before, after);
+        NodeState indexed = HOOK.processCommit(before, after, CommitInfo.EMPTY);
 
         QueryIndex queryIndex = new LuceneIndex(analyzer, null);
         FilterImpl filter = createFilter(NT_BASE);
@@ -125,7 +126,7 @@ public class LuceneIndexTest {
 
         NodeState after = builder.getNodeState();
 
-        NodeState indexed = HOOK.processCommit(before, after);
+        NodeState indexed = HOOK.processCommit(before, after,CommitInfo.EMPTY);
 
         QueryIndex queryIndex = new LuceneIndex(analyzer, null);
         FilterImpl filter = createFilter(NT_BASE);
@@ -145,8 +146,7 @@ public class LuceneIndexTest {
         NodeState types = system.getChildNode(JCR_NODE_TYPES);
         NodeState type = types.getChildNode(nodeTypeName);
         SelectorImpl selector = new SelectorImpl(type, nodeTypeName);
-        return new FilterImpl(selector, "SELECT * FROM [" + nodeTypeName + "]",
-                null);
+        return new FilterImpl(selector, "SELECT * FROM [" + nodeTypeName + "]");
     }
 
     @Test
@@ -163,6 +163,15 @@ public class LuceneIndexTest {
                 LuceneIndex.tokenize("first. second", analyzer));
         assertEquals(ImmutableList.of("first", "second"),
                 LuceneIndex.tokenize("first.second", analyzer));
+
+        assertEquals(ImmutableList.of("hello", "world"),
+                LuceneIndex.tokenize("hello-world", analyzer));
+        assertEquals(ImmutableList.of("hello", "wor*"),
+                LuceneIndex.tokenize("hello-wor*", analyzer));
+        assertEquals(ImmutableList.of("*llo", "world"),
+                LuceneIndex.tokenize("*llo-world", analyzer));
+        assertEquals(ImmutableList.of("*llo", "wor*"),
+                LuceneIndex.tokenize("*llo-wor*", analyzer));
     }
 
 }

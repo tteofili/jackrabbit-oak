@@ -16,18 +16,21 @@
  */
 package org.apache.jackrabbit.oak.security.authorization.permission;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 import org.apache.jackrabbit.JcrConstants;
 import org.apache.jackrabbit.api.security.user.Group;
 import org.apache.jackrabbit.api.security.user.UserManager;
 import org.apache.jackrabbit.oak.AbstractSecurityTest;
 import org.apache.jackrabbit.oak.api.ContentSession;
 import org.apache.jackrabbit.oak.api.Root;
+import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.core.ImmutableRoot;
-import org.apache.jackrabbit.oak.core.TreeTypeProvider;
 import org.apache.jackrabbit.oak.plugins.name.NamespaceConstants;
 import org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants;
 import org.apache.jackrabbit.oak.spi.security.ConfigurationParameters;
@@ -35,11 +38,14 @@ import org.apache.jackrabbit.oak.spi.security.authorization.AuthorizationConfigu
 import org.apache.jackrabbit.oak.spi.security.authorization.accesscontrol.AccessControlConstants;
 import org.apache.jackrabbit.oak.spi.security.authorization.permission.PermissionConstants;
 import org.apache.jackrabbit.oak.spi.security.authorization.permission.PermissionProvider;
-import org.apache.jackrabbit.oak.spi.security.authorization.permission.ReadStatus;
+import org.apache.jackrabbit.oak.spi.security.authorization.permission.Permissions;
+import org.apache.jackrabbit.oak.spi.security.authorization.permission.RepositoryPermission;
+import org.apache.jackrabbit.oak.spi.security.authorization.permission.TreePermission;
 import org.apache.jackrabbit.oak.spi.security.privilege.PrivilegeConstants;
 import org.apache.jackrabbit.oak.util.NodeUtil;
 import org.junit.Test;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
@@ -47,14 +53,15 @@ import static org.junit.Assert.assertTrue;
 public class PermissionProviderImplTest extends AbstractSecurityTest implements AccessControlConstants {
 
     private static final String ADMINISTRATOR_GROUP = "administrators";
-    private static final String[] READ_PATHS = new String[] {
+    private static final Set<String> READ_PATHS = ImmutableSet.of(
             NamespaceConstants.NAMESPACES_PATH,
             NodeTypeConstants.NODE_TYPES_PATH,
             PrivilegeConstants.PRIVILEGES_PATH,
             "/test"
-    };
+    );
 
     private Group adminstrators;
+    private AuthorizationConfiguration config;
 
     @Override
     public void before() throws Exception {
@@ -64,6 +71,7 @@ public class PermissionProviderImplTest extends AbstractSecurityTest implements 
         UserManager uMgr = getUserManager(root);
         adminstrators = uMgr.createGroup(ADMINISTRATOR_GROUP);
         root.commit();
+        config = getSecurityProvider().getConfiguration(AuthorizationConfiguration.class);
     }
 
     @Override
@@ -92,22 +100,103 @@ public class PermissionProviderImplTest extends AbstractSecurityTest implements 
         return ConfigurationParameters.of(ImmutableMap.of(AuthorizationConfiguration.NAME, acConfig));
     }
 
+    private PermissionProvider createPermissionProvider(ContentSession session) {
+        return config.getPermissionProvider(session.getLatestRoot(), session.getWorkspaceName(), session.getAuthInfo().getPrincipals());
+    }
+
+    @Test
+    public void testHasPrivileges() throws Exception {
+        ContentSession testSession = createTestSession();
+        try {
+            PermissionProvider pp = createPermissionProvider(testSession);
+
+            assertTrue(pp.hasPrivileges(null));
+            assertTrue(pp.hasPrivileges(null, new String[0]));
+            assertFalse(pp.hasPrivileges(null, PrivilegeConstants.JCR_WORKSPACE_MANAGEMENT));
+        } finally {
+            testSession.close();
+        }
+    }
+
     @Test
     public void testReadPath() throws Exception {
         ContentSession testSession = createTestSession();
         try {
             Root r = testSession.getLatestRoot();
-            Root immutableRoot = new ImmutableRoot(r, TreeTypeProvider.EMPTY);
+            PermissionProvider pp = createPermissionProvider(testSession);
 
-            PermissionProvider pp = new PermissionProviderImpl(testSession.getLatestRoot(), testSession.getAuthInfo().getPrincipals(), getSecurityProvider());
-
-            assertFalse(r.getTree("/").exists());
-            assertSame(ReadStatus.DENY_THIS, pp.getReadStatus(immutableRoot.getTree("/"), null));
+            Tree tree = r.getTree("/");
+            assertFalse(tree.exists());
+            assertFalse(pp.getTreePermission(tree, TreePermission.EMPTY).canRead());
 
             for (String path : READ_PATHS) {
-                assertTrue(r.getTree(path).exists());
-                assertSame(ReadStatus.ALLOW_ALL_REGULAR, pp.getReadStatus(immutableRoot.getTree(path), null));
+                tree = r.getTree(path);
+                assertTrue(tree.exists());
+                assertTrue(pp.getTreePermission(tree, TreePermission.EMPTY).canRead());
             }
+        } finally {
+            testSession.close();
+        }
+    }
+
+    @Test
+    public void testIsGrantedForReadPaths() throws Exception {
+        ContentSession testSession = createTestSession();
+        try {
+            PermissionProvider pp = createPermissionProvider(testSession) ;
+            for (String path : READ_PATHS) {
+                assertTrue(pp.isGranted(path, Permissions.getString(Permissions.READ)));
+                assertTrue(pp.isGranted(path, Permissions.getString(Permissions.READ_NODE)));
+                assertTrue(pp.isGranted(path + '/' + JcrConstants.JCR_PRIMARYTYPE, Permissions.getString(Permissions.READ_PROPERTY)));
+                assertFalse(pp.isGranted(path, Permissions.getString(Permissions.READ_ACCESS_CONTROL)));
+            }
+
+            for (String path : READ_PATHS) {
+                Tree tree = root.getTree(path);
+                assertTrue(pp.isGranted(tree, null, Permissions.READ));
+                assertTrue(pp.isGranted(tree, null, Permissions.READ_NODE));
+                assertTrue(pp.isGranted(tree, tree.getProperty(JcrConstants.JCR_PRIMARYTYPE), Permissions.READ_PROPERTY));
+                assertFalse(pp.isGranted(tree, null, Permissions.READ_ACCESS_CONTROL));
+            }
+
+            RepositoryPermission rp = pp.getRepositoryPermission();
+            assertFalse(rp.isGranted(Permissions.READ));
+            assertFalse(rp.isGranted(Permissions.READ_NODE));
+            assertFalse(rp.isGranted(Permissions.READ_PROPERTY));
+            assertFalse(rp.isGranted(Permissions.READ_ACCESS_CONTROL));
+        } finally {
+            testSession.close();
+        }
+    }
+
+    @Test
+    public void testGetPrivilegesForReadPaths() throws Exception {
+        ContentSession testSession = createTestSession();
+        try {
+            PermissionProvider pp = createPermissionProvider(testSession) ;
+            for (String path : READ_PATHS) {
+                Tree tree = root.getTree(path);
+                assertEquals(Collections.singleton(PrivilegeConstants.JCR_READ), pp.getPrivileges(tree));
+            }
+            assertEquals(Collections.<String>emptySet(), pp.getPrivileges(null));
+        } finally {
+            testSession.close();
+        }
+    }
+
+    @Test
+    public void testHasPrivilegesForReadPaths() throws Exception {
+        ContentSession testSession = createTestSession();
+        try {
+            PermissionProvider pp = createPermissionProvider(testSession) ;
+            for (String path : READ_PATHS) {
+                Tree tree = root.getTree(path);
+                assertTrue(pp.hasPrivileges(tree, PrivilegeConstants.JCR_READ));
+                assertTrue(pp.hasPrivileges(tree, PrivilegeConstants.REP_READ_NODES));
+                assertTrue(pp.hasPrivileges(tree, PrivilegeConstants.REP_READ_PROPERTIES));
+                assertFalse(pp.hasPrivileges(tree, PrivilegeConstants.JCR_READ_ACCESS_CONTROL));
+            }
+            assertFalse(pp.hasPrivileges(null, PrivilegeConstants.JCR_READ));
         } finally {
             testSession.close();
         }
@@ -121,16 +210,17 @@ public class PermissionProviderImplTest extends AbstractSecurityTest implements 
         ContentSession testSession = createTestSession();
         try {
             Root r = testSession.getLatestRoot();
-            Root immutableRoot = new ImmutableRoot(r, TreeTypeProvider.EMPTY);
+            Root immutableRoot = new ImmutableRoot(r);
 
-            PermissionProvider pp = new PermissionProviderImpl(testSession.getLatestRoot(), testSession.getAuthInfo().getPrincipals(), getSecurityProvider());
-
+            PermissionProvider pp = createPermissionProvider(testSession) ;
             assertTrue(r.getTree("/").exists());
-            assertSame(ReadStatus.ALLOW_ALL, pp.getReadStatus(immutableRoot.getTree("/"), null));
+            TreePermission tp = pp.getTreePermission(immutableRoot.getTree("/"), TreePermission.EMPTY);
+            assertSame(TreePermission.ALL, tp);
 
             for (String path : READ_PATHS) {
-                assertTrue(r.getTree(path).exists());
-                assertSame(ReadStatus.ALLOW_ALL, pp.getReadStatus(immutableRoot.getTree(path), null));
+                Tree tree = r.getTree(path);
+                assertTrue(tree.exists());
+                assertSame(TreePermission.ALL, pp.getTreePermission(tree, TreePermission.EMPTY));
             }
         } finally {
             testSession.close();

@@ -20,6 +20,9 @@ import static com.google.common.base.Preconditions.checkNotNull;
 
 import java.util.Collections;
 import java.util.Map;
+import java.util.concurrent.Callable;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
@@ -32,20 +35,31 @@ import javax.jcr.SimpleCredentials;
 import javax.jcr.Value;
 import javax.security.auth.login.LoginException;
 
+import com.google.common.util.concurrent.FutureCallback;
+import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.ListenableScheduledFuture;
+import com.google.common.util.concurrent.ListeningScheduledExecutorService;
+import com.google.common.util.concurrent.MoreExecutors;
 import org.apache.jackrabbit.api.JackrabbitRepository;
 import org.apache.jackrabbit.api.security.authentication.token.TokenCredentials;
 import org.apache.jackrabbit.commons.SimpleValueFactory;
 import org.apache.jackrabbit.oak.api.ContentRepository;
 import org.apache.jackrabbit.oak.api.ContentSession;
+import org.apache.jackrabbit.oak.api.jmx.SessionMBean;
+import org.apache.jackrabbit.oak.stats.StatisticManager;
+import org.apache.jackrabbit.oak.jcr.delegate.SessionDelegate;
 import org.apache.jackrabbit.oak.jcr.session.RefreshStrategy;
 import org.apache.jackrabbit.oak.jcr.session.RefreshStrategy.LogOnce;
 import org.apache.jackrabbit.oak.jcr.session.RefreshStrategy.Once;
 import org.apache.jackrabbit.oak.jcr.session.RefreshStrategy.ThreadSynchronising;
 import org.apache.jackrabbit.oak.jcr.session.RefreshStrategy.Timed;
 import org.apache.jackrabbit.oak.jcr.session.SessionContext;
-import org.apache.jackrabbit.oak.jcr.delegate.SessionDelegate;
+import org.apache.jackrabbit.oak.jcr.session.SessionStats;
 import org.apache.jackrabbit.oak.spi.security.SecurityProvider;
+import org.apache.jackrabbit.oak.spi.whiteboard.Registration;
 import org.apache.jackrabbit.oak.spi.whiteboard.Whiteboard;
+import org.apache.jackrabbit.oak.spi.whiteboard.WhiteboardUtils;
+import org.apache.jackrabbit.oak.util.GenericDescriptors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -67,11 +81,14 @@ public class RepositoryImpl implements JackrabbitRepository {
      */
     public static final String REFRESH_INTERVAL = "oak.refresh-interval";
 
-    private final Descriptors descriptors;
+    private final GenericDescriptors descriptors;
     private final ContentRepository contentRepository;
     protected final Whiteboard whiteboard;
     private final SecurityProvider securityProvider;
     private final ThreadLocal<Long> threadSaveCount;
+    private final ListeningScheduledExecutorService scheduledExecutor =
+            MoreExecutors.listeningDecorator(Executors.newSingleThreadScheduledExecutor());
+    private final StatisticManager statisticManager;
 
     public RepositoryImpl(@Nonnull ContentRepository contentRepository,
                           @Nonnull Whiteboard whiteboard,
@@ -81,6 +98,7 @@ public class RepositoryImpl implements JackrabbitRepository {
         this.securityProvider = checkNotNull(securityProvider);
         this.threadSaveCount = new ThreadLocal<Long>();
         this.descriptors = determineDescriptors();
+        this.statisticManager = new StatisticManager(whiteboard, scheduledExecutor);
     }
 
     //---------------------------------------------------------< Repository >---
@@ -205,18 +223,49 @@ public class RepositoryImpl implements JackrabbitRepository {
 
             RefreshStrategy refreshStrategy = createRefreshStrategy(refreshInterval);
             ContentSession contentSession = contentRepository.login(credentials, workspaceName);
-            SessionDelegate sessionDelegate = new SessionDelegate(contentSession, refreshStrategy);
+            SessionDelegate sessionDelegate = createSessionDelegate(refreshStrategy, contentSession);
             SessionContext context = createSessionContext(
-                    securityProvider, createAttributes(refreshInterval), sessionDelegate);
+                    statisticManager, securityProvider, createAttributes(refreshInterval), sessionDelegate);
             return context.getSession();
         } catch (LoginException e) {
             throw new javax.jcr.LoginException(e.getMessage(), e);
         }
     }
 
+    private SessionDelegate createSessionDelegate(
+            final RefreshStrategy refreshStrategy,
+            final ContentSession contentSession) {
+        return new SessionDelegate(contentSession, refreshStrategy, statisticManager) {
+            // Defer session MBean registration to avoid cluttering the
+            // JMX name space with short lived sessions
+            ListenableScheduledFuture<Registration> registration = scheduledExecutor.schedule(
+                    new RegistrationCallable(getSessionStats(), whiteboard), 1, TimeUnit.MINUTES);
+
+            @Override
+            public void logout() {
+                // Cancel session MBean registration and unregister MBean
+                // if registration succeed before the cancellation
+                registration.cancel(false);
+                Futures.addCallback(registration, new FutureCallback<Registration>() {
+                    @Override
+                    public void onSuccess(Registration registration) {
+                        registration.unregister();
+                    }
+
+                    @Override
+                    public void onFailure(Throwable t) {
+                    }
+                });
+
+                super.logout();
+            }
+        };
+    }
+
     @Override
     public void shutdown() {
-        // empty
+        statisticManager.dispose();
+        scheduledExecutor.shutdown();
     }
 
     //------------------------------------------------------------< internal >---
@@ -229,9 +278,9 @@ public class RepositoryImpl implements JackrabbitRepository {
      * @return session context
      */
     protected SessionContext createSessionContext(
-            SecurityProvider securityProvider, Map<String, Object> attributes,
-            SessionDelegate delegate) {
-        return new SessionContext(this, securityProvider, whiteboard, attributes, delegate);
+            StatisticManager statisticManager, SecurityProvider securityProvider,
+            Map<String, Object> attributes, SessionDelegate delegate) {
+        return new SessionContext(this, statisticManager, securityProvider, whiteboard, attributes, delegate);
     }
 
     /**
@@ -239,15 +288,15 @@ public class RepositoryImpl implements JackrabbitRepository {
      * by the subclasses to add more values to the descriptor
      * @return  repository descriptor
      */
-    protected Descriptors determineDescriptors() {
-        return new Descriptors(new SimpleValueFactory());
+    protected GenericDescriptors determineDescriptors() {
+        return new JcrDescriptorsImpl(contentRepository.getDescriptors(), new SimpleValueFactory());
     }
 
     /**
      * Returns the descriptors associated with the repository
      * @return repository descriptor
      */
-    protected Descriptors getDescriptors() {
+    protected GenericDescriptors getDescriptors() {
         return descriptors;
     }
 
@@ -323,8 +372,22 @@ public class RepositoryImpl implements JackrabbitRepository {
                 : new RefreshStrategy[] {
                 new Once(false),
                 new Timed(refreshInterval),
-                new LogOnce(60),
                 new ThreadSynchronising(threadSaveCount)});
     }
 
+    private static class RegistrationCallable implements Callable<Registration> {
+        private final SessionStats sessionStats;
+        private final Whiteboard whiteboard;
+
+        public RegistrationCallable(SessionStats sessionStats, Whiteboard whiteboard) {
+            this.sessionStats = sessionStats;
+            this.whiteboard = whiteboard;
+        }
+
+        @Override
+        public Registration call() throws Exception {
+            return WhiteboardUtils.registerMBean(whiteboard, SessionMBean.class,
+                    sessionStats, SessionMBean.TYPE, sessionStats.toString());
+        }
+    }
 }

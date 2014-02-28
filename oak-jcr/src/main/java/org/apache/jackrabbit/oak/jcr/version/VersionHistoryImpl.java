@@ -18,8 +18,8 @@ package org.apache.jackrabbit.oak.jcr.version;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Iterator;
 import java.util.List;
-
 import javax.jcr.AccessDeniedException;
 import javax.jcr.NodeIterator;
 import javax.jcr.ReferentialIntegrityException;
@@ -32,16 +32,15 @@ import javax.jcr.version.VersionHistory;
 import javax.jcr.version.VersionIterator;
 
 import com.google.common.base.Function;
-import com.google.common.collect.Iterators;
-
 import org.apache.jackrabbit.commons.iterator.FrozenNodeIteratorAdapter;
 import org.apache.jackrabbit.commons.iterator.VersionIteratorAdapter;
-import org.apache.jackrabbit.oak.jcr.session.NodeImpl;
-import org.apache.jackrabbit.oak.jcr.session.SessionContext;
 import org.apache.jackrabbit.oak.jcr.delegate.VersionDelegate;
 import org.apache.jackrabbit.oak.jcr.delegate.VersionHistoryDelegate;
+import org.apache.jackrabbit.oak.jcr.session.NodeImpl;
+import org.apache.jackrabbit.oak.jcr.session.SessionContext;
 import org.apache.jackrabbit.oak.jcr.session.operation.SessionOperation;
-import org.apache.jackrabbit.oak.util.TODO;
+
+import static com.google.common.collect.Iterators.transform;
 
 /**
  * {@code VersionHistoryImpl}...
@@ -83,13 +82,14 @@ public class VersionHistoryImpl extends NodeImpl<VersionHistoryDelegate>
         return perform(new SessionOperation<VersionIterator>() {
             @Override
             public VersionIterator perform() throws RepositoryException {
-                return new VersionIteratorAdapter(Iterators.transform(
-                        dlg.getAllLinearVersions(), new Function<VersionDelegate, Version>() {
-                    @Override
-                    public Version apply(VersionDelegate input) {
-                        return new VersionImpl(input, sessionContext);
-                    }
-                }));
+                Iterator<Version> versions = transform(dlg.getAllLinearVersions(),
+                        new Function<VersionDelegate, Version>() {
+                            @Override
+                            public Version apply(VersionDelegate input) {
+                                return new VersionImpl(input, sessionContext);
+                            }
+                        });
+                return new VersionIteratorAdapter(sessionDelegate.sync(versions));
             }
         });
     }
@@ -99,13 +99,14 @@ public class VersionHistoryImpl extends NodeImpl<VersionHistoryDelegate>
         return perform(new SessionOperation<VersionIterator>() {
             @Override
             public VersionIterator perform() throws RepositoryException {
-                return new VersionIteratorAdapter(Iterators.transform(
-                        dlg.getAllVersions(), new Function<VersionDelegate, Version>() {
+                Iterator<Version> versions = transform(dlg.getAllVersions(),
+                        new Function<VersionDelegate, Version>() {
                     @Override
                     public Version apply(VersionDelegate input) {
                         return new VersionImpl(input, sessionContext);
                     }
-                }));
+                });
+                return new VersionIteratorAdapter(sessionDelegate.sync(versions));
             }
         });
     }
@@ -219,10 +220,18 @@ public class VersionHistoryImpl extends NodeImpl<VersionHistoryDelegate>
     }
 
     @Override
-    public void removeVersion(String versionName)
+    public void removeVersion(final String versionName)
             throws ReferentialIntegrityException, AccessDeniedException,
             UnsupportedRepositoryOperationException, VersionException,
             RepositoryException {
-        TODO.unimplemented().doNothing();
+
+        perform(new SessionOperation<Void>(true) {
+            @Override
+            public Void perform() throws RepositoryException {
+                String oakName = sessionContext.getOakName(versionName);
+                dlg.removeVersion(oakName);
+                return null;
+            }
+        });
     }
 }

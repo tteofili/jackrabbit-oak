@@ -16,20 +16,13 @@
  */
 package org.apache.jackrabbit.oak.plugins.index.solr.index;
 
-import static com.google.common.collect.Sets.newHashSet;
-import static junit.framework.Assert.assertEquals;
-import static junit.framework.Assert.assertFalse;
-import static junit.framework.Assert.assertNotNull;
-import static junit.framework.Assert.assertTrue;
-import static org.apache.jackrabbit.JcrConstants.JCR_PRIMARYTYPE;
-import static org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState.EMPTY_NODE;
-
 import java.util.Set;
-
 import org.apache.jackrabbit.oak.plugins.index.solr.SolrBaseTest;
 import org.apache.jackrabbit.oak.plugins.index.solr.query.SolrQueryIndex;
 import org.apache.jackrabbit.oak.query.ast.Operator;
+import org.apache.jackrabbit.oak.query.ast.SelectorImpl;
 import org.apache.jackrabbit.oak.query.index.FilterImpl;
+import org.apache.jackrabbit.oak.spi.commit.CommitInfo;
 import org.apache.jackrabbit.oak.spi.query.Cursor;
 import org.apache.jackrabbit.oak.spi.query.Filter;
 import org.apache.jackrabbit.oak.spi.query.IndexRow;
@@ -39,6 +32,15 @@ import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.junit.Test;
 
+import static com.google.common.collect.Sets.newHashSet;
+import static junit.framework.Assert.assertEquals;
+import static junit.framework.Assert.assertFalse;
+import static junit.framework.Assert.assertNotNull;
+import static junit.framework.Assert.assertTrue;
+import static org.apache.jackrabbit.JcrConstants.JCR_PRIMARYTYPE;
+import static org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState.EMPTY_NODE;
+import static org.mockito.Mockito.mock;
+
 public class SolrIndexHookIT extends SolrBaseTest {
 
     @Test
@@ -47,17 +49,17 @@ public class SolrIndexHookIT extends SolrBaseTest {
 
         NodeBuilder builder = root.builder();
         builder.child("oak:index").child("solr")
-                .setProperty(JCR_PRIMARYTYPE, "oak:queryIndexDefinition")
+                .setProperty(JCR_PRIMARYTYPE, "oak:QueryIndexDefinition")
                 .setProperty("type", "solr");
 
         NodeState before = builder.getNodeState();
         builder.child("newnode").setProperty("prop", "val");
         NodeState after = builder.getNodeState();
 
-        NodeState indexed = hook.processCommit(before, after);
+        NodeState indexed = hook.processCommit(before, after, CommitInfo.EMPTY);
 
         QueryIndex queryIndex = new SolrQueryIndex("solr", server, configuration);
-        FilterImpl filter = new FilterImpl(null, null);
+        FilterImpl filter = new FilterImpl(mock(SelectorImpl.class), "");
         filter.restrictPath("/newnode", Filter.PathRestriction.EXACT);
         filter.restrictProperty("prop", Operator.EQUAL,
                 PropertyValues.newString("val"));
@@ -76,17 +78,17 @@ public class SolrIndexHookIT extends SolrBaseTest {
 
         NodeBuilder builder = root.builder();
         builder.child("oak:index").child("solr")
-                .setProperty(JCR_PRIMARYTYPE, "oak:queryIndexDefinition")
+                .setProperty(JCR_PRIMARYTYPE, "oak:QueryIndexDefinition")
                 .setProperty("type", "solr");
 
         NodeState before = builder.getNodeState();
         builder.setProperty("foo", "bar");
         NodeState after = builder.getNodeState();
 
-        NodeState indexed = hook.processCommit(before, after);
+        NodeState indexed = hook.processCommit(before, after, CommitInfo.EMPTY);
 
         QueryIndex queryIndex = new SolrQueryIndex("solr", server, configuration);
-        FilterImpl filter = new FilterImpl(null, null);
+        FilterImpl filter = new FilterImpl(mock(SelectorImpl.class), "");
         filter.restrictProperty("foo", Operator.EQUAL,
                 PropertyValues.newString("bar"));
         Cursor cursor = queryIndex.query(filter, indexed);
@@ -106,7 +108,7 @@ public class SolrIndexHookIT extends SolrBaseTest {
 
         NodeBuilder builder = root.builder();
         builder.child("oak:index").child("solr")
-                .setProperty(JCR_PRIMARYTYPE, "oak:queryIndexDefinition")
+                .setProperty(JCR_PRIMARYTYPE, "oak:QueryIndexDefinition")
                 .setProperty("type", "solr");
 
         NodeState before = builder.getNodeState();
@@ -117,10 +119,10 @@ public class SolrIndexHookIT extends SolrBaseTest {
 
         NodeState after = builder.getNodeState();
 
-        NodeState indexed = hook.processCommit(before, after);
+        NodeState indexed = hook.processCommit(before, after, CommitInfo.EMPTY);
 
         QueryIndex queryIndex = new SolrQueryIndex("solr", server, configuration);
-        FilterImpl filter = new FilterImpl(null, null);
+        FilterImpl filter = new FilterImpl(mock(SelectorImpl.class), "");
         filter.restrictProperty("foo", Operator.EQUAL,
                 PropertyValues.newString("bar"));
         filter.restrictFulltextCondition("bar");

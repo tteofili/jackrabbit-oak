@@ -16,14 +16,8 @@
  */
 package org.apache.jackrabbit.oak.plugins.index.lucene;
 
-import static java.util.Arrays.asList;
-import static junit.framework.Assert.assertEquals;
-import static org.apache.jackrabbit.oak.api.Type.STRINGS;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
-
+import com.google.common.collect.ImmutableList;
 import java.util.Iterator;
-
 import org.apache.jackrabbit.oak.Oak;
 import org.apache.jackrabbit.oak.api.ContentRepository;
 import org.apache.jackrabbit.oak.api.Tree;
@@ -32,7 +26,11 @@ import org.apache.jackrabbit.oak.query.AbstractQueryTest;
 import org.apache.jackrabbit.oak.spi.security.OpenSecurityProvider;
 import org.junit.Test;
 
-import com.google.common.collect.ImmutableList;
+import static java.util.Arrays.asList;
+import static junit.framework.Assert.assertEquals;
+import static org.apache.jackrabbit.oak.api.Type.STRINGS;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 /**
  * Tests the query engine using the default index implementation: the
@@ -148,6 +146,21 @@ public class LuceneIndexQueryTest extends AbstractQueryTest {
     }
 
     @Test
+    public void containsDash() throws Exception {
+        Tree test = root.getTree("/").addChild("test");
+        test.addChild("a").setProperty("name", "hello-wor");
+        test.addChild("b").setProperty("name", "hello-world");
+        test.addChild("c").setProperty("name", "hello");
+        root.commit();
+
+        assertQuery("/jcr:root//*[jcr:contains(., 'hello-wor*')]", "xpath",
+                ImmutableList.of("/test/a", "/test/b"));
+        assertQuery("/jcr:root//*[jcr:contains(., '*hello-wor*')]", "xpath",
+                ImmutableList.of("/test/a", "/test/b"));
+
+    }
+
+    @Test
     public void containsPath() throws Exception {
 
         Tree test = root.getTree("/").addChild("test");
@@ -198,6 +211,46 @@ public class LuceneIndexQueryTest extends AbstractQueryTest {
         assertQuery(stmt.toString(), "xpath",
                 ImmutableList.of("/match_on_path1234"));
 
+    }
+
+    /**
+     * OAK-1208 property existence constraints break queries
+     */
+    @Test
+    public void testOAK1208() throws Exception {
+        Tree t = root.getTree("/").addChild("containsWithMultipleOr");
+        Tree one = t.addChild("one");
+        one.setProperty("p", "dam/smartcollection");
+        one.setProperty("t", "media");
+
+        Tree two = t.addChild("two");
+        two.setProperty("p", "dam/collection");
+        two.setProperty("t", "media");
+
+        Tree three = t.addChild("three");
+        three.setProperty("p", "dam/hits");
+        three.setProperty("t", "media");
+
+        root.commit();
+
+        StringBuffer stmt = new StringBuffer();
+        stmt.append("//*[jcr:contains(., 'media') and (@p = 'dam/smartcollection' or @p = 'dam/collection') ]");
+        assertQuery(stmt.toString(), "xpath",
+                ImmutableList.of(one.getPath(), two.getPath()));
+    }
+
+    @Test
+    public void testNativeLuceneQuery() throws Exception {
+        String nativeQueryString = "select [jcr:path] from [nt:base] where native('lucene', 'title:foo -title:bar')";
+        Tree test = root.getTree("/").addChild("test");
+        test.addChild("a").setProperty("title", "foo");
+        test.addChild("b").setProperty("title", "bar");
+        root.commit();
+
+        Iterator<String> result = executeQuery(nativeQueryString, "JCR-SQL2").iterator();
+        assertTrue(result.hasNext());
+        assertEquals("/test/a", result.next());
+        assertFalse(result.hasNext());
     }
 
 }

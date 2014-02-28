@@ -28,7 +28,7 @@ import javax.net.SocketFactory;
 
 import org.apache.jackrabbit.mk.api.MicroKernel;
 import org.apache.jackrabbit.mk.api.MicroKernelException;
-import org.apache.jackrabbit.mk.util.IOUtils;
+import org.apache.jackrabbit.oak.commons.IOUtils;
 
 /**
  * Client exposing a {@code MicroKernel} interface, that "remotes" commands
@@ -317,8 +317,41 @@ public class Client implements MicroKernel {
 
     @Nonnull
     @Override
-    public String rebase(@Nonnull String branchRevisionId, String newBaseRevisionId) {
-        throw new UnsupportedOperationException();
+    public String rebase(@Nonnull String branchRevisionId, String newBaseRevisionId)
+            throws MicroKernelException {
+
+        Request request = null;
+
+        try {
+            request = createRequest("rebase");
+            request.addParameter("branch_revision_id", branchRevisionId);
+            request.addParameter("new_base_revision_id", newBaseRevisionId);
+            return request.getString();
+        } catch (IOException e) {
+            throw toMicroKernelException(e);
+        } finally {
+            IOUtils.closeQuietly(request);
+        }
+    }
+
+    @Nonnull
+    @Override
+    public String reset(@Nonnull String branchRevisionId,
+                        @Nonnull String ancestorRevisionId)
+            throws MicroKernelException {
+
+        Request request = null;
+
+        try {
+            request = createRequest("reset");
+            request.addParameter("branch_revision_id", branchRevisionId);
+            request.addParameter("ancestor_revision_id", ancestorRevisionId);
+            return request.getString();
+        } catch (IOException e) {
+            throw toMicroKernelException(e);
+        } finally {
+            IOUtils.closeQuietly(request);
+        }
     }
 
     @Override

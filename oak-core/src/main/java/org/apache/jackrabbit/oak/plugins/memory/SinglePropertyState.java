@@ -18,14 +18,14 @@
  */
 package org.apache.jackrabbit.oak.plugins.memory;
 
+import static com.google.common.base.Preconditions.checkArgument;
+import static java.util.Collections.singleton;
+
 import javax.annotation.Nonnull;
 import javax.jcr.PropertyType;
 
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.plugins.value.Conversions.Converter;
-
-import static com.google.common.base.Preconditions.checkArgument;
-import static java.util.Collections.singleton;
 
 /**
  * Abstract base class for single valued {@code PropertyState} implementations.

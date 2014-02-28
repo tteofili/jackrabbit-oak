@@ -17,10 +17,13 @@
 package org.apache.jackrabbit.oak.jcr.security.user;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
+import java.util.TreeSet;
+
 import javax.jcr.RepositoryException;
 import javax.jcr.UnsupportedRepositoryOperationException;
 
@@ -29,8 +32,8 @@ import org.apache.jackrabbit.api.security.user.AuthorizableExistsException;
 import org.apache.jackrabbit.api.security.user.Group;
 import org.apache.jackrabbit.api.security.user.User;
 import org.apache.jackrabbit.test.NotExecutableException;
+import org.apache.jackrabbit.util.Text;
 import org.junit.Before;
-import org.junit.Ignore;
 import org.junit.Test;
 
 /**
@@ -179,6 +182,20 @@ public class GroupTest extends AbstractUserTest {
         for (Iterator<Authorizable> it = group.getDeclaredMembers(); it.hasNext(); ) {
             assertTrue("All declared members must also be part of the Iterator " +
                     "returned upon getMembers()", l.contains(it.next().getID()));
+        }
+    }
+
+    @Test
+    public void testGetDeclaredMembersWithMemberRemoved() throws RepositoryException {
+        String uid = user.getID();
+        user.remove();
+        superuser.save();
+        user = null;
+
+        Iterator<Authorizable> it = group.getDeclaredMembers();
+        while (it.hasNext()) {
+            Authorizable a = it.next();
+            assertFalse(uid.equals(a.getID()));
         }
     }
 
@@ -715,4 +732,64 @@ public class GroupTest extends AbstractUserTest {
             assertFalse(groupId.equals(it.next().getID()));
         }
     }
+
+    @Test
+    public void testMoveUserToOtherGroup() throws Exception {
+        User user1  = userMgr.createUser(createUserId(), "p");
+        User user2  = userMgr.createUser(createUserId(), "p");
+        Group grp1 = userMgr.createGroup(createGroupId());
+        Group grp2 = userMgr.createGroup(createGroupId());
+
+        grp1.addMember(user1);
+        grp1.addMember(user2);
+        superuser.save();
+
+        checkDeclaredMembers(grp1, user1.getID(), user2.getID());
+        checkDeclaredMembers(grp2);
+        checkDeclaredMemberOf(user1, grp1.getID());
+        checkDeclaredMemberOf(user2, grp1.getID());
+
+        grp1.removeMember(user1);
+        superuser.save();
+
+        checkDeclaredMembers(grp1, user2.getID());
+        checkDeclaredMembers(grp2);
+        checkDeclaredMemberOf(user1);
+        checkDeclaredMemberOf(user2, grp1.getID());
+
+        grp2.addMember(user1);
+        superuser.save();
+
+        checkDeclaredMembers(grp1, user2.getID());
+        checkDeclaredMembers(grp2, user1.getID());
+        checkDeclaredMemberOf(user1, grp2.getID());
+        checkDeclaredMemberOf(user2, grp1.getID());
+    }
+
+    private void checkDeclaredMembers(Group grp, String ... ids) throws RepositoryException {
+        TreeSet<String> members = new TreeSet<String>();
+        Iterator<Authorizable> iter = grp.getMembers();
+        while (iter.hasNext()) {
+            members.add(iter.next().getID());
+        }
+        Arrays.sort(ids);
+        assertEquals(
+                "Group members",
+                Text.implode(ids, ","),
+                Text.implode(members.toArray(new String[members.size()]), ","));
+    }
+
+    private void checkDeclaredMemberOf(Authorizable auth, String ... ids) throws RepositoryException {
+        TreeSet<String> members = new TreeSet<String>();
+        Iterator<Group> iter = auth.declaredMemberOf();
+        while (iter.hasNext()) {
+            members.add(iter.next().getID());
+        }
+        Arrays.sort(ids);
+        assertEquals(
+                "Group memberships",
+                Text.implode(ids, ","),
+                Text.implode(members.toArray(new String[members.size()]), ","));
+    }
+
 }

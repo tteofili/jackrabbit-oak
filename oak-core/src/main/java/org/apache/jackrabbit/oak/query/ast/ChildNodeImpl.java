@@ -79,20 +79,24 @@ public class ChildNodeImpl extends ConstraintImpl {
         }
         // the parent of the root is the root,
         // so we need to special case this
-        return !PathUtils.denotesRoot(local) && PathUtils.getParentPath(local).equals(parentPath);
+        if (PathUtils.denotesRoot(local)) {
+            return false;
+        }
+        String path = normalizePath(parentPath);
+        return PathUtils.getParentPath(local).equals(path);
     }
 
     @Override
     public void restrict(FilterImpl f) {
-        if (selector == f.getSelector()) {
-            String path = validateAndNormalizePath(parentPath);
+        if (selector.equals(f.getSelector())) {
+            String path = normalizePath(parentPath);
             f.restrictPath(path, Filter.PathRestriction.DIRECT_CHILDREN);
         }
     }
 
     @Override
     public void restrictPushDown(SelectorImpl s) {
-        if (s == selector) {
+        if (s.equals(selector)) {
             s.restrictSelector(this);
         }
     }

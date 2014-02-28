@@ -16,21 +16,9 @@
  */
 package org.apache.jackrabbit.oak.kernel;
 
-import static org.apache.jackrabbit.oak.api.Type.BINARIES;
-import static org.apache.jackrabbit.oak.api.Type.BOOLEANS;
-import static org.apache.jackrabbit.oak.api.Type.LONGS;
-import static org.apache.jackrabbit.oak.api.Type.STRINGS;
-
-import java.io.IOException;
-
-import javax.jcr.PropertyType;
-
-import org.apache.jackrabbit.mk.json.JsopBuilder;
-import org.apache.jackrabbit.oak.api.Blob;
+import org.apache.jackrabbit.oak.commons.json.JsopBuilder;
 import org.apache.jackrabbit.oak.api.PropertyState;
-import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.commons.PathUtils;
-import org.apache.jackrabbit.oak.spi.state.ChildNodeEntry;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.apache.jackrabbit.oak.spi.state.NodeStateDiff;
 
@@ -39,40 +27,50 @@ import org.apache.jackrabbit.oak.spi.state.NodeStateDiff;
  */
 public class JsopDiff implements NodeStateDiff {
 
-    private final KernelNodeStore store;
+    private final JsopBuilder jsop;
 
-    protected final JsopBuilder jsop;
+    private final BlobSerializer blobs;
 
-    protected final String path;
+    private final String path;
 
-    JsopDiff(KernelNodeStore store, JsopBuilder jsop, String path) {
-        this.store = store;
+    private final int depth;
+
+    private JsopDiff(
+            JsopBuilder jsop, BlobSerializer blobs, String path, int depth) {
         this.jsop = jsop;
-        this.path = path;
+        this.blobs = blobs;
+
+        if (path != null) {
+            this.path = path;
+        } else {
+            this.path = "/";
+        }
+
+        if (depth >= 0) {
+            this.depth = depth;
+        } else {
+            this.depth = Integer.MAX_VALUE;
+        }
     }
 
-    JsopDiff(KernelNodeStore store) {
-        this(store, new JsopBuilder(), "/");
+    JsopDiff(BlobSerializer blobs, String path) {
+        this(new JsopBuilder(), blobs, path, Integer.MAX_VALUE);
+    }
+
+    JsopDiff(BlobSerializer blobs) {
+        this(blobs, "/");
+    }
+
+    JsopDiff(String path, int depth) {
+        this(new JsopBuilder(), new BlobSerializer(), path, depth);
+    }
+
+    JsopDiff() {
+        this("/", Integer.MAX_VALUE);
     }
 
     /**
-     * Create the jsop diff between {@code before} and {@code after} and
-     * stores binaries to {@code store}.
-     *
-     * @param store   node store for storing binaries.
-     * @param before  before node state
-     * @param after   after node state
-     * @param path    base path
-     * @param jsop    builder to feed in the diff
-     */
-    public static void diffToJsop(
-            KernelNodeStore store, NodeState before, NodeState after,
-            String path, JsopBuilder jsop) {
-        after.compareAgainstBaseState(before, new JsopDiff(store, jsop, path));
-    }
-
-    /**
-     * Create the jsop diff between {@code before} and {@code after} for
+     * Create the JSOP diff between {@code before} and {@code after} for
      * debugging purposes.
      * <p>
      * This method does not store binaries but returns them inlined
@@ -84,34 +82,9 @@ public class JsopDiff implements NodeStateDiff {
      * @return  jsop diff between {@code before} and {@code after}
      */
     public static String diffToJsop(NodeState before, NodeState after) {
-        class ToStringDiff extends JsopDiff {
-            public ToStringDiff() {
-                super(null);
-            }
-
-            public ToStringDiff(JsopBuilder jsop, String path) {
-                super(null, jsop, path);
-            }
-
-            @Override
-            protected String writeBlob(Blob blob) {
-                return "Blob{" + blob + '}';
-            }
-
-            @Override
-            protected JsopDiff createChildDiff(JsopBuilder jsop, String path) {
-                return new ToStringDiff(jsop, path);
-            }
-        }
-
-        JsopDiff diff = new ToStringDiff();
+        JsopDiff diff = new JsopDiff();
         after.compareAgainstBaseState(before, diff);
         return diff.toString();
-    }
-
-
-    protected JsopDiff createChildDiff(JsopBuilder jsop, String path) {
-        return new JsopDiff(store, jsop, path);
     }
 
     //-----------------------------------------------------< NodeStateDiff >--
@@ -119,14 +92,14 @@ public class JsopDiff implements NodeStateDiff {
     @Override
     public boolean propertyAdded(PropertyState after) {
         jsop.tag('^').key(buildPath(after.getName()));
-        toJson(after, jsop);
+        new JsonSerializer(jsop, blobs).serialize(after);
         return true;
     }
 
     @Override
     public boolean propertyChanged(PropertyState before, PropertyState after) {
         jsop.tag('^').key(buildPath(after.getName()));
-        toJson(after, jsop);
+        new JsonSerializer(jsop, blobs).serialize(after);
         return true;
     }
 
@@ -139,7 +112,7 @@ public class JsopDiff implements NodeStateDiff {
     @Override
     public boolean childNodeAdded(String name, NodeState after) {
         jsop.tag('+').key(buildPath(name));
-        toJson(after, jsop);
+        new JsonSerializer(jsop, blobs).serialize(after);
         return true;
     }
 
@@ -151,8 +124,15 @@ public class JsopDiff implements NodeStateDiff {
 
     @Override
     public boolean childNodeChanged(String name, NodeState before, NodeState after) {
-        String path = buildPath(name);
-        after.compareAgainstBaseState(before, createChildDiff(jsop, path));
+        if (depth > 0) {
+            after.compareAgainstBaseState(before, new JsopDiff(
+                    jsop, blobs, buildPath(name), depth - 1));
+        } else {
+            jsop.tag('^');
+            jsop.key(buildPath(name));
+            jsop.object();
+            jsop.endObject();
+        }
         return true;
     }
 
@@ -167,84 +147,6 @@ public class JsopDiff implements NodeStateDiff {
 
     protected String buildPath(String name) {
         return PathUtils.concat(path, name);
-    }
-
-    private void toJson(NodeState nodeState, JsopBuilder jsop) {
-        jsop.object();
-        for (PropertyState property : nodeState.getProperties()) {
-            jsop.key(property.getName());
-            toJson(property, jsop);
-        }
-        for (ChildNodeEntry child : nodeState.getChildNodeEntries()) {
-            jsop.key(child.getName());
-            toJson(child.getNodeState(), jsop);
-        }
-        jsop.endObject();
-    }
-
-    private void toJson(PropertyState propertyState, JsopBuilder jsop) {
-        if (propertyState.isArray()) {
-            Type<?> type = propertyState.getType();
-            if (type == STRINGS || propertyState.count() > 0) {
-                jsop.array();
-                toJsonValue(propertyState, jsop);
-                jsop.endArray();
-            } else {
-                jsop.value(TypeCodes.EMPTY_ARRAY
-                        + PropertyType.nameFromValue(type.tag()));
-            }
-        } else {
-            toJsonValue(propertyState, jsop);
-        }
-    }
-
-    private void toJsonValue(PropertyState property, JsopBuilder jsop) {
-        int type = property.getType().tag();
-        switch (type) {
-            case PropertyType.BOOLEAN:
-                for (boolean value : property.getValue(BOOLEANS)) {
-                    jsop.value(value);
-                }
-                break;
-            case PropertyType.LONG:
-                for (long value : property.getValue(LONGS)) {
-                    jsop.value(value);
-                }
-                break;
-            case PropertyType.BINARY:
-                for (Blob value : property.getValue(BINARIES)) {
-                    String binId = writeBlob(value);
-                    jsop.value(TypeCodes.encode(type, binId));
-                }
-                break;
-            default:
-                for (String value : property.getValue(STRINGS)) {
-                    if (PropertyType.STRING != type || TypeCodes.split(value) != -1) {
-                        value = TypeCodes.encode(type, value);
-                    }
-                    jsop.value(value);
-                }
-                break;
-        }
-    }
-
-    /**
-     * Make sure {@code blob} is persisted and return the id of the persisted blob.
-     * @param blob  blob to persist
-     * @return  id of the persisted blob
-     */
-    protected String writeBlob(Blob blob) {
-        KernelBlob kernelBlob;
-        if (blob instanceof KernelBlob) {
-            kernelBlob = (KernelBlob) blob;
-        } else {
-            try {
-                kernelBlob = store.createBlob(blob.getNewStream());
-            } catch (IOException e) {
-                throw new IllegalStateException(e);
-            }
-        }
-        return kernelBlob.getBinaryID();
     }
 
 }

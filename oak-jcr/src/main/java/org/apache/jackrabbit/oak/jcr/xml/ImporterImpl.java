@@ -45,8 +45,10 @@ import org.apache.jackrabbit.oak.api.Root;
 import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.commons.PathUtils;
+import org.apache.jackrabbit.oak.jcr.delegate.SessionDelegate;
 import org.apache.jackrabbit.oak.jcr.security.AccessManager;
 import org.apache.jackrabbit.oak.jcr.session.SessionContext;
+import org.apache.jackrabbit.oak.jcr.session.WorkspaceImpl;
 import org.apache.jackrabbit.oak.plugins.identifier.IdentifierManager;
 import org.apache.jackrabbit.oak.plugins.memory.PropertyStates;
 import org.apache.jackrabbit.oak.plugins.nodetype.DefinitionProvider;
@@ -78,15 +80,15 @@ public class ImporterImpl implements Importer {
     /**
      * There are two IdentifierManagers used.
      *
-     * baseStateIdManager - Associated with the initial root on which
-     *   no modifications are performed
+     * 1) currentStateIdManager - Associated with current root on which all import
+     *    operations are being performed
      *
-     * currentStateIdManager - Associated with current root on which all import
-     *   operations are being performed
-     *
+     * 2) baseStateIdManager - Associated with the initial root on which
+     *    no modifications are performed
      */
-    private final IdentifierManager baseStateIdManager;
     private final IdentifierManager currentStateIdManager;
+    private final IdentifierManager baseStateIdManager;
+
     private final EffectiveNodeTypeProvider effectiveNodeTypeProvider;
     private final DefinitionProvider definitionProvider;
 
@@ -126,7 +128,6 @@ public class ImporterImpl implements Importer {
     public ImporterImpl(String absPath,
                         SessionContext sessionContext,
                         Root root,
-                        Root initialRoot,
                         int uuidBehavior,
                         boolean isWorkspaceImport) throws RepositoryException {
         if (!PathUtils.isAbsolute(absPath)) {
@@ -137,33 +138,35 @@ public class ImporterImpl implements Importer {
             throw new RepositoryException("Invalid name or path: " + absPath);
         }
 
-        if (isWorkspaceImport && sessionContext.getSessionDelegate().hasPendingChanges()) {
+        SessionDelegate sd = sessionContext.getSessionDelegate();
+        if (isWorkspaceImport && sd.hasPendingChanges()) {
             throw new RepositoryException("Pending changes on session. Cannot run workspace import.");
         }
 
         this.uuidBehavior = uuidBehavior;
-        userID = sessionContext.getSessionDelegate().getAuthInfo().getUserID();
+        userID = sd.getAuthInfo().getUserID();
 
         importTargetTree = root.getTree(absPath);
         if (!importTargetTree.exists()) {
             throw new PathNotFoundException(absPath);
         }
 
-        // TODO: review usage of write-root and object obtained from session-context (OAK-931)
-        VersionManager vMgr = sessionContext.getWorkspace().getVersionManager();
+        WorkspaceImpl wsp = sessionContext.getWorkspace();
+        VersionManager vMgr = wsp.getVersionManager();
         if (!vMgr.isCheckedOut(absPath)) {
             throw new VersionException("Target node is checked in.");
         }
-        if (sessionContext.getWorkspace().getLockManager().isLocked(absPath)) {
+        if (importTargetTree.getStatus() != Tree.Status.NEW && wsp.getLockManager().isLocked(absPath)) {
             throw new LockException("Target node is locked.");
         }
+        effectiveNodeTypeProvider = wsp.getNodeTypeManager();
+        definitionProvider = wsp.getNodeTypeManager();
         ntTypesRoot = root.getTree(NODE_TYPES_PATH);
+
         accessManager = sessionContext.getAccessManager();
-        baseStateIdManager = new IdentifierManager(initialRoot);
+
         currentStateIdManager = new IdentifierManager(root);
-        effectiveNodeTypeProvider = sessionContext.getWorkspace().getNodeTypeManager();
-        definitionProvider = sessionContext.getWorkspace().getNodeTypeManager();
-        // TODO: end
+        baseStateIdManager = new IdentifierManager(sd.getContentSession().getLatestRoot());
 
         refTracker = new ReferenceChangeTracker();
 
@@ -403,7 +406,12 @@ public class ImporterImpl implements Importer {
                     conflicting = currentStateIdManager.getTree(id);
                 }
 
-                if (conflicting != null && conflicting.exists()) {
+                // resolve conflict if there is one or force
+                // conflict resolution when behavior is IMPORT_UUID_CREATE_NEW.
+                // the latter will always create a new UUID even if no
+                // conflicting node exists. see OAK-1244
+                if ((conflicting != null && conflicting.exists())
+                        || uuidBehavior == ImportUUIDBehavior.IMPORT_UUID_CREATE_NEW) {
                     // resolve uuid conflict
                     tree = resolveUUIDConflict(parent, conflicting, id, nodeInfo);
                     if (tree == null) {
@@ -540,7 +548,7 @@ public class ImporterImpl implements Importer {
         }
     }
 
-    private class Reference {
+    private static final class Reference {
 
         private final Tree tree;
         private final PropertyState property;

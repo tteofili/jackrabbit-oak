@@ -17,11 +17,12 @@
 package org.apache.jackrabbit.oak.plugins.version;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
-import static org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState.EMPTY_NODE;
-
 import javax.annotation.Nonnull;
+
+import com.google.common.collect.ImmutableSet;
 
 import org.apache.jackrabbit.JcrConstants;
 import org.apache.jackrabbit.oak.api.CommitFailedException;
@@ -29,14 +30,15 @@ import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.commons.PathUtils;
-import org.apache.jackrabbit.oak.core.ImmutableTree;
+import org.apache.jackrabbit.oak.plugins.tree.ImmutableTree;
 import org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants;
 import org.apache.jackrabbit.oak.spi.commit.CommitHook;
+import org.apache.jackrabbit.oak.spi.commit.CommitInfo;
 import org.apache.jackrabbit.oak.spi.state.DefaultNodeStateDiff;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 
-import com.google.common.collect.ImmutableSet;
+import static org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState.EMPTY_NODE;
 
 /**
  * Commit hook which is responsible for storing the path of the versionable
@@ -54,7 +56,9 @@ public class VersionablePathHook implements CommitHook {
 
     @Nonnull
     @Override
-    public NodeState processCommit(final NodeState before, NodeState after) throws CommitFailedException {
+    public NodeState processCommit(
+            NodeState before, NodeState after, CommitInfo info)
+            throws CommitFailedException {
         NodeBuilder rootBuilder = after.builder();
         NodeBuilder vsRoot = rootBuilder.child(NodeTypeConstants.JCR_SYSTEM).child(NodeTypeConstants.JCR_VERSIONSTORAGE);
         ReadWriteVersionManager vMgr = new ReadWriteVersionManager(vsRoot, rootBuilder);
@@ -83,11 +87,32 @@ public class VersionablePathHook implements CommitHook {
 
         @Override
         public boolean propertyAdded(PropertyState after) {
-            if (VersionConstants.JCR_VERSIONHISTORY.equals(after.getName())
-                    && nodeAfter.isVersionable(versionManager)) {
+            return setVersionablePath(after);
+        }
+
+        @Override
+        public boolean propertyChanged(PropertyState before, PropertyState after) {
+            return setVersionablePath(after);
+        }
+
+        @Override
+        public boolean childNodeAdded(String name, NodeState after) {
+            return childNodeChanged(name, EMPTY_NODE, after);
+        }
+
+        @Override
+        public boolean childNodeChanged(
+                String name, NodeState before, NodeState after) {
+            Node node = new Node(nodeAfter, name);
+            return after.compareAgainstBaseState(
+                    before, new Diff(versionManager, node, exceptions));
+        }
+
+        private boolean setVersionablePath(PropertyState after) {
+            if (JcrConstants.JCR_VERSIONHISTORY.equals(after.getName()) && nodeAfter.isVersionable(versionManager)) {
                 NodeBuilder vhBuilder;
                 try {
-                    vhBuilder = versionManager.getOrCreateVersionHistory(nodeAfter.builder);
+                    vhBuilder = versionManager.getOrCreateVersionHistory(nodeAfter.builder, Collections.EMPTY_MAP);
                 } catch (CommitFailedException e) {
                     exceptions.add(e);
                     // stop further comparison
@@ -102,22 +127,9 @@ public class VersionablePathHook implements CommitHook {
                 }
 
                 String versionablePath = nodeAfter.path;
-                vhBuilder.setProperty(workspaceName, versionablePath);
+                vhBuilder.setProperty(workspaceName, versionablePath, Type.PATH);
             }
             return true;
-        }
-
-        @Override
-        public boolean childNodeAdded(String name, NodeState after) {
-            return childNodeChanged(name, EMPTY_NODE, after);
-        }
-
-        @Override
-        public boolean childNodeChanged(
-                String name, NodeState before, NodeState after) {
-            Node node = new Node(nodeAfter, name);
-            return after.compareAgainstBaseState(
-                    before, new Diff(versionManager, node, exceptions));
         }
     }
 

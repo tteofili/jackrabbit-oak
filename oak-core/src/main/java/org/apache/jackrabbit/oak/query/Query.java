@@ -19,10 +19,8 @@ import java.util.List;
 import org.apache.jackrabbit.oak.api.PropertyValue;
 import org.apache.jackrabbit.oak.api.Result;
 import org.apache.jackrabbit.oak.api.Tree;
-import org.apache.jackrabbit.oak.namepath.NamePathMapper;
 import org.apache.jackrabbit.oak.query.ast.ColumnImpl;
 import org.apache.jackrabbit.oak.query.ast.OrderingImpl;
-import org.apache.jackrabbit.oak.spi.state.NodeState;
 
 /**
  * A "select" or "union" query.
@@ -33,11 +31,7 @@ import org.apache.jackrabbit.oak.spi.state.NodeState;
  */
 public interface Query {
 
-    void setRootTree(Tree rootTree);
-
-    void setRootState(NodeState rootState);
-
-    void setNamePathMapper(NamePathMapper namePathMapper);
+    void setExecutionContext(ExecutionContext context);
 
     void setLimit(long limit);
 
@@ -45,16 +39,14 @@ public interface Query {
 
     void bindValue(String key, PropertyValue value);
 
-    void setQueryEngine(QueryEngineImpl queryEngineImpl);
-
-    void prepare();
+    void setTraversalEnabled(boolean traversalEnabled);
 
     Result executeQuery();
 
     List<String> getBindVariableNames();
 
     ColumnImpl[] getColumns();
-    
+
     int getColumnIndex(String columnName);
 
     String[] getSelectorNames();
@@ -69,16 +61,34 @@ public interface Query {
 
     void setMeasure(boolean measure);
 
-    void init();
-
     void setOrderings(OrderingImpl[] orderings);
     
+    /**
+     * Initialize the query. This will 'wire' selectors into constraints bind
+     * variables into expressions. It will also simplify expressions if
+     * possible, but will not prepare the query.
+     */
+    void init();
+    
+    /**
+     * Prepare the query. The cost is estimated and the execution plan is
+     * decided here.
+     */
+    void prepare();
+
     /**
      * Get the query plan. The query must already be prepared.
      * 
      * @return the query plan
      */
     String getPlan();
+
+    /**
+     * Get the estimated cost.
+     * 
+     * @return the estimated cost
+     */
+    double getEstimatedCost();
 
     Tree getTree(String path);
 

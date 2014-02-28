@@ -30,12 +30,15 @@ import javax.annotation.Nullable;
 import javax.jcr.PropertyType;
 import javax.jcr.RepositoryException;
 import javax.jcr.Value;
+import javax.jcr.ValueFactory;
+import javax.jcr.ValueFormatException;
 import javax.jcr.security.AccessControlEntry;
 import javax.jcr.security.AccessControlException;
 import javax.jcr.security.Privilege;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
+import org.apache.jackrabbit.JcrConstants;
 import org.apache.jackrabbit.api.security.JackrabbitAccessControlEntry;
 import org.apache.jackrabbit.api.security.JackrabbitAccessControlList;
 import org.apache.jackrabbit.api.security.authorization.PrivilegeManager;
@@ -55,7 +58,6 @@ import org.apache.jackrabbit.oak.spi.security.authorization.restriction.Restrict
 import org.apache.jackrabbit.oak.spi.security.principal.EveryonePrincipal;
 import org.apache.jackrabbit.oak.spi.security.principal.PrincipalImpl;
 import org.apache.jackrabbit.oak.spi.security.privilege.PrivilegeBits;
-import org.apache.jackrabbit.oak.spi.security.privilege.PrivilegeBitsProvider;
 import org.apache.jackrabbit.oak.spi.security.privilege.PrivilegeConstants;
 import org.junit.Before;
 import org.junit.Test;
@@ -105,8 +107,14 @@ public class ACLTest extends AbstractAccessControlListTest implements PrivilegeC
             }
 
             @Override
-            PrincipalManager getPrincipalManager() {
-                return principalManager;
+            ACE createACE(Principal principal, PrivilegeBits privilegeBits, boolean isAllow, Set<Restriction> restrictions) throws RepositoryException {
+                return createEntry(principal, privilegeBits, isAllow, restrictions);
+            }
+
+            @Override
+            void checkValidPrincipal(Principal principal) throws AccessControlException {
+                Util.checkValidPrincipal(principal, principalManager, true);
+
             }
 
             @Override
@@ -115,13 +123,8 @@ public class ACLTest extends AbstractAccessControlListTest implements PrivilegeC
             }
 
             @Override
-            PrivilegeBitsProvider getPrivilegeBitsProvider() {
-                return getBitsProvider();
-            }
-
-            @Override
-            ACE createACE(Principal principal, PrivilegeBits privilegeBits, boolean isAllow, Set<Restriction> restrictions, NamePathMapper namePathMapper) throws RepositoryException {
-                return createEntry(principal, privilegeBits, isAllow, restrictions);
+            PrivilegeBits getPrivilegeBits(Privilege[] privileges) {
+                return getBitsProvider().getBits(privileges, getNamePathMapper());
             }
         };
     }
@@ -132,7 +135,7 @@ public class ACLTest extends AbstractAccessControlListTest implements PrivilegeC
     }
 
     @Test
-    public void testAddInvalidEntry() throws Exception {
+    public void testUnknownPrincipal() throws Exception {
         Principal unknownPrincipal = new InvalidTestPrincipal("unknown");
         try {
             acl.addAccessControlEntry(unknownPrincipal, privilegesFromNames(JCR_READ));
@@ -143,9 +146,50 @@ public class ACLTest extends AbstractAccessControlListTest implements PrivilegeC
     }
 
     @Test
-    public void testAddEntryWithOakPrincipal() throws Exception {
-        Principal oakPrincipal = new PrincipalImpl("name");
-        acl.addAccessControlEntry(oakPrincipal, privilegesFromNames(JCR_READ));
+    public void testInternalPrincipal() throws RepositoryException {
+        Principal internal = new PrincipalImpl("unknown");
+        acl.addAccessControlEntry(internal, privilegesFromNames(JCR_READ));
+    }
+
+    @Test
+    public void testNullPrincipal() throws Exception {
+
+        try {
+            acl.addAccessControlEntry(null, privilegesFromNames(JCR_READ));
+            fail("Adding an ACE with null principal should fail");
+        } catch (AccessControlException e) {
+            // success
+        }
+    }
+
+    @Test
+    public void testEmptyPrincipal() throws Exception {
+
+        try {
+            acl.addAccessControlEntry(new PrincipalImpl(""), privilegesFromNames(JCR_READ));
+            fail("Adding an ACE with empty-named principal should fail");
+        } catch (AccessControlException e) {
+            // success
+        }
+    }
+
+    @Test
+    public void testAddEntriesWithCustomPrincipal()  throws Exception {
+        Principal oakPrincipal = new PrincipalImpl("anonymous");
+        Principal principal = new Principal() {
+            @Override
+            public String getName() {
+                return "anonymous";
+            }
+        };
+
+        assertTrue(acl.addAccessControlEntry(oakPrincipal, privilegesFromNames(JCR_READ)));
+        assertTrue(acl.addAccessControlEntry(principal, privilegesFromNames(JCR_READ_ACCESS_CONTROL)));
+        assertEquals(1, acl.getAccessControlEntries().length);
+
+        assertTrue(acl.addEntry(principal, privilegesFromNames(JCR_READ), false));
+        assertEquals(2, acl.getAccessControlEntries().length);
+        assertArrayEquals(privilegesFromNames(JCR_READ_ACCESS_CONTROL), acl.getAccessControlEntries()[0].getPrivileges());
     }
 
     @Test
@@ -602,10 +646,11 @@ public class ACLTest extends AbstractAccessControlListTest implements PrivilegeC
     public void testRestrictions() throws Exception {
         String[] names = acl.getRestrictionNames();
         assertNotNull(names);
-        assertEquals(2, names.length);
-        assertArrayEquals(new String[] {REP_GLOB, REP_NT_NAMES}, names);
+        assertEquals(3, names.length);
+        assertArrayEquals(new String[] {REP_GLOB, REP_NT_NAMES, REP_PREFIXES}, names);
         assertEquals(PropertyType.STRING, acl.getRestrictionType(names[0]));
         assertEquals(PropertyType.NAME, acl.getRestrictionType(names[1]));
+        assertEquals(PropertyType.STRING, acl.getRestrictionType(names[2]));
 
         Privilege[] writePriv = privilegesFromNames(JCR_WRITE);
 
@@ -637,6 +682,31 @@ public class ACLTest extends AbstractAccessControlListTest implements PrivilegeC
         // ... complementary entry -> must modify the acl.
         assertTrue(acl.addEntry(testPrincipal, writePriv, true, restrictions));
         assertEquals(2, acl.getAccessControlEntries().length);
+    }
+
+    @Test
+    public void testMvRestrictions() throws Exception {
+
+        ValueFactory vf = getValueFactory();
+        Value[] vs = new Value[] {
+                vf.createValue(JcrConstants.NT_FILE, PropertyType.NAME),
+                vf.createValue(JcrConstants.NT_FOLDER, PropertyType.NAME)
+        };
+        Map<String, Value[]> mvRestrictions = Collections.singletonMap(REP_NT_NAMES, vs);
+        Map<String, Value> restrictions = Collections.singletonMap(REP_GLOB, vf.createValue("/.*"));
+
+        assertTrue(acl.addEntry(testPrincipal, testPrivileges, false, restrictions, mvRestrictions));
+        assertFalse(acl.addEntry(testPrincipal, testPrivileges, false, restrictions, mvRestrictions));
+        assertEquals(1, acl.getAccessControlEntries().length);
+        JackrabbitAccessControlEntry ace = (JackrabbitAccessControlEntry) acl.getAccessControlEntries()[0];
+        try {
+            ace.getRestriction(REP_NT_NAMES);
+            fail();
+        } catch (ValueFormatException e) {
+            // success
+        }
+        Value[] vvs = ace.getRestrictions(REP_NT_NAMES);
+        assertArrayEquals(vs, vvs);
     }
 
     @Test

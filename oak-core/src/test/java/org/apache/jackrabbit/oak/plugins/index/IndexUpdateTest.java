@@ -37,6 +37,7 @@ import org.apache.jackrabbit.oak.plugins.index.property.PropertyIndexEditorProvi
 import org.apache.jackrabbit.oak.plugins.index.property.PropertyIndexLookup;
 import org.apache.jackrabbit.oak.query.ast.SelectorImpl;
 import org.apache.jackrabbit.oak.query.index.FilterImpl;
+import org.apache.jackrabbit.oak.spi.commit.CommitInfo;
 import org.apache.jackrabbit.oak.spi.commit.EditorHook;
 import org.apache.jackrabbit.oak.spi.query.Filter;
 import org.apache.jackrabbit.oak.spi.query.PropertyValues;
@@ -83,7 +84,7 @@ public class IndexUpdateTest {
 
         NodeState after = builder.getNodeState();
 
-        NodeState indexed = HOOK.processCommit(before, after);
+        NodeState indexed = HOOK.processCommit(before, after, CommitInfo.EMPTY);
 
         // first check that the index content nodes exist
         checkPathExists(indexed, INDEX_DEFINITIONS_NAME, "rootIndex",
@@ -119,7 +120,7 @@ public class IndexUpdateTest {
 
         NodeState after = builder.getNodeState();
 
-        NodeState indexed = HOOK.processCommit(before, after);
+        NodeState indexed = HOOK.processCommit(before, after, CommitInfo.EMPTY);
 
         // first check that the index content nodes exist
         NodeState ns = checkPathExists(indexed, INDEX_DEFINITIONS_NAME,
@@ -155,7 +156,7 @@ public class IndexUpdateTest {
                 .setProperty(REINDEX_PROPERTY_NAME, true);
         NodeState after = builder.getNodeState();
 
-        NodeState indexed = HOOK.processCommit(before, after);
+        NodeState indexed = HOOK.processCommit(before, after, CommitInfo.EMPTY);
 
         // first check that the index content nodes exist
         NodeState ns = checkPathExists(indexed, INDEX_DEFINITIONS_NAME,
@@ -185,7 +186,7 @@ public class IndexUpdateTest {
                 ImmutableSet.of("foo"), null);
         NodeState after = builder.getNodeState();
 
-        NodeState indexed = HOOK.processCommit(before, after);
+        NodeState indexed = HOOK.processCommit(before, after, CommitInfo.EMPTY);
 
         // check that the index content nodes exist
         checkPathExists(indexed, INDEX_DEFINITIONS_NAME, "existing",
@@ -200,7 +201,7 @@ public class IndexUpdateTest {
         NodeState types = system.getChildNode(JCR_NODE_TYPES);
         NodeState type = types.getChildNode(NT_BASE);
         SelectorImpl selector = new SelectorImpl(type, NT_BASE);
-        Filter filter = new FilterImpl(selector, "SELECT * FROM [nt:base]", null);
+        Filter filter = new FilterImpl(selector, "SELECT * FROM [nt:base]");
         return Sets.newHashSet(lookup.query(filter, name,
                 PropertyValues.newString(value)));
     }

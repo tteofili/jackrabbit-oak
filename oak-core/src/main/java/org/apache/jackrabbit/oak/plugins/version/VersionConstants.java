@@ -19,7 +19,9 @@ package org.apache.jackrabbit.oak.plugins.version;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Set;
 
+import com.google.common.collect.ImmutableSet;
 import org.apache.jackrabbit.JcrConstants;
 
 /**
@@ -64,6 +66,11 @@ public interface VersionConstants extends JcrConstants {
      * Version operation property name to remove version labels.
      */
     String REP_REMOVE_VERSION_LABELS = "rep:removeVersionLabels";
+
+    /**
+     * Version operation property name to remove version(s).
+     */
+    String REP_REMOVE_VERSION = "rep:removeVersion";
 
     /**
      * Prefix of the jcr:baseVersion value for a restore.
@@ -147,4 +154,15 @@ public interface VersionConstants extends JcrConstants {
             REP_ACTIVITIES,
             REP_CONFIGURATIONS
     ));
+
+    Set<String> VERSION_STORE_ROOT_NAMES = ImmutableSet.of(
+            JcrConstants.JCR_VERSIONSTORAGE,
+            VersionConstants.JCR_CONFIGURATIONS,
+            VersionConstants.JCR_ACTIVITIES);
+
+    Set<String> VERSION_STORE_NT_NAMES = ImmutableSet.of(
+            VersionConstants.REP_VERSIONSTORAGE,
+            VersionConstants.REP_ACTIVITIES,
+            VersionConstants.REP_CONFIGURATIONS
+    );
 }

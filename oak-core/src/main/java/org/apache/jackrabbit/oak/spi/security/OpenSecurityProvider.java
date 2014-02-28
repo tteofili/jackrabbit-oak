@@ -24,12 +24,15 @@ import org.apache.jackrabbit.oak.spi.security.authentication.AuthenticationConfi
 import org.apache.jackrabbit.oak.spi.security.authentication.OpenAuthenticationConfiguration;
 import org.apache.jackrabbit.oak.spi.security.authorization.AuthorizationConfiguration;
 import org.apache.jackrabbit.oak.spi.security.authorization.OpenAuthorizationConfiguration;
-import org.apache.jackrabbit.oak.spi.security.principal.PrincipalConfiguration;
-import org.apache.jackrabbit.oak.spi.security.privilege.PrivilegeConfiguration;
-import org.apache.jackrabbit.oak.spi.security.user.UserConfiguration;
 
 /**
- * OpenSecurityProvider... TODO: review if we really have the need for that once TODO in InitialContent is resolved
+ * Rudimentary {@code SecurityProvider} implementation that allow every subject
+ * to authenticate and grants it full access everywhere. Note, that this
+ * implementation does not provide support for other security related features
+ * such as e.g. user or access control management.
+ *
+ * @see org.apache.jackrabbit.oak.spi.security.authentication.OpenAuthenticationConfiguration
+ * @see org.apache.jackrabbit.oak.spi.security.authorization.OpenAuthorizationConfiguration
  */
 public class OpenSecurityProvider implements SecurityProvider {
 
@@ -52,12 +55,6 @@ public class OpenSecurityProvider implements SecurityProvider {
             return (T) new OpenAuthenticationConfiguration();
         } else if (AuthorizationConfiguration.class == configClass) {
             return (T) new OpenAuthorizationConfiguration();
-        } else if (UserConfiguration.class == configClass) {
-            throw new UnsupportedOperationException();
-        } else if (PrincipalConfiguration.class == configClass) {
-            throw new UnsupportedOperationException();
-        } else if (PrivilegeConfiguration.class == configClass) {
-            throw new UnsupportedOperationException();
         } else {
             throw new IllegalArgumentException("Unsupported security configuration class " + configClass);
         }

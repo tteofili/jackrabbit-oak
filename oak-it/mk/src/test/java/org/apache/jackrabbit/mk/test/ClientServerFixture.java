@@ -16,14 +16,12 @@
  */
 package org.apache.jackrabbit.mk.test;
 
-import java.io.IOException;
 import java.net.InetSocketAddress;
 
 import org.apache.jackrabbit.mk.api.MicroKernel;
 import org.apache.jackrabbit.mk.client.Client;
 import org.apache.jackrabbit.mk.core.MicroKernelImpl;
 import org.apache.jackrabbit.mk.server.Server;
-import org.apache.jackrabbit.mk.test.MicroKernelFixture;
 
 public class ClientServerFixture implements MicroKernelFixture {
 
@@ -36,14 +34,10 @@ public class ClientServerFixture implements MicroKernelFixture {
     }
 
     @Override
-    public void setUpCluster(MicroKernel[] cluster) {
+    public void setUpCluster(MicroKernel[] cluster) throws Exception {
         mk = new MicroKernelImpl();
         server = new Server(mk);
-        try {
-            server.start();
-        } catch (IOException e) {
-            throw new IllegalArgumentException(e.getMessage());
-        }
+        server.start();
 
         InetSocketAddress address = server.getAddress();
         cluster[0] = new Client(address);

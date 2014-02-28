@@ -24,6 +24,79 @@ work but probably be very slow.
 
 Query Indices are defined under the `oak:index` node.
 
+### Compatibility
+
+#### Quoting
+
+The query parser is now generally more strict about invalid syntax.
+The following query used to work in Jackrabbit 2.x, but not in Oak,
+because multiple way to quote the path are used at the same time:
+
+    SELECT * FROM [nt:base] AS s 
+    WHERE ISDESCENDANTNODE(s, ["/libs/sling/config"])
+    
+Instead, the query now needs to be:
+
+    SELECT * FROM [nt:base] AS s 
+    WHERE ISDESCENDANTNODE(s, [/libs/sling/config])
+    
+#### Equality for Path Constraints
+
+In Jackrabbit 2.x, the following condition was interpreted as a LIKE condition:
+
+    SELECT * FROM nt:base WHERE jcr:path = '/abc/%'
+    
+Therefore, the query behaves exactly the same as if LIKE was used.
+In Oak, this is no longer the case, and such queries search for an exact path match.
+    
+### Slow Queries and Read Limits
+
+Slow queries are logged as follows:
+
+    *WARN* Traversed 1000 nodes with filter Filter(query=select ...)
+    consider creating an index or changing the query
+
+If this is the case, an index might need to be created, or the condition 
+of the query might need to be changed to take advantage of an existing index.
+
+If a query reads more than 10 thousand nodes in memory, then the query is cancelled
+with an UnsupportedOperationException saying that 
+"The query read more than 10000 nodes in memory. To avoid running out of memory, processing was stopped."
+As a workaround, this limit can be changed using the system property "oak.queryLimitInMemory".
+
+If a query traversed more than 100 thousand nodes (for example because there is no index
+at all and the whole repository is traversed), then the query is cancelled
+with an UnsupportedOperationException saying that 
+"The query read or traversed more than 10000 nodes. To avoid affecting other tasks, processing was stopped.".
+As a workaround, this limit can be changed using the system property "oak.queryLimitReads".
+
+### Native Queries
+
+To take advantage of features that are available in full-text index implementations
+such as Apache Lucene and Apache Lucene Solr, so called `native` constraints are supported.
+Such constraints are passed directly to the full-text index. This is supported
+for both XPath and SQL-2. For XPath queries, the name of the function is `rep:native`,
+and for SQL-2, it is `native`. The first parameter is the index type (currently supported
+are `solr` and `lucene`). The second parameter is the native search query expression.
+For SQL-2, the selector name (if needed) is the first parameter, just before the language.
+Examples:
+
+    //*[rep:native('solr', 'name:(Hello OR World)')]
+    
+    select [jcr:path] from [nt:base] 
+    where native('solr', 'name:(Hello OR World)')
+
+    select [jcr:path] from [nt:base] as a 
+    where native(a, 'solr', 'name:(Hello OR World)')
+
+This also allows to use the Solr [MoreLikeThis](http://wiki.apache.org/solr/MoreLikeThis)
+feature. An example query is:
+
+    select [jcr:path] from [nt:base] 
+    where native('solr', 'mlt?q=id:UTF8TEST&mlt.fl=manu,cat&mlt.mindf=1&mlt.mintf=1')
+
+If no full-text implementation is available, those queries will fail.
+
 ### XPath to SQL2 Transformation
 
 To support the XPath query language, such queries are internally converted to SQL2. 
@@ -40,6 +113,10 @@ Every conversion is logged in `debug` level under the
         and @lock.created < xs:dateTime('2013-09-02T15:44:05.920+02:00')] */
 
 _Each transformed SQL2 query contains the original XPath query as a comment._
+
+When converting from XPath to SQL-2, `or` conditions are automatically converted to
+`union` queries, so that indexes can be used for conditions of the form 
+`a = 'x' or b = 'y'`.
 
 ### Query Processing
 
@@ -70,7 +147,7 @@ Is useful whenever there is a query with a property constraint that is not full-
 
 To define a property index on a subtree you have to add an index definition node that:
 
-* must be of type `oak:queryIndexDefinition`
+* must be of type `oak:QueryIndexDefinition`
 * must have the `type` property set to __`property`__
 * contains the `propertyNames` property that indicates what properties will be stored in the index.
   `propertyNames` can be a list of properties, and it is optional.in case it is missing, the node name will be used as a property name reference value
@@ -86,7 +163,7 @@ Example:
     {
       NodeBuilder index = root.child("oak:index");
       index.child("uuid")
-        .setProperty("jcr:primaryType", "oak:queryIndexDefinition", Type.NAME)
+        .setProperty("jcr:primaryType", "oak:QueryIndexDefinition", Type.NAME)
         .setProperty("type", "property")
         .setProperty("propertyNames", "jcr:uuid")
         .setProperty("declaringNodeTypes", "mix:referenceable")
@@ -119,7 +196,7 @@ TODO Node aggregation [OAK-828](https://issues.apache.org/jira/browse/OAK-828)
 
 The index definition node for a lucene-based full-text index:
 
-* must be of type `oak:queryIndexDefinition`
+* must be of type `oak:QueryIndexDefinition`
 * must have the `type` property set to __`lucene`__
 * must contain the `async` property set to the value `async`, this is what sends the index update process to a background thread
 
@@ -134,7 +211,7 @@ Example:
     {
       NodeBuilder index = root.child("oak:index");
       index.child("lucene")
-        .setProperty("jcr:primaryType", "oak:queryIndexDefinition", Type.NAME)
+        .setProperty("jcr:primaryType", "oak:QueryIndexDefinition", Type.NAME)
         .setProperty("type", "lucene")
         .setProperty("async", "async")
         .setProperty(PropertyStates.createProperty("includePropertyTypes", ImmutableSet.of(
@@ -162,6 +239,4 @@ The returned value is between 1 (very fast; lookup of a unique node) and the est
 The returned value is supposed to be an estimate and doesn't have to be very accurate. Please note this method is called on each index whenever a query is run, so the method should be reasonably fast (not read any data itself, or at least not read too much data).
 
 If an index implementation can not query the data, it has to return `Double.POSITIVE_INFINITY`.
-
-TODO Traversal warnings
 

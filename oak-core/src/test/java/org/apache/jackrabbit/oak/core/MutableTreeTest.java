@@ -24,6 +24,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
+import java.io.IOException;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
@@ -31,13 +32,17 @@ import java.util.Set;
 import com.google.common.collect.Sets;
 import org.apache.jackrabbit.oak.NodeStoreFixture;
 import org.apache.jackrabbit.oak.OakBaseTest;
+import org.apache.jackrabbit.oak.api.Blob;
 import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.api.ContentSession;
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Root;
 import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.api.Tree.Status;
+import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.plugins.memory.LongPropertyState;
+import org.apache.jackrabbit.oak.plugins.memory.StringBasedBlob;
+import org.apache.jackrabbit.oak.plugins.tree.TreeConstants;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -285,18 +290,18 @@ public class MutableTreeTest extends OakBaseTest {
         assertEquals(Tree.Status.NEW, tree.getChild("new").getStatus());
         root.commit();
 
-        assertEquals(Tree.Status.EXISTING, tree.getChild("new").getStatus());
+        assertEquals(Tree.Status.UNCHANGED, tree.getChild("new").getStatus());
         Tree added = tree.getChild("new");
         added.addChild("another");
         assertEquals(Tree.Status.MODIFIED, tree.getChild("new").getStatus());
         root.commit();
 
-        assertEquals(Tree.Status.EXISTING, tree.getChild("new").getStatus());
+        assertEquals(Tree.Status.UNCHANGED, tree.getChild("new").getStatus());
         tree.getChild("new").getChild("another").remove();
         assertEquals(Tree.Status.MODIFIED, tree.getChild("new").getStatus());
         root.commit();
 
-        assertEquals(Tree.Status.EXISTING, tree.getChild("new").getStatus());
+        assertEquals(Tree.Status.UNCHANGED, tree.getChild("new").getStatus());
         assertFalse(tree.getChild("new").getChild("another").exists());
 
         Tree x = root.getTree("/x");
@@ -308,6 +313,17 @@ public class MutableTreeTest extends OakBaseTest {
     }
 
     @Test
+    public void modifiedAfterRebase() throws CommitFailedException {
+        Tree tree = root.getTree("/");
+
+        tree.addChild("new");
+        assertEquals(Status.MODIFIED, tree.getStatus());
+
+        root.rebase();
+        assertEquals(Status.MODIFIED, tree.getStatus());
+    }
+
+    @Test
     public void propertyStatus() throws CommitFailedException {
         Tree tree = root.getTree("/");
 
@@ -315,12 +331,12 @@ public class MutableTreeTest extends OakBaseTest {
         assertEquals(Tree.Status.NEW, tree.getPropertyStatus("new"));
         root.commit();
 
-        assertEquals(Tree.Status.EXISTING, tree.getPropertyStatus("new"));
+        assertEquals(Tree.Status.UNCHANGED, tree.getPropertyStatus("new"));
         tree.setProperty("new", "value2");
         assertEquals(Tree.Status.MODIFIED, tree.getPropertyStatus("new"));
         root.commit();
 
-        assertEquals(Tree.Status.EXISTING, tree.getPropertyStatus("new"));
+        assertEquals(Tree.Status.UNCHANGED, tree.getPropertyStatus("new"));
         tree.removeProperty("new");
         assertNull(tree.getPropertyStatus("new"));
         root.commit();
@@ -339,7 +355,7 @@ public class MutableTreeTest extends OakBaseTest {
         root.commit();
 
         tree.getChild("one").getChild("two").addChild("three");
-        assertEquals(Tree.Status.EXISTING, tree.getChild("one").getStatus());
+        assertEquals(Tree.Status.UNCHANGED, tree.getChild("one").getStatus());
         assertEquals(Tree.Status.MODIFIED, tree.getChild("one").getChild("two").getStatus());
     }
 
@@ -368,20 +384,20 @@ public class MutableTreeTest extends OakBaseTest {
     public void testSetOrderableChildrenSetsProperty() throws Exception {
         Tree tree = root.getTree("/").addChild("test");
         tree.setOrderableChildren(true);
-        assertTrue(((MutableTree) tree).getNodeState().hasProperty(AbstractTree.OAK_CHILD_ORDER));
+        assertTrue(((MutableTree) tree).getNodeState().hasProperty(TreeConstants.OAK_CHILD_ORDER));
 
         tree.setOrderableChildren(false);
-        assertFalse(((MutableTree) tree).getNodeState().hasProperty(AbstractTree.OAK_CHILD_ORDER));
+        assertFalse(((MutableTree) tree).getNodeState().hasProperty(TreeConstants.OAK_CHILD_ORDER));
 
         tree.setOrderableChildren(true);
         root.commit();
 
-        assertTrue(((MutableTree) tree).getNodeState().hasProperty(AbstractTree.OAK_CHILD_ORDER));
+        assertTrue(((MutableTree) tree).getNodeState().hasProperty(TreeConstants.OAK_CHILD_ORDER));
 
         tree.setOrderableChildren(false);
         root.commit();
 
-        assertFalse(((MutableTree) tree).getNodeState().hasProperty(AbstractTree.OAK_CHILD_ORDER));
+        assertFalse(((MutableTree) tree).getNodeState().hasProperty(TreeConstants.OAK_CHILD_ORDER));
     }
 
     @Test
@@ -414,7 +430,7 @@ public class MutableTreeTest extends OakBaseTest {
 
         root.refresh();
 
-        assertEquals(Status.EXISTING, x.getStatus());
+        assertEquals(Status.UNCHANGED, x.getStatus());
         assertNull(x.getPropertyStatus("p"));
         assertFalse(xx.exists());
     }
@@ -435,6 +451,19 @@ public class MutableTreeTest extends OakBaseTest {
 
         assertFalse(x.exists());
         assertFalse(xx.exists());
+    }
+
+    @Test
+    public void testBlob() throws CommitFailedException, IOException {
+        Blob expected = new StringBasedBlob("test blob");
+        root.getTree("/x").setProperty("blob", expected);
+        root.commit();
+
+        Blob actual = root.getTree("/x").getProperty("blob").getValue(Type.BINARY);
+        assertEquals(expected, actual);
+
+        assertTrue(expected.getNewStream().available() >= 0);
+        assertTrue(actual.getNewStream().available() >= 0);
     }
 
 }

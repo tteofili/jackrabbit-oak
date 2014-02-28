@@ -34,7 +34,7 @@ class NameValidator extends DefaultValidator {
 
     private final Set<String> prefixes;
 
-    public NameValidator(Set<String> prefixes) {
+    NameValidator(Set<String> prefixes) {
         this.prefixes = prefixes;
     }
 
@@ -44,7 +44,7 @@ class NameValidator extends DefaultValidator {
             String prefix = name.substring(0, colon);
             if (prefix.isEmpty() || !prefixes.contains(prefix)) {
                 throw new CommitFailedException(
-                        CommitFailedException.NAME, 1, "Invalid namespace prefix: " + name);
+                        CommitFailedException.NAME, 1, "Invalid namespace prefix("+prefixes+"): " + prefix);
             }
         }
 

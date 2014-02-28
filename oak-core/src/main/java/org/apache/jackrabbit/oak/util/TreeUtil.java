@@ -16,6 +16,29 @@
  */
 package org.apache.jackrabbit.oak.util;
 
+import java.util.Calendar;
+import java.util.List;
+import java.util.Set;
+import javax.annotation.CheckForNull;
+import javax.annotation.Nonnull;
+import javax.jcr.RepositoryException;
+import javax.jcr.nodetype.ConstraintViolationException;
+import javax.jcr.nodetype.NoSuchNodeTypeException;
+
+import com.google.common.collect.Iterables;
+import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
+import org.apache.jackrabbit.JcrConstants;
+import org.apache.jackrabbit.oak.api.PropertyState;
+import org.apache.jackrabbit.oak.api.Tree;
+import org.apache.jackrabbit.oak.api.Type;
+import org.apache.jackrabbit.oak.commons.PathUtils;
+import org.apache.jackrabbit.oak.plugins.identifier.IdentifierManager;
+import org.apache.jackrabbit.oak.plugins.memory.PropertyStates;
+import org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants;
+import org.apache.jackrabbit.util.ISO8601;
+
+import static com.google.common.collect.Iterables.contains;
 import static com.google.common.collect.Lists.newArrayList;
 import static java.util.Collections.emptyList;
 import static org.apache.jackrabbit.JcrConstants.JCR_AUTOCREATED;
@@ -40,31 +63,10 @@ import static org.apache.jackrabbit.oak.commons.PathUtils.dropIndexFromName;
 import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.JCR_CREATEDBY;
 import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.JCR_IS_ABSTRACT;
 import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.JCR_LASTMODIFIEDBY;
-import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.OAK_NAMED_CHILD_NODE_DEFINITIONS;
-import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.OAK_NAMED_PROPERTY_DEFINITIONS;
-import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.OAK_RESIDUAL_CHILD_NODE_DEFINITIONS;
-
-import java.util.Calendar;
-import java.util.List;
-import java.util.Set;
-
-import javax.annotation.CheckForNull;
-import javax.annotation.Nonnull;
-import javax.jcr.RepositoryException;
-import javax.jcr.nodetype.ConstraintViolationException;
-import javax.jcr.nodetype.NoSuchNodeTypeException;
-
-import com.google.common.collect.Iterables;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Sets;
-import org.apache.jackrabbit.JcrConstants;
-import org.apache.jackrabbit.oak.api.PropertyState;
-import org.apache.jackrabbit.oak.api.Tree;
-import org.apache.jackrabbit.oak.api.Type;
-import org.apache.jackrabbit.oak.commons.PathUtils;
-import org.apache.jackrabbit.oak.plugins.identifier.IdentifierManager;
-import org.apache.jackrabbit.oak.plugins.memory.PropertyStates;
-import org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants;
+import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.REP_NAMED_CHILD_NODE_DEFINITIONS;
+import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.REP_NAMED_PROPERTY_DEFINITIONS;
+import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.REP_RESIDUAL_CHILD_NODE_DEFINITIONS;
+import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.REP_SUPERTYPES;
 
 /**
  * Utility providing common operations for the {@code Tree} that are not provided
@@ -170,8 +172,9 @@ public final class TreeUtil {
         return tree;
     }
 
-    public static Tree addChild(
-            Tree parent, String name, String typeName, Tree typeRoot, String userID)
+    public static Tree addChild(@Nonnull Tree parent, @Nonnull String name,
+                                @Nonnull String typeName, @Nonnull Tree typeRoot,
+                                @CheckForNull String userID)
             throws RepositoryException {
         Tree type = typeRoot.getChild(typeName);
         if (!type.exists()) {
@@ -210,11 +213,11 @@ public final class TreeUtil {
         List<String> mixins = Lists.newArrayList();
         String primary = getName(tree, JCR_PRIMARYTYPE);
         if (primary != null
-                && Iterables.contains(getNames(type, NodeTypeConstants.OAK_PRIMARY_SUBTYPES), primary)) {
+                && Iterables.contains(getNames(type, NodeTypeConstants.REP_PRIMARY_SUBTYPES), primary)) {
             return;
         }
 
-        Set<String> subMixins = Sets.newHashSet(getNames(type, NodeTypeConstants.OAK_MIXIN_SUBTYPES));
+        Set<String> subMixins = Sets.newHashSet(getNames(type, NodeTypeConstants.REP_MIXIN_SUBTYPES));
         for (String mixin : getNames(tree, NodeTypeConstants.JCR_MIXINTYPES)) {
             if (mixinName.equals(mixin) || subMixins.contains(mixin)) {
                 return;
@@ -230,14 +233,14 @@ public final class TreeUtil {
 
     public static void autoCreateItems(Tree tree, Tree type, Tree typeRoot, String userID)
             throws RepositoryException {
-        // TODO: use a separate oak:autoCreatePropertyDefinitions
-        Tree properties = type.getChild(OAK_NAMED_PROPERTY_DEFINITIONS);
+        // TODO: use a separate rep:autoCreatePropertyDefinitions
+        Tree properties = type.getChild(REP_NAMED_PROPERTY_DEFINITIONS);
         for (Tree definitions : properties.getChildren()) {
             String name = definitions.getName();
-            if (name.equals("oak:primaryType")
-                    || name.equals("oak:mixinTypes")) {
+            if (name.equals(NodeTypeConstants.REP_PRIMARY_TYPE)
+                    || name.equals(NodeTypeConstants.REP_MIXIN_TYPES)) {
                 continue;
-            } else if (name.equals("oak:uuid")) {
+            } else if (name.equals(NodeTypeConstants.REP_UUID)) {
                 name = JCR_UUID;
             }
             for (Tree definition : definitions.getChildren()) {
@@ -258,11 +261,11 @@ public final class TreeUtil {
             }
         }
 
-        // TODO: use a separate oak:autoCreateChildNodeDefinitions
+        // TODO: use a separate rep:autoCreateChildNodeDefinitions
         // Note that we use only named, non-SNS child node definitions
         // as there can be no reasonable default values for residual or
         // SNS child nodes
-        Tree childNodes = type.getChild(OAK_NAMED_CHILD_NODE_DEFINITIONS);
+        Tree childNodes = type.getChild(REP_NAMED_CHILD_NODE_DEFINITIONS);
         for (Tree definitions : childNodes.getChildren()) {
             String name = definitions.getName();
             for (Tree definition : definitions.getChildren()) {
@@ -285,14 +288,14 @@ public final class TreeUtil {
             String uuid = IdentifierManager.generateUUID();
             return PropertyStates.createProperty(name, uuid, STRING);
         } else if (JCR_CREATED.equals(name)) {
-            long now = Calendar.getInstance().getTime().getTime();
+            String now = ISO8601.format(Calendar.getInstance());
             return PropertyStates.createProperty(name, now, DATE);
         } else if (JCR_CREATEDBY.equals(name)) {
             if (userID != null) {
                 return PropertyStates.createProperty(name, userID, STRING);
             }
         } else if (JCR_LASTMODIFIED.equals(name)) {
-            long now = Calendar.getInstance().getTime().getTime();
+            String now = ISO8601.format(Calendar.getInstance());
             return PropertyStates.createProperty(name, now, DATE);
         } else if (JCR_LASTMODIFIEDBY.equals(name)) {
             if (userID != null) {
@@ -334,7 +337,7 @@ public final class TreeUtil {
         // first look for named node definitions
         for (Tree type : types) {
             Tree definitions = type
-                    .getChild(OAK_NAMED_CHILD_NODE_DEFINITIONS)
+                    .getChild(REP_NAMED_CHILD_NODE_DEFINITIONS)
                     .getChild(name);
             String defaultName = findDefaultPrimaryType(definitions, sns);
             if (defaultName != null) {
@@ -345,7 +348,7 @@ public final class TreeUtil {
         // then check residual definitions
         for (Tree type : types) {
             Tree definitions = type
-                    .getChild(OAK_RESIDUAL_CHILD_NODE_DEFINITIONS);
+                    .getChild(REP_RESIDUAL_CHILD_NODE_DEFINITIONS);
             String defaultName = findDefaultPrimaryType(definitions, sns);
             if (defaultName != null) {
                 return defaultName;
@@ -389,5 +392,30 @@ public final class TreeUtil {
             }
         }
         return null;
+    }
+
+    public static boolean isNodeType(Tree tree, String typeName, Tree typeRoot) {
+        String primaryName = TreeUtil.getName(tree, JCR_PRIMARYTYPE);
+        if (typeName.equals(primaryName)) {
+            return true;
+        } else if (primaryName != null) {
+            Tree type = typeRoot.getChild(primaryName);
+            if (contains(getNames(type, REP_SUPERTYPES), typeName)) {
+                return true;
+            }
+        }
+
+        for (String mixinName : getNames(tree, JCR_MIXINTYPES)) {
+            if (typeName.equals(mixinName)) {
+                return true;
+            } else {
+                Tree type = typeRoot.getChild(mixinName);
+                if (contains(getNames(type, REP_SUPERTYPES), typeName)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 }

@@ -21,11 +21,11 @@ package org.apache.jackrabbit.oak.spi.lifecycle;
 import javax.annotation.Nonnull;
 
 import org.apache.jackrabbit.oak.api.CommitFailedException;
-import org.apache.jackrabbit.oak.plugins.index.IndexUpdateProvider;
 import org.apache.jackrabbit.oak.plugins.index.IndexEditorProvider;
+import org.apache.jackrabbit.oak.plugins.index.IndexUpdateProvider;
 import org.apache.jackrabbit.oak.spi.commit.CommitHook;
+import org.apache.jackrabbit.oak.spi.commit.CommitInfo;
 import org.apache.jackrabbit.oak.spi.commit.EditorHook;
-import org.apache.jackrabbit.oak.spi.commit.PostCommitHook;
 import org.apache.jackrabbit.oak.spi.query.QueryIndexProvider;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeStore;
@@ -41,10 +41,9 @@ public final class OakInitializer {
         try {
             NodeBuilder builder = store.getRoot().builder();
             initializer.initialize(builder);
-            store.merge(
-                    builder,
-                    new EditorHook(new IndexUpdateProvider(indexEditor)),
-                    PostCommitHook.EMPTY);
+            CommitHook hook = new EditorHook(new IndexUpdateProvider(indexEditor));
+            CommitInfo info = new CommitInfo("OakInitializer", null);
+            store.merge(builder, hook, info);
         } catch (CommitFailedException e) {
             throw new RuntimeException(e);
         }
@@ -61,10 +60,9 @@ public final class OakInitializer {
             wspInit.initialize(builder, workspaceName, indexProvider, commitHook);
         }
         try {
-            store.merge(
-                    builder,
-                    new EditorHook(new IndexUpdateProvider(indexEditor)),
-                    PostCommitHook.EMPTY);
+            CommitHook hook = new EditorHook(new IndexUpdateProvider(indexEditor));
+            CommitInfo info = new CommitInfo("OakInitializer", null);
+            store.merge(builder, hook, info);
         } catch (CommitFailedException e) {
             throw new RuntimeException(e);
         }

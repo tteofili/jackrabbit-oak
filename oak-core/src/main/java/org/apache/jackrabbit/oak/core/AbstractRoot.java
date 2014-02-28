@@ -19,6 +19,7 @@
 package org.apache.jackrabbit.oak.core;
 
 import static com.google.common.base.Preconditions.checkNotNull;
+import static com.google.common.collect.Lists.newArrayList;
 import static org.apache.jackrabbit.oak.commons.PathUtils.getName;
 import static org.apache.jackrabbit.oak.commons.PathUtils.getParentPath;
 import static org.apache.jackrabbit.oak.commons.PathUtils.isAncestor;
@@ -26,28 +27,30 @@ import static org.apache.jackrabbit.oak.commons.PathUtils.isAncestor;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 import javax.security.auth.Subject;
 
-import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
 import org.apache.jackrabbit.oak.api.Blob;
-import org.apache.jackrabbit.oak.api.BlobFactory;
 import org.apache.jackrabbit.oak.api.CommitFailedException;
+import org.apache.jackrabbit.oak.api.ContentSession;
 import org.apache.jackrabbit.oak.api.QueryEngine;
 import org.apache.jackrabbit.oak.api.Root;
-import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.plugins.index.diffindex.UUIDDiffIndexProviderWrapper;
+import org.apache.jackrabbit.oak.query.ExecutionContext;
 import org.apache.jackrabbit.oak.query.QueryEngineImpl;
 import org.apache.jackrabbit.oak.spi.commit.CommitHook;
+import org.apache.jackrabbit.oak.spi.commit.CommitInfo;
 import org.apache.jackrabbit.oak.spi.commit.CompositeEditorProvider;
 import org.apache.jackrabbit.oak.spi.commit.CompositeHook;
 import org.apache.jackrabbit.oak.spi.commit.EditorHook;
 import org.apache.jackrabbit.oak.spi.commit.EmptyHook;
-import org.apache.jackrabbit.oak.spi.commit.PostCommitHook;
+import org.apache.jackrabbit.oak.spi.commit.MoveTracker;
 import org.apache.jackrabbit.oak.spi.commit.PostValidationHook;
 import org.apache.jackrabbit.oak.spi.commit.ValidatorProvider;
 import org.apache.jackrabbit.oak.spi.query.QueryIndexProvider;
@@ -59,9 +62,8 @@ import org.apache.jackrabbit.oak.spi.security.authorization.permission.Permissio
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.apache.jackrabbit.oak.spi.state.NodeStore;
-import org.apache.jackrabbit.oak.util.LazyValue;
 
-public abstract class AbstractRoot implements Root {
+abstract class AbstractRoot implements Root {
 
     /**
      * The underlying store to which this root belongs
@@ -69,8 +71,6 @@ public abstract class AbstractRoot implements Root {
     private final NodeStore store;
 
     private final CommitHook hook;
-
-    private final PostCommitHook postHook;
 
     private final String workspaceName;
 
@@ -96,14 +96,20 @@ public abstract class AbstractRoot implements Root {
     private final SecureNodeBuilder secureBuilder;
 
     /**
-     * Base state of the root tree
-     */
-    private NodeState base;
-
-    /**
      * Sentinel for the next move operation to take place on the this root
      */
     private Move lastMove = new Move();
+
+    /**
+     * Simple info object used to collect all move operations (source + dest)
+     * for further processing in those commit hooks that wish to distinguish
+     * between simple add/remove and move operations.
+     * Please note that this information will only allow to perform best-effort
+     * matching as depending on the sequence of modifications some operations
+     * may no longer be detected as changes in the commit hook due to way the
+     * diff is compiled.
+     */
+    private final MoveTracker moveTracker = new MoveTracker();
 
     /**
      * Number of {@link #updated} occurred.
@@ -113,7 +119,10 @@ public abstract class AbstractRoot implements Root {
     private final LazyValue<PermissionProvider> permissionProvider = new LazyValue<PermissionProvider>() {
         @Override
         protected PermissionProvider createValue() {
-            return getAcConfig().getPermissionProvider(AbstractRoot.this, subject.getPrincipals());
+            return getAcConfig().getPermissionProvider(
+                    AbstractRoot.this,
+                    getContentSession().getWorkspaceName(),
+                    subject.getPrincipals());
         }
     };
 
@@ -127,23 +136,20 @@ public abstract class AbstractRoot implements Root {
      * @param securityProvider the security configuration.
      * @param indexProvider    the query index provider.
      */
-    protected AbstractRoot(NodeStore store,
-            CommitHook hook,
-            PostCommitHook postHook,
-            String workspaceName,
-            Subject subject,
-            SecurityProvider securityProvider,
-            QueryIndexProvider indexProvider) {
+    AbstractRoot(NodeStore store,
+                 CommitHook hook,
+                 String workspaceName,
+                 Subject subject,
+                 SecurityProvider securityProvider,
+                 QueryIndexProvider indexProvider) {
         this.store = checkNotNull(store);
         this.hook = checkNotNull(hook);
-        this.postHook = postHook;
         this.workspaceName = checkNotNull(workspaceName);
         this.subject = checkNotNull(subject);
         this.securityProvider = checkNotNull(securityProvider);
         this.indexProvider = indexProvider;
 
-        base = store.getRoot();
-        builder = base.builder();
+        builder = store.getRoot().builder();
         secureBuilder = new SecureNodeBuilder(builder, permissionProvider, getAcContext());
         rootTree = new MutableTree(this, secureBuilder, lastMove);
     }
@@ -156,7 +162,6 @@ public abstract class AbstractRoot implements Root {
      * the session has been logged out already).
      */
     protected void checkLive() {
-
     }
 
     //---------------------------------------------------------------< Root >---
@@ -187,28 +192,8 @@ public abstract class AbstractRoot implements Root {
             getTree(getParentPath(destPath)).updateChildOrder();
             lastMove = lastMove.setMove(sourcePath, newParent, newName);
             updated();
-        }
-        return success;
-    }
-
-    @Override
-    public boolean copy(String sourcePath, String destPath) {
-        checkLive();
-        MutableTree source = rootTree.getTree(sourcePath);
-        if (!source.exists()) {
-            return false;
-        }
-
-        String newName = getName(destPath);
-        MutableTree newParent = rootTree.getTree(getParentPath(destPath));
-        if (!newParent.exists() || newParent.hasChild(newName)) {
-            return false;
-        }
-
-        boolean success = source.copyTo(newParent, newName);
-        if (success) {
-            getTree(getParentPath(destPath)).updateChildOrder();
-            updated();
+            // remember all move operations for further processing in the commit hooks.
+            moveTracker.addMove(sourcePath, destPath);
         }
         return success;
     }
@@ -222,19 +207,17 @@ public abstract class AbstractRoot implements Root {
     @Override
     public void rebase() {
         checkLive();
-        if (!store.getRoot().equals(getBaseState())) {
-            store.rebase(builder);
-            secureBuilder.baseChanged();
-            if (permissionProvider.hasValue()) {
-                permissionProvider.get().refresh();
-            }
+        store.rebase(builder);
+        secureBuilder.baseChanged();
+        if (permissionProvider.hasValue()) {
+            permissionProvider.get().refresh();
         }
     }
 
     @Override
     public final void refresh() {
         checkLive();
-        base = store.reset(builder);
+        store.reset(builder);
         secureBuilder.baseChanged();
         modCount = 0;
         if (permissionProvider.hasValue()) {
@@ -243,56 +226,62 @@ public abstract class AbstractRoot implements Root {
     }
 
     @Override
-    public void commit(final CommitHook... hooks) throws CommitFailedException {
+    public void commit(Map<String, Object> info) throws CommitFailedException {
         checkLive();
-        base = store.merge(builder, getCommitHook(hooks), postHook);
+        ContentSession session = getContentSession();
+        CommitInfo commitInfo = new CommitInfo(
+                session.toString(), session.getAuthInfo().getUserID(), info);
+        store.merge(builder, getCommitHook(), commitInfo);
         secureBuilder.baseChanged();
         modCount = 0;
         if (permissionProvider.hasValue()) {
             permissionProvider.get().refresh();
         }
+        moveTracker.clear();
+    }
+
+    @Override
+    public void commit(@Nullable String path) throws CommitFailedException {
+        Map<String, Object> info = Maps.newHashMap();
+        info.put(COMMIT_PATH, path);
+        commit(info);
+    }
+
+    @Override
+    public void commit() throws CommitFailedException {
+        commit((String) null);
     }
 
     /**
-     * Combine the passed {@code hooks}, the globally defined commit hook(s) and the hooks and
-     * validators defined by the various security related configurations.
+     * Combine the globally defined commit hook(s) and the hooks and validators defined by the
+     * various security related configurations.
      *
      * @return A commit hook combining repository global commit hook(s) with the pluggable hooks
      *         defined with the security modules and the padded {@code hooks}.
-     * @param hooks
      */
-    private CommitHook getCommitHook(CommitHook[] hooks) {
-        List<CommitHook> commitHooks = Lists.newArrayList(hooks);
-        commitHooks.add(hook);
+    private CommitHook getCommitHook() {
+        List<CommitHook> hooks = newArrayList();
+
+        hooks.add(hook);
+
         List<CommitHook> postValidationHooks = new ArrayList<CommitHook>();
         for (SecurityConfiguration sc : securityProvider.getConfigurations()) {
             for (CommitHook ch : sc.getCommitHooks(workspaceName)) {
                 if (ch instanceof PostValidationHook) {
                     postValidationHooks.add(ch);
                 } else if (ch != EmptyHook.INSTANCE) {
-                    commitHooks.add(ch);
+                    hooks.add(ch);
                 }
             }
-            List<? extends ValidatorProvider> validators =
-                    sc.getValidators(workspaceName, getCommitSubject());
+
+            List<? extends ValidatorProvider> validators = sc.getValidators(workspaceName, subject.getPrincipals(), moveTracker);
             if (!validators.isEmpty()) {
-                commitHooks.add(new EditorHook(CompositeEditorProvider.compose(validators)));
+                hooks.add(new EditorHook(CompositeEditorProvider.compose(validators)));
             }
         }
-        commitHooks.addAll(postValidationHooks);
-        return CompositeHook.compose(commitHooks);
-    }
+        hooks.addAll(postValidationHooks);
 
-    /**
-     * TODO: review again once the permission validation is completed.
-     * Build a read only subject for the {@link #commit(CommitHook...)} call that makes the
-     * principals and the permission provider available to the commit hooks.
-     *
-     * @return a new read only subject.
-     */
-    private Subject getCommitSubject() {
-        return new Subject(true, subject.getPrincipals(),
-                Collections.singleton(permissionProvider.get()), Collections.<Object>emptySet());
+        return CompositeHook.compose(hooks);
     }
 
     @Override
@@ -304,42 +293,29 @@ public abstract class AbstractRoot implements Root {
     @Override
     public QueryEngine getQueryEngine() {
         checkLive();
-        return new QueryEngineImpl(getIndexProvider()) {
-
+        return new QueryEngineImpl() {
             @Override
-            protected NodeState getRootState() {
-                return AbstractRoot.this.getRootState();
+            protected ExecutionContext getExecutionContext() {
+                QueryIndexProvider provider = indexProvider;
+                if (hasPendingChanges()) {
+                    provider = new UUIDDiffIndexProviderWrapper(
+                            provider, getBaseState(), getRootState());
+                }
+                return new ExecutionContext(
+                        getBaseState(), AbstractRoot.this, provider);
             }
-
-            @Override
-            protected Tree getRootTree() {
-                return rootTree;
-            }
-
         };
     }
 
-    @Nonnull
-    @Override
-    public BlobFactory getBlobFactory() {
+    @Override @Nonnull
+    public Blob createBlob(@Nonnull InputStream inputStream) throws IOException {
         checkLive();
-
-        return new BlobFactory() {
-            @Override
-            public Blob createBlob(InputStream inputStream) throws IOException {
-                checkLive();
-                return store.createBlob(inputStream);
-            }
-        };
+        return store.createBlob(checkNotNull(inputStream));
     }
 
-    @Nonnull
-    private QueryIndexProvider getIndexProvider() {
-        if (hasPendingChanges()) {
-            return new UUIDDiffIndexProviderWrapper(indexProvider,
-                    getBaseState(), getRootState());
-        }
-        return indexProvider;
+    @Override
+    public Blob getBlob(@Nonnull String reference) {
+        return store.getBlob(reference);
     }
 
     //-----------------------------------------------------------< internal >---
@@ -352,16 +328,7 @@ public abstract class AbstractRoot implements Root {
      */
     @Nonnull
     NodeState getBaseState() {
-        return base;
-    }
-
-    /**
-     * Returns the secure view of this root's base state.
-     *
-     * @return secure base node state
-     */
-    NodeState getSecureBase() {
-        return new SecureNodeState(base, permissionProvider.get(), getAcContext());
+        return builder.getBaseState();
     }
 
     void updated() {
@@ -457,4 +424,5 @@ public abstract class AbstractRoot implements Root {
                     : '>' + source + ':' + PathUtils.concat(destParent.getPathInternal(), destName);
         }
     }
+
 }

@@ -21,6 +21,8 @@ package org.apache.jackrabbit.oak.plugins.memory;
 import java.io.IOException;
 import java.io.InputStream;
 
+import javax.annotation.CheckForNull;
+
 import com.google.common.hash.HashCode;
 import com.google.common.hash.Hashing;
 import com.google.common.io.ByteStreams;
@@ -35,43 +37,67 @@ import org.apache.jackrabbit.oak.api.Blob;
  */
 public abstract class AbstractBlob implements Blob {
 
-    private static class BlobSupplier implements InputSupplier<InputStream> {
-
-        private final Blob blob;
-
-        private BlobSupplier(Blob blob) {
-            this.blob = blob;
-        }
-
-        @Override
-        public InputStream getInput() throws IOException {
-            return blob.getNewStream();
-        }
-
+    private static InputSupplier<InputStream> supplier(final Blob blob) {
+        return new InputSupplier<InputStream>() {
+            @Override
+            public InputStream getInput() throws IOException {
+                return blob.getNewStream();
+            }
+        };
     }
 
     public static boolean equal(Blob a, Blob b) {
+        // shortcut: first compare lengths if known in advance
+        long al = a.length();
+        long bl = b.length();
+        if (al != -1 && bl != -1 && al != bl) {
+            return false; // blobs not equal, given known and non-equal lengths
+        }
+
         try {
-            return ByteStreams.equal(new BlobSupplier(a), new BlobSupplier(b));
+            return ByteStreams.equal(supplier(a), supplier(b));
         } catch (IOException e) {
-            throw new RuntimeException("Blob equality check failed", e);
+            throw new IllegalStateException("Blob equality check failed", e);
         }
     }
 
-    private static HashCode calculateSha256(final Blob blob) {
-        try {
-            return ByteStreams.hash(new BlobSupplier(blob), Hashing.sha256());
-        } catch (IOException e) {
-            throw new RuntimeException("Blob hash calculation failed", e);
+    public static HashCode calculateSha256(final Blob blob) {
+        AbstractBlob ab;
+        if (blob instanceof AbstractBlob) {
+            ab = ((AbstractBlob) blob);
+        } else {
+            ab = new AbstractBlob() {
+                @Override
+                public long length() {
+                    return blob.length();
+                }
+                @Override
+                public InputStream getNewStream() {
+                    return blob.getNewStream();
+                }
+            };
         }
+        return ab.getSha256();
     }
 
-    private HashCode hashCode = null; // synchronized access
+    private HashCode hashCode; // synchronized access
+
+    protected AbstractBlob(HashCode hashCode) {
+        this.hashCode = hashCode;
+    }
+
+    protected AbstractBlob() {
+        this(null);
+    }
 
     private synchronized HashCode getSha256() {
         // Blobs are immutable so we can safely cache the hash
         if (hashCode == null) {
-            hashCode = calculateSha256(this);
+            try {
+                hashCode = ByteStreams.hash(supplier(this), Hashing.sha256());
+            } catch (IOException e) {
+                throw new IllegalStateException("Hash calculation failed", e);
+            }
         }
         return hashCode;
     }
@@ -83,6 +109,15 @@ public abstract class AbstractBlob implements Blob {
     protected byte[] sha256() {
         return getSha256().asBytes();
     }
+
+    //--------------------------------------------------------------< Blob >--
+
+    @Override @CheckForNull
+    public String getReference() {
+        return null;
+    }
+
+    //------------------------------------------------------------< Object >--
 
     /**
      * To {@code Blob} instances are considered equal iff they have the

@@ -21,11 +21,12 @@ import java.io.InputStream;
 
 import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
 import org.apache.jackrabbit.oak.api.Blob;
 import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.spi.commit.CommitHook;
-import org.apache.jackrabbit.oak.spi.commit.PostCommitHook;
+import org.apache.jackrabbit.oak.spi.commit.CommitInfo;
 
 /**
  * Storage abstraction for trees. At any given point in time the stored
@@ -51,15 +52,16 @@ public interface NodeStore {
      *
      * @param builder  the builder whose changes to apply
      * @param commitHook the commit hook to apply while merging changes
-     * @param committed  the post commit hook
+     * @param info commit info associated with this merge operation
      * @return the node state resulting from the merge.
      * @throws CommitFailedException if the merge failed
      * @throws IllegalArgumentException if the builder is not acquired
      *                                  from a root state of this store
      */
     @Nonnull
-    NodeState merge(@Nonnull NodeBuilder builder, @Nonnull CommitHook commitHook,
-            PostCommitHook committed) throws CommitFailedException;
+    NodeState merge(
+            @Nonnull NodeBuilder builder, @Nonnull CommitHook commitHook,
+            @Nonnull CommitInfo info) throws CommitFailedException;
 
     /**
      * Rebase the changes in the passed {@code builder} on top of the current root state.
@@ -90,7 +92,17 @@ public interface NodeStore {
      * @return  The {@code Blob} representing {@code inputStream}
      * @throws IOException  If an error occurs while reading from the stream
      */
+    @Nonnull
     Blob createBlob(InputStream inputStream) throws IOException;
+
+    /**
+     * Get a blob by its reference.
+     * @param reference  reference to the blob
+     * @return  blob or {@code null} if the reference does not resolve to a blob.
+     * @see Blob#getReference()
+     */
+    @CheckForNull
+    Blob getBlob(@Nonnull String reference);
 
     /**
      * Creates a new checkpoint of the latest root of the tree. The checkpoint
@@ -114,5 +126,4 @@ public interface NodeStore {
      */
     @CheckForNull
     NodeState retrieve(@Nonnull String checkpoint);
-
 }

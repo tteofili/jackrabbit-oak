@@ -17,12 +17,11 @@
 package org.apache.jackrabbit.mk.test;
 
 import org.apache.jackrabbit.mk.api.MicroKernel;
-import org.apache.jackrabbit.mk.blobs.BlobStore;
-import org.apache.jackrabbit.oak.plugins.mongomk.Collection;
-import org.apache.jackrabbit.oak.plugins.mongomk.DocumentStore;
-import org.apache.jackrabbit.oak.plugins.mongomk.MongoMK;
-import org.apache.jackrabbit.oak.plugins.mongomk.blob.MongoBlobStore;
-import org.apache.jackrabbit.oak.plugins.mongomk.util.MongoConnection;
+import org.apache.jackrabbit.oak.spi.blob.BlobStore;
+import org.apache.jackrabbit.oak.plugins.document.Collection;
+import org.apache.jackrabbit.oak.plugins.document.DocumentMK;
+import org.apache.jackrabbit.oak.plugins.document.mongo.MongoBlobStore;
+import org.apache.jackrabbit.oak.plugins.document.util.MongoConnection;
 
 import com.mongodb.BasicDBObject;
 import com.mongodb.DB;
@@ -40,7 +39,7 @@ public abstract class BaseMongoMicroKernelFixture implements MicroKernelFixture 
 
     private MongoConnection mongoConnection = null;
 
-    private MongoConnection getMongoConnection() throws Exception {
+    protected MongoConnection getMongoConnection() throws Exception {
         if (mongoConnection == null) {
             mongoConnection = new MongoConnection(HOST, PORT, DB);
         }
@@ -70,7 +69,7 @@ public abstract class BaseMongoMicroKernelFixture implements MicroKernelFixture 
         dropCollections(db);
 
         for (int i = 0; i < cluster.length; i++) {
-            cluster[i] = new MongoMK.Builder().
+            cluster[i] = new DocumentMK.Builder().
                     setMongoDB(db).setClusterId(i).open();
         }
     }
@@ -94,7 +93,7 @@ public abstract class BaseMongoMicroKernelFixture implements MicroKernelFixture 
 
     protected abstract BlobStore getBlobStore(DB db);
 
-    private static void dropCollections(DB db) {
+    protected void dropCollections(DB db) {
         db.getCollection(MongoBlobStore.COLLECTION_BLOBS).drop();
         db.getCollection(Collection.NODES.toString()).drop();
     }

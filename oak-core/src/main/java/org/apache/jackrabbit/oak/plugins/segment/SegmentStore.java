@@ -16,16 +16,32 @@
  */
 package org.apache.jackrabbit.oak.plugins.segment;
 
-import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.Callable;
+
+import javax.annotation.CheckForNull;
+
+import org.apache.jackrabbit.oak.api.Blob;
 
 public interface SegmentStore {
 
     SegmentWriter getWriter();
 
+    /**
+     * Returns the named journal.
+     *
+     * @param name journal name
+     * @return named journal, or {@code null} if not found
+     */
+    @CheckForNull
     Journal getJournal(String name);
 
+    /**
+     * Reads the identified segment from this store.
+     *
+     * @param segmentId segment identifier
+     * @return identified segment, or {@code null} if not found
+     */
+    @CheckForNull
     Segment readSegment(UUID segmentId);
 
     /**
@@ -35,16 +51,30 @@ public interface SegmentStore {
      * @param bytes byte buffer that contains the raw contents of the segment
      * @param offset start offset within the byte buffer
      * @param length length of the segment
-     * @param referencedSegmentIds identifiers of all the referenced segments
      */
-    void writeSegment(
-            UUID segmentId, byte[] bytes, int offset, int length,
-            List<UUID> referencedSegmentIds);
+    void writeSegment(UUID segmentId, byte[] bytes, int offset, int length);
 
     void deleteSegment(UUID segmentId);
 
     void close();
 
-    <T> T getRecord(RecordId id, Callable<T> loader);
+    /**
+     * Checks whether the given object is a record of the given type and
+     * is stored in this segment store.
+     *
+     * @param object possible record object
+     * @param type record type
+     * @return {@code true} if the object is a record of the given type
+     *         from this store, {@code false} otherwise
+     */
+    boolean isInstance(Object object, Class<? extends Record> type);
+
+    /**
+     * Read a blob from external storage.
+     *
+     * @param reference blob reference
+     * @return external blob
+     */
+    Blob readBlob(String reference);
 
 }

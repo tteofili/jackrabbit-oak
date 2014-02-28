@@ -112,36 +112,6 @@ public class AccessControlImporterTest extends AbstractJCRTest {
             "</sv:node>" +
             "</sv:node>";
 
-    public static final String XML_POLICY_TREE_4 = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" +
-            "<sv:node sv:name=\"rep:policy\" " +
-            "xmlns:mix=\"http://www.jcp.org/jcr/mix/1.0\" xmlns:nt=\"http://www.jcp.org/jcr/nt/1.0\" xmlns:fn_old=\"http://www.w3.org/2004/10/xpath-functions\" xmlns:fn=\"http://www.w3.org/2005/xpath-functions\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:sv=\"http://www.jcp.org/jcr/sv/1.0\" xmlns:rep=\"internal\" xmlns:jcr=\"http://www.jcp.org/jcr/1.0\">" +
-            "<sv:property sv:name=\"jcr:primaryType\" sv:type=\"Name\">" +
-            "<sv:value>rep:ACL</sv:value>" +
-            "</sv:property>" +
-            "<sv:node sv:name=\"allow\">" +
-            "<sv:property sv:name=\"jcr:primaryType\" sv:type=\"Name\">" +
-            "<sv:value>rep:GrantACE</sv:value>" +
-            "</sv:property>" +
-            "<sv:property sv:name=\"rep:principalName\" sv:type=\"String\">" +
-            "<sv:value>unknownprincipal</sv:value>" +
-            "</sv:property>" +
-            "<sv:property sv:name=\"rep:privileges\" sv:type=\"Name\">" +
-            "<sv:value>jcr:write</sv:value>" +
-            "</sv:property>" +
-            "</sv:node>" +
-            "<sv:node sv:name=\"allow0\">" +
-            "<sv:property sv:name=\"jcr:primaryType\" sv:type=\"Name\">" +
-            "<sv:value>rep:GrantACE</sv:value>" +
-            "</sv:property>" +
-            "<sv:property sv:name=\"rep:principalName\" sv:type=\"String\">" +
-            "<sv:value>admin</sv:value>" +
-            "</sv:property>" +
-            "<sv:property sv:name=\"rep:privileges\" sv:type=\"Name\">" +
-            "<sv:value>jcr:write</sv:value>" +
-            "</sv:property>" +
-            "</sv:node>" +
-            "</sv:node>";
-
     public static final String XML_POLICY_TREE_5 = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" +
             "<sv:node sv:name=\"rep:policy\" " +
             "xmlns:mix=\"http://www.jcp.org/jcr/mix/1.0\" xmlns:nt=\"http://www.jcp.org/jcr/nt/1.0\" xmlns:fn_old=\"http://www.w3.org/2004/10/xpath-functions\" xmlns:fn=\"http://www.w3.org/2005/xpath-functions\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:sv=\"http://www.jcp.org/jcr/sv/1.0\" xmlns:rep=\"internal\" xmlns:jcr=\"http://www.jcp.org/jcr/1.0\">" +
@@ -323,41 +293,6 @@ public class AccessControlImporterTest extends AbstractJCRTest {
             assertEquals(1, entries.length);
 
             AccessControlEntry entry = entries[0];
-            assertEquals("admin", entry.getPrincipal().getName());
-            assertEquals(1, entry.getPrivileges().length);
-            assertEquals(acMgr.privilegeFromName(Privilege.JCR_WRITE), entry.getPrivileges()[0]);
-
-            if (entry instanceof JackrabbitAccessControlEntry) {
-                assertTrue(((JackrabbitAccessControlEntry) entry).isAllow());
-            }
-        } finally {
-            superuser.refresh(false);
-        }
-    }
-
-    public void testImportACLUnknown() throws Exception {
-        try {
-            Node target = createImportTarget();
-
-            doImport(target.getPath(), XML_POLICY_TREE_4);
-
-            String path = target.getPath();
-
-            AccessControlManager acMgr = superuser.getAccessControlManager();
-            AccessControlPolicy[] policies = acMgr.getPolicies(path);
-
-            assertEquals(1, policies.length);
-            assertTrue(policies[0] instanceof JackrabbitAccessControlList);
-
-            AccessControlEntry[] entries = ((JackrabbitAccessControlList) policies[0]).getAccessControlEntries();
-            assertEquals(2, entries.length);
-
-            AccessControlEntry entry = entries[0];
-            assertEquals("unknownprincipal", entry.getPrincipal().getName());
-            assertEquals(1, entry.getPrivileges().length);
-            assertEquals(acMgr.privilegeFromName(Privilege.JCR_WRITE), entry.getPrivileges()[0]);
-
-            entry = entries[1];
             assertEquals("admin", entry.getPrincipal().getName());
             assertEquals(1, entry.getPrivileges().length);
             assertEquals(acMgr.privilegeFromName(Privilege.JCR_WRITE), entry.getPrivileges()[0]);

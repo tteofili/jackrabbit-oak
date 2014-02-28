@@ -18,6 +18,7 @@ package org.apache.jackrabbit.oak.jcr.version;
 
 import javax.jcr.Node;
 import javax.jcr.NodeIterator;
+import javax.jcr.Property;
 import javax.jcr.RepositoryException;
 import javax.jcr.query.Query;
 import javax.jcr.query.QueryManager;
@@ -83,5 +84,21 @@ public class VersionTest extends AbstractJCRTest {
         Version v = vMgr.getBaseVersion(n.getPath());
         Node frozenChild = v.getFrozenNode().getNode(child.getName());
         assertEquals(ntFrozenNode, frozenChild.getPrimaryNodeType().getName());
+    }
+
+    // OAK-1009 & OAK-1346
+    public void testFrozenUUID() throws RepositoryException {
+        Node n = testRootNode.addNode(nodeName1, testNodeType);
+        n.addMixin(mixVersionable);
+        Node child = n.addNode(nodeName2, "nt:folder");
+        superuser.save();
+        VersionManager vMgr = superuser.getWorkspace().getVersionManager();
+        Version v = vMgr.checkpoint(n.getPath());
+        vMgr.checkpoint(n.getPath());
+        Version baseVersion = vMgr.getBaseVersion(n.getPath());
+        Node frozenChild = baseVersion.getFrozenNode().getNode(child.getName());
+        assertEquals(child.getIdentifier(),
+                frozenChild.getProperty(Property.JCR_FROZEN_UUID).getString());
+        vMgr.restore(v, true);
     }
 }

@@ -48,6 +48,7 @@ import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.plugins.identifier.IdentifierManager;
 import org.apache.jackrabbit.oak.namepath.NamePathMapper;
 import org.apache.jackrabbit.oak.plugins.name.NamespaceConstants;
+import org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants;
 import org.apache.jackrabbit.oak.spi.security.ConfigurationParameters;
 import org.apache.jackrabbit.oak.spi.security.authentication.ImpersonationCredentials;
 import org.apache.jackrabbit.oak.spi.security.authentication.token.TokenInfo;
@@ -55,6 +56,7 @@ import org.apache.jackrabbit.oak.spi.security.authentication.token.TokenProvider
 import org.apache.jackrabbit.oak.spi.security.user.UserConfiguration;
 import org.apache.jackrabbit.oak.spi.security.user.util.PasswordUtil;
 import org.apache.jackrabbit.oak.util.NodeUtil;
+import org.apache.jackrabbit.oak.util.TreeUtil;
 import org.apache.jackrabbit.util.ISO8601;
 import org.apache.jackrabbit.util.Text;
 import org.slf4j.Logger;
@@ -74,9 +76,11 @@ import static org.apache.jackrabbit.oak.plugins.identifier.IdentifierManager.get
  * For security reasons the nodes storing the token information now have a
  * dedicated node type (rep:Token) which has the following definition:
  * <pre>
- *     [rep:Token] > nt:unstructured, mix:referenceable
- *     - rep:token.key (STRING) protected mandatory
- *     - rep:token.exp (STRING) protected mandatory
+ *     [rep:Token] > mix:referenceable
+ *      - rep:token.key (STRING) protected mandatory
+ *      - rep:token.exp (DATE) protected mandatory
+ *      - * (UNDEFINED) protected
+ *      - * (UNDEFINED) multiple protected
  * </pre>
  * Consequently the hash of the token and the expiration time of tokens generated
  * by this provider can no longer be manipulated using regular JCR item
@@ -88,7 +92,7 @@ import static org.apache.jackrabbit.oak.plugins.identifier.IdentifierManager.get
  * interface will not validate the node type of the token node associated with
  * a given token.
  */
-public class TokenProviderImpl implements TokenProvider {
+class TokenProviderImpl implements TokenProvider {
 
     private static final Logger log = LoggerFactory.getLogger(TokenProviderImpl.class);
 
@@ -100,7 +104,7 @@ public class TokenProviderImpl implements TokenProvider {
     private static final String TOKEN_ATTRIBUTE_EXPIRY = "rep:token.exp";
     private static final String TOKEN_ATTRIBUTE_KEY = "rep:token.key";
     private static final String TOKENS_NODE_NAME = ".tokens";
-    private static final String TOKENS_NT_NAME = JcrConstants.NT_UNSTRUCTURED;
+    private static final String TOKENS_NT_NAME = NodeTypeConstants.NT_REP_UNSTRUCTURED;
     private static final String TOKEN_NT_NAME = "rep:Token";
 
     /**
@@ -110,8 +114,7 @@ public class TokenProviderImpl implements TokenProvider {
     private static final int DEFAULT_KEY_SIZE = 8;
     private static final char DELIM = '_';
 
-    private static final Set<String> RESERVED_ATTRIBUTES = new HashSet(2);
-
+    private static final Set<String> RESERVED_ATTRIBUTES = new HashSet(3);
     static {
         RESERVED_ATTRIBUTES.add(TOKEN_ATTRIBUTE);
         RESERVED_ATTRIBUTES.add(TOKEN_ATTRIBUTE_EXPIRY);
@@ -125,7 +128,7 @@ public class TokenProviderImpl implements TokenProvider {
     private final UserManager userManager;
     private final IdentifierManager identifierManager;
 
-    public TokenProviderImpl(Root root, ConfigurationParameters options, UserConfiguration userConfiguration) {
+    TokenProviderImpl(Root root, ConfigurationParameters options, UserConfiguration userConfiguration) {
         this.root = root;
         this.options = options;
 
@@ -218,7 +221,7 @@ public class TokenProviderImpl implements TokenProvider {
                 String nodeId = getIdentifier(tokenNode.getTree());
                 String token = new StringBuilder(nodeId).append(DELIM).append(key).toString();
 
-                String keyHash = PasswordUtil.buildPasswordHash(key);
+                String keyHash = PasswordUtil.buildPasswordHash(getKeyValue(key, userId));
                 tokenNode.setString(TOKEN_ATTRIBUTE_KEY, keyHash);
 
                 long exp;
@@ -227,8 +230,8 @@ public class TokenProviderImpl implements TokenProvider {
                 } else {
                     exp = tokenExpiration;
                 }
-                long expirationTime = createExpirationTime(creationTime, exp);
-                tokenNode.setDate(TOKEN_ATTRIBUTE_EXPIRY, expirationTime);
+                long expTime = createExpirationTime(creationTime, exp);
+                tokenNode.setDate(TOKEN_ATTRIBUTE_EXPIRY, expTime);
 
                 for (String name : attributes.keySet()) {
                     if (!RESERVED_ATTRIBUTES.contains(name)) {
@@ -272,7 +275,7 @@ public class TokenProviderImpl implements TokenProvider {
         String nodeId = (pos == -1) ? token : token.substring(0, pos);
         Tree tokenTree = identifierManager.getTree(nodeId);
         String userId = getUserId(tokenTree);
-        if (tokenTree == null || !tokenTree.exists() || userId == null) {
+        if (userId == null || !isValidTokenTree(tokenTree)) {
             return null;
         } else {
             return new TokenInfoImpl(new NodeUtil(tokenTree), token, userId);
@@ -317,6 +320,20 @@ public class TokenProviderImpl implements TokenProvider {
             res.append(Text.hexTable[b & 15]);
         }
         return res.toString();
+    }
+
+    @Nonnull
+    private static String getKeyValue(String key, String userId) {
+        return key + userId;
+    }
+
+    private static boolean isValidTokenTree(Tree tokenTree) {
+        if (tokenTree == null || !tokenTree.exists()) {
+            return false;
+        } else {
+            return TOKENS_NODE_NAME.equals(tokenTree.getParent().getName()) &&
+                    TOKEN_NT_NAME.equals(TreeUtil.getPrimaryTypeName(tokenTree));
+        }
     }
 
     @CheckForNull
@@ -445,22 +462,21 @@ public class TokenProviderImpl implements TokenProvider {
             Tree tokenTree = getTokenTree(this);
             if (tokenTree != null && tokenTree.exists()) {
                 NodeUtil tokenNode = new NodeUtil(tokenTree);
-                long expTime = getExpirationTime(tokenNode, 0);
                 if (isExpired(loginTime)) {
                     log.debug("Attempt to reset an expired token.");
                     return false;
                 }
 
-                long expiration = tokenNode.getLong(PARAM_TOKEN_EXPIRATION, tokenExpiration);
-                if (expTime - loginTime <= expiration / 2) {
-                    long expirationTime = createExpirationTime(loginTime, expiration);
+                if (expirationTime - loginTime <= tokenExpiration / 2) {
                     try {
-                        tokenNode.setDate(TOKEN_ATTRIBUTE_EXPIRY, expirationTime);
+                        long expTime = createExpirationTime(loginTime, tokenExpiration);
+                        tokenNode.setDate(TOKEN_ATTRIBUTE_EXPIRY, expTime);
                         root.commit();
                         log.debug("Successfully reset token expiration time.");
                         return true;
                     } catch (CommitFailedException e) {
-                        log.warn("Error while resetting token expiration", e.getMessage());
+                        log.debug("Failed to reset token expiration", e.getMessage());
+                        root.refresh();
                     }
                 }
             }
@@ -490,7 +506,7 @@ public class TokenProviderImpl implements TokenProvider {
             if (pos > -1) {
                 tk = tk.substring(pos + 1);
             }
-            if (key == null || !PasswordUtil.isSame(key, tk)) {
+            if (key == null || !PasswordUtil.isSame(key, getKeyValue(tk, userId))) {
                 return false;
             }
 

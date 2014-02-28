@@ -76,13 +76,14 @@ Query
 Oak does not index content by default as does Jackrabbit 2. You need to create custom indexes when
 necessary, much like in traditional RDBMSs. If there is no index for a specific query then the
 repository will be traversed. That is, the query will still work but probably be very slow.
-
 See the [query overview page](query.html) for how to create a custom index.
+
+There were some smaller bugfixes in the query parser which might lead to incompatibility.
+See the [query overview page](query.html) for details.
+
 
 Observation
 -----------
-
-Regarding observation listeners:
 
 * `Event.getUserId()`, `Event.getUserData()`and `Event.getDate()` will only be available for locally
   generated events (i.e. on the same cluster node). To help identifying potential trouble spots,
@@ -96,9 +97,130 @@ Regarding observation listeners:
   (https://cwiki.apache.org/confluence/display/SLING/Observation+usage+patterns) of observation and
   recommendations on alternative solutions where applicable.
 
-* Touched properties: Jackrabbit 2 used to generate a `PROPERTY_CHANGED` event when touching a
-  property (i.e. setting a property to its current value). Oak keeps closer to the specification and
-  [omits such events](https://issues.apache.org/jira/browse/OAK-948).
+* Event generation is done by looking at the difference between two revisions of the persisted
+  content trees. Items not present in a previous revision but present in the current revision are
+  reported as `Event.NODE_ADDED` and `Event.PROPERTY_ADDED`, respectively. Items present in a
+  previous revision but not present in the current revision are reported as `Event.NODE_REMOVED` and
+  `Event.PROPERTY_REMOVED`, respectively. Properties that changed in between the previous revision
+  and the current revision are reported as `PROPERTY_CHANGED`. As a consequence operations that
+  cancelled each others in between the previous revision and the current revision are not reported.
+  Furthermore the order of the events depends on the underlying implementation and is not specified.
+  In particular there are some interesting consequences:
+
+    * Touched properties: Jackrabbit 2 used to generate a `PROPERTY_CHANGED` event when touching a
+      property (i.e. setting a property to its current value). Oak keeps closer to the specification
+      and [omits such events](https://issues.apache.org/jira/browse/OAK-948). More generally removing
+      a subtree and replacing it with the same subtree will not generate any event.
+
+    * Removing a referenceable node and adding it again will result in a `PROPERTY_CHANGED` event for
+      `jcr:uuid`; the same applies for other built-in protected and mandatory properties
+      such as e.g. jcr:versionHistory if the corresponding versionable node
+      was removed and a versionable node with the same name is being created.
+
+    * Limited support for `Event.NODE_MOVED`:
+
+      + A node that is added and subsequently moved will not generate a `Event.NODE_MOVED`
+        but a `Event.NODE_ADDED` for its final location.
+
+      + A node that is moved and subsequently removed will not generate a `Event.NODE_MOVED`
+        but a `Event.NODE_REMOVED` for its initial location.
+
+      + A node that is moved and subsequently moved again will only generate a single
+        `Event.NODE_MOVED` reporting its initial location as `srcAbsPath` and its
+         final location as `destAbsPath`.
+
+      + A node whose parent was moved and that moved itself subsequently reports its initial
+        location as `srcAbsPath` instead of the location it had under the moved parent.
+
+      + A node that was moved and subsequently its parent is moved will report its final
+        location as `destAbsPath` instead of the location it had before its parent moved.
+
+      + Removing a node and adding a node with the same name at the same parent will be
+        reported as `NODE_MOVED` event as if it where caused by `Node.orderBefore()` if
+        the parent node is orderable and the sequence of operations caused a change in
+        the order of the child nodes.
+
+      + The exact sequence of `Node.orderBefore()` will not be reflected through `NODE_MOVED`
+        events: given two child nodes `a` and `b`, ordering `a` after `b` may be reported as
+        ordering `b` before `a`.
+
+* The sequence of differences Oak generates observation events from is guaranteed to contain the
+  before and after states of all cluster local changes. This guarantee does not hold for cluster
+  external changes. That is, cancelling operations from cluster external events might not be
+  reported event though they stem from separate commits (`Session.save()`).
+
+* Unregistering an observation listener blocks for no more than one second. If a pending
+  `onEvent()` call does not complete by then a warning is logged and the listener will be
+  unregistered without further waiting for the pending `onEvent()` call to complete.
+  See [OAK-1290](https://issues.apache.org/jira/browse/OAK-1290) and
+  [JSR_333-74](https://java.net/jira/browse/JSR_333-74) for further information.
+
+* See [OAK-1459](https://issues.apache.org/jira/browse/OAK-1459) introduced some differences
+  in what events are dispatch for bulk operations (moving and deleting sub-trees):
+
+<table>
+<tr>
+<th>Operation</th>
+<th>Jackrabbit 2</th>
+<th>Oak</th>
+</tr>
+<tr>
+<td>add sub-tree</td>
+<td>NODE_ADDED event for every node in the sub-tree</td>
+<td>NODE_ADDED event for every node in the sub-tree</td>
+</tr>
+<tr>
+<td>remove sub-tree</td>
+<td>NODE_REMOVED event for every node in the sub-tree</td>
+<td>NODE_REMOVED event for the root of the sub-tree only</td>
+</tr>
+<tr>
+<td>move sub-tree</td>
+<td>NODE_MOVED event, NODE_ADDED event for the root of the sub-tree only,
+    NODE_REMOVED event for every node in the sub-tree</td>
+<td>NODE_MOVED event, NODE_ADDED event for the root of the sub-tree only,
+    NODE_REMOVED event for the root of the sub-tree only</td>
+</tr>
+</table>
+
+Binary streams
+--------------
+
+In Jackrabbit 2 binary values were often (though not always) stored in
+or spooled into a file in the local file system, and methods like
+`Value.getStream()` would thus be backed by `FileInputStream` instances.
+As a result the `available()` method of the stream would typically return
+the full count of remaining bytes, regardless of whether the next `read()`
+call would block to wait for disk IO.
+
+In Oak binaries are typically stored in an external database or (with the
+TarMK) using a custom data structure in the local file system. The streams
+returned by Oak are therefore custom `InputStream` subclasses that implement
+the `available()` method based on whether the next `read()` call will return
+immediately or if it needs to block to wait for the underlying IO operations.
+
+This difference may affect some clients that make the incorrect assumption
+that the `available()` method will always return the number of remaining
+bytes in the stream, or that the return value is zero only at the end of the
+stream. Neither assumption is correctly based on the `InputStream` API
+contract, so such client code needs to be fixed to avoid problems with Oak.
+
+Locking
+-------
+
+Oak does not support the strict locking semantics of Jackrabbit 2.x. Instead
+a "fuzzy locking" approach is used with lock information stored as normal
+content changes. If a `mix:lockable` node is marked as holding a lock, then
+the code treats it as locked, regardless of what other concurrent sessions
+that might see different versions of the node see or do. Similarly a lock token
+is simply the path of the locked node.
+
+This fuzzy locking should not be used or relied as a tool for synchronizing
+the actions of two clients that are expected to access the repository within
+a few seconds of each other. Instead this feature is mostly useful as a higher
+level tool, for example a human author could use a lock to mark a document as
+locked for a few hours or days during which other users will not be able to
+modify the document.
 
 Same name siblings
 ------------------
@@ -110,118 +232,30 @@ there are ideas to implement a feature for automatic [disambiguation of node nam
 In the meanwhile we have [basic support](https://issues.apache.org/jira/browse/OAK-203) for same
 name siblings but that might not cover all cases.
 
-Authentication
---------------
+XML Import
+----------
 
-Please refer to [OAK-793](https://issues.apache.org/jira/browse/OAK-793) for a general overview of
-changes with respect to Jackrabbit 2.
+The import behavior for [`IMPORT_UUID_CREATE_NEW`](http://www.day.com/maven/jsr170/javadocs/jcr-2.0/javax/jcr/ImportUUIDBehavior.html#IMPORT_UUID_CREATE_NEW) in Oak is implemented slightly different compared to Jackrabbit. Jackrabbit 2.x only creates a new UUID when it detects an existing conflicting node with the same UUID. Oak always creates a new UUID, even if there is no conflicting node. The are mainly two reasons why this is done in Oak:
 
-Access Control Management
--------------------------
+* The implementation in Oak is closer to what the JCR specification says: *Incoming nodes are assigned newly created identifiers upon addition to the workspace. As a result, identifier collisions never occur.*
+* Oak uses a MVCC model where a session operates on a snapshot of the repository. It is therefore very difficult to ensure new UUIDs only in case of a conflict. Based on the snapshot view of a session, an existing node with a conflicting UUID may not be visible until commit.
 
-Refer to [OAK-792](https://issues.apache.org/jira/browse/OAK-792) for a general overview of changes
-with respect to Jackrabbit 2.
-
-The following modification are most likely to have an effect on existing applications:
-
-* `AccessControlManager#hasPrivilege()` and `AccessControlManager#getPrivileges()` will throw a
-  `PathNotFoundException` if the node for the specified path is not accessible. The Jackrabbit 2
-  implementation is wrong and we fixed that in OAK ([OAK-886](https://issues.apache.org/jira/browse/OAK-886)).
-  If the new behaviour turns out to be a problem with existing applications we might consider
-  adding backward compatible behaviour.
-
-Permissions
+Identifiers
 -----------
 
-Refer to [OAK-942](https://issues.apache.org/jira/browse/OAK-942) for a general overview of changes
-with respect to Jackrabbit 2.
+In contrast to Jackrabbit 2.x, only referenceable nodes in Oak have a UUID assigned. With Jackrabbit 2.x the UUID is only visible in content when the node is referenceable and exposes the UUID as a `jcr:uuid` property. But using `Node.getIdentifer()`, it is possible to get the UUID of any node. With Oak this method will only return a UUID when the node is referenceable, otherwise the identifier is the UUID of the nearest referenceable ancestor with the relative path to the node.
 
-* As of Oak `Node#remove()` only requires sufficient permissions to remove the target node. In
-  contrast to jackrabbit the validation will not traverse the tree and verify remove permission on
-  all child nodes/properties. There exists a configuration flag that aims to produce best effort
-  backwards compatibility but this flag is currently not enabled by default. Please let us know if
-  you suspect this causes wrong behavior in your application.
+Versioning
+----------
 
-* By default user management operations require the specific user mgt related
-  permission that has been introduced with OAK-1.0. This behavior can be
-  turned off by setting the corresponding configuration flag.
+Because of the different identifier implementation in Oak, the value of a `jcr:frozenUuid` property on a frozen node will not always be a UUID (see also section about Identifiers). The property reflects the value returned by `Node.getIdentifier()` when a node is copied into the version storage as a frozen node. This also means a node restored from a frozen node will only have a `jcr:uuid` when it is actually referenceable.
 
-* As of OAK reading and writing items in the version store does not follow the
-  regular permission evaluation but depends on access rights present on the
-  corresponding versionable node [OAK-444](https://issues.apache.org/jira/browse/OAK-444).
+Security
+--------
 
-Privilege Management
---------------------
-
-Refer to [OAK-910](https://issues.apache.org/jira/browse/OAK-910) for a general overview of changes
-with respect to Jackrabbit 2.
-
-User Management
----------------
-
-Refer to [OAK-791](https://issues.apache.org/jira/browse/OAK-791) for a general overview of changes
-with respect to Jackrabbit 2.
-
-Principal Management
---------------------
-
-Refer to [OAK-909](https://issues.apache.org/jira/browse/OAK-909) for a general overview of changes
-with respect to Jackrabbit 2.
-
-Known issues
-============
-All known issues are listed in the Apache [JIRA](https://issues.apache.org/jira/browse/OAK).
-Changes with respect to Jackrabbit-core are collected in [OAK-14]
-(https://issues.apache.org/jira/browse/OAK-14) and its sub-tasks.
-
-* Locking:
-    * Locking and unlocking of nodes is not implemented yet. You will not see an exception as long as
-      the [TODO](https://issues.apache.org/jira/browse/OAK-193)-flag prevents the implementation from
-      throwing UnsupportedOperationException, but the node *will not* be locked.
-      See [OAK-150](https://issues.apache.org/jira/browse/OAK-150)
-
-
-* Versioning [OAK-168](https://issues.apache.org/jira/browse/OAK-168):
-    * `VersionHistory#removeVersion()` is not implemented yet
-    * `VersionManager#merge()` is not implemented yet
-    * `VersionManager#restore()` with version-array is not implemented yet
-    * Activities are not implemented
-    * Configurations are not implemented
-
-
-* Query:
-    * Known issue with OR statements in full text queries
-      See [OAK-902](https://issues.apache.org/jira/browse/OAK-902)
-
-
-* Workspace Operations:
-    * Cross workspace operations are not implemented yet
-      See [OAK-916](https://issues.apache.org/jira/browse/OAK-916)
-    * `Workspace#importXml()` not implemented yet
-      See [OAK-773](https://issues.apache.org/jira/browse/OAK-773)
-    * Workspace Management (creating/deleting workspaces) is not implemented yet
-      See [OAK-916](https://issues.apache.org/jira/browse/OAK-916)
-    * `Workspace#copy()` is not properly implemented
-      See [OAK-917](https://issues.apache.org/jira/browse/OAK-917) and sub tasks
-        * copy of referenceable nodes does not work
-          See [OAK-915](https://issues.apache.org/jira/browse/OAK-915)
-        * copy of versionable nodes does not create new version history
-          See [OAK-918](https://issues.apache.org/jira/browse/OAK-918)
-        * copy of locked nodes does not remove the lock
-          See [OAK-919](https://issues.apache.org/jira/browse/OAK-919)
-        * copy of trees with limited read access
-          See [OAK-920](https://issues.apache.org/jira/browse/OAK-920)
-
-
-* Access Control Management and Permissions:
-    * Move operations are not properly handled wrt. permissions
-      See [OAK-710](https://issues.apache.org/jira/browse/OAK-710)
-
-
-* User Management:
-    * Group membership stored in tree structure is not yet implemented
-      See [OAK-482](https://issues.apache.org/jira/browse/OAK-482)
-
-
-In some cases Oak throws Runtime exceptions instead of a properly typed exception. We are working
-on correcting this. Please do not work around this by adapting catch clauses in your application.
+* [AccessControl Management](differences_accesscontrol.html)
+* [Authentication](differences_authentication.html)
+* [Permission Evaluation](differences_permission.html)
+* [Principal Management](differences_principal.html)
+* [Privilege Management](differences_privileges.html)
+* [User Management](differences_user.html)

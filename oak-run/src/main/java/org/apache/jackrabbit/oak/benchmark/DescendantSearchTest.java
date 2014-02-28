@@ -16,6 +16,7 @@
  */
 package org.apache.jackrabbit.oak.benchmark;
 
+import javax.jcr.InvalidItemStateException;
 import javax.jcr.Node;
 import javax.jcr.NodeIterator;
 import javax.jcr.RepositoryException;
@@ -35,27 +36,19 @@ public class DescendantSearchTest extends AbstractTest {
     private Session session;
 
     private Node root;
+    
+    String testNodeName = "test" + TEST_ID;
 
     protected Query createQuery(QueryManager manager, int i)
             throws RepositoryException {
         @SuppressWarnings("deprecation")
         String xpath = Query.XPATH;
-        return manager.createQuery("/jcr:root/testroot//element(*,nt:base)[@testcount=" + i + "]", xpath);
+        return manager.createQuery("/jcr:root/" + testNodeName + "//element(*,nt:base)[@testcount=" + i + "]", xpath);
     }
 
     @Override
     public void beforeSuite() throws RepositoryException {
         session = getRepository().login(getCredentials());
-
-        root = session.getRootNode().addNode("testroot", "nt:unstructured");
-        for (int i = 0; i < NODE_COUNT; i++) {
-            Node node = root.addNode("node" + i, "nt:unstructured");
-            for (int j = 0; j < NODE_COUNT; j++) {
-                Node child = node.addNode("node" + j, "nt:unstructured");
-                child.setProperty("testcount", j);
-            }
-            session.save();
-        }
 
         try {
             // Jackrabbit 2 doesn't have the oak namespace
@@ -64,9 +57,25 @@ public class DescendantSearchTest extends AbstractTest {
             session.setNamespacePrefix("oak", "http://jackrabbit.apache.org/oak/ns/1.0");
         }
 
-        new OakIndexUtils.PropertyIndex().
-            property("testcount").
-            create(session);
+        try {
+            ensurePropertyIndex();
+        } catch (InvalidItemStateException e) {
+            // some other oak instance probably created the same
+            // index definition concurrently. refresh and try again
+            // do not catch exception if it fails again.
+            session.refresh(false);
+            ensurePropertyIndex();
+        }
+
+        root = session.getRootNode().addNode(testNodeName, "nt:unstructured");
+        for (int i = 0; i < NODE_COUNT; i++) {
+            Node node = root.addNode("node" + i, "nt:unstructured");
+            for (int j = 0; j < NODE_COUNT; j++) {
+                Node child = node.addNode("node" + j, "nt:unstructured");
+                child.setProperty("testcount", j);
+            }
+            session.save();
+        }
     }
 
     @Override
@@ -96,4 +105,9 @@ public class DescendantSearchTest extends AbstractTest {
         session.logout();
     }
 
+    private void ensurePropertyIndex() throws RepositoryException {
+        new OakIndexUtils.PropertyIndex().
+                property("testcount").
+                create(session);
+    }
 }

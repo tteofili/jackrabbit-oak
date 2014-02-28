@@ -136,7 +136,7 @@ class GroupImpl extends AuthorizableImpl implements Group {
         if (newMember.isGroup()) {
             MembershipProvider mProvider = getMembershipProvider();
             String contentId = mProvider.getContentID(getTree());
-            if (mProvider.isCyclicMembership(newMember.getTree(), contentId)) {
+            if (mProvider.isMember(newMember.getTree(), contentId, true)) {
                 // found cyclic group membership
                 return true;
             }
@@ -191,7 +191,7 @@ class GroupImpl extends AuthorizableImpl implements Group {
                     }
             );
         } else {
-            Iterator oakPaths = getMembershipProvider().getMembers(getTree(), AuthorizableType.AUTHORIZABLE, includeInherited);
+            Iterator<String> oakPaths = getMembershipProvider().getMembers(getTree(), AuthorizableType.AUTHORIZABLE, includeInherited);
             if (oakPaths.hasNext()) {
                 AuthorizableIterator iterator = AuthorizableIterator.create(oakPaths, userMgr, AuthorizableType.AUTHORIZABLE);
                 return new RangeIteratorAdapter(iterator, iterator.getSize());

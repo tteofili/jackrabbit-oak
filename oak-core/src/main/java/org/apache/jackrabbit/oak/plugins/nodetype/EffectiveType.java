@@ -16,6 +16,17 @@
  */
 package org.apache.jackrabbit.oak.plugins.nodetype;
 
+import java.util.List;
+import java.util.Set;
+import javax.annotation.CheckForNull;
+import javax.annotation.Nonnull;
+
+import org.apache.jackrabbit.oak.api.CommitFailedException;
+import org.apache.jackrabbit.oak.api.PropertyState;
+import org.apache.jackrabbit.oak.api.Type;
+import org.apache.jackrabbit.oak.spi.state.ChildNodeEntry;
+import org.apache.jackrabbit.oak.spi.state.NodeState;
+
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.collect.Iterables.addAll;
 import static com.google.common.collect.Iterables.concat;
@@ -23,7 +34,6 @@ import static com.google.common.collect.Iterables.contains;
 import static com.google.common.collect.Lists.newArrayListWithCapacity;
 import static com.google.common.collect.Sets.newHashSet;
 import static org.apache.jackrabbit.JcrConstants.JCR_DEFAULTPRIMARYTYPE;
-import static org.apache.jackrabbit.JcrConstants.JCR_ISMIXIN;
 import static org.apache.jackrabbit.JcrConstants.JCR_MANDATORY;
 import static org.apache.jackrabbit.JcrConstants.JCR_MIXINTYPES;
 import static org.apache.jackrabbit.JcrConstants.JCR_NODETYPENAME;
@@ -34,28 +44,13 @@ import static org.apache.jackrabbit.oak.api.CommitFailedException.CONSTRAINT;
 import static org.apache.jackrabbit.oak.api.Type.UNDEFINED;
 import static org.apache.jackrabbit.oak.api.Type.UNDEFINEDS;
 import static org.apache.jackrabbit.oak.commons.PathUtils.dropIndexFromName;
-import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.JCR_IS_ABSTRACT;
-import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.OAK_MANDATORY_CHILD_NODES;
-import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.OAK_MANDATORY_PROPERTIES;
-import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.OAK_NAMED_CHILD_NODE_DEFINITIONS;
-import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.OAK_NAMED_PROPERTY_DEFINITIONS;
-import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.OAK_RESIDUAL_CHILD_NODE_DEFINITIONS;
-import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.OAK_RESIDUAL_PROPERTY_DEFINITIONS;
-import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.OAK_SUPERTYPES;
-
-import java.util.List;
-import java.util.Set;
-
-import javax.annotation.CheckForNull;
-import javax.annotation.Nonnull;
-
-import org.apache.jackrabbit.oak.api.CommitFailedException;
-import org.apache.jackrabbit.oak.api.PropertyState;
-import org.apache.jackrabbit.oak.api.Type;
-import org.apache.jackrabbit.oak.spi.state.ChildNodeEntry;
-import org.apache.jackrabbit.oak.spi.state.NodeState;
-
-import com.google.common.collect.Lists;
+import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.REP_MANDATORY_CHILD_NODES;
+import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.REP_MANDATORY_PROPERTIES;
+import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.REP_NAMED_CHILD_NODE_DEFINITIONS;
+import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.REP_NAMED_PROPERTY_DEFINITIONS;
+import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.REP_RESIDUAL_CHILD_NODE_DEFINITIONS;
+import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.REP_RESIDUAL_PROPERTY_DEFINITIONS;
+import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.REP_SUPERTYPES;
 
 class EffectiveType {
 
@@ -81,7 +76,7 @@ class EffectiveType {
     boolean isNodeType(String name) {
         for (NodeState type : types) {
             if (name.equals(type.getName(JCR_NODETYPENAME))
-                    || contains(type.getNames(OAK_SUPERTYPES), name)) {
+                    || contains(type.getNames(REP_SUPERTYPES), name)) {
                 return true;
             }
         }
@@ -89,21 +84,21 @@ class EffectiveType {
     }
 
     boolean isMandatoryProperty(String name) {
-        return nameSetContains(OAK_MANDATORY_PROPERTIES, name);
+        return nameSetContains(REP_MANDATORY_PROPERTIES, name);
     }
 
     @Nonnull
     Set<String> getMandatoryProperties() {
-        return getNameSet(OAK_MANDATORY_PROPERTIES);
+        return getNameSet(REP_MANDATORY_PROPERTIES);
     }
 
     boolean isMandatoryChildNode(String name) {
-        return nameSetContains(OAK_MANDATORY_CHILD_NODES, name);
+        return nameSetContains(REP_MANDATORY_CHILD_NODES, name);
     }
 
     @Nonnull
     Set<String> getMandatoryChildNodes() {
-        return getNameSet(OAK_MANDATORY_CHILD_NODES);
+        return getNameSet(REP_MANDATORY_CHILD_NODES);
     }
 
     /**
@@ -119,11 +114,11 @@ class EffectiveType {
 
         String escapedName;
         if (JCR_PRIMARYTYPE.equals(propertyName)) {
-            escapedName = "oak:primaryType";
+            escapedName = NodeTypeConstants.REP_PRIMARY_TYPE;
         } else if (JCR_MIXINTYPES.equals(propertyName)) {
-            escapedName = "oak:mixinTypes";
+            escapedName = NodeTypeConstants.REP_MIXIN_TYPES;
         } else if (JCR_UUID.equals(propertyName)) {
-            escapedName = "oak:uuid";
+            escapedName = NodeTypeConstants.REP_UUID;
         } else {
             escapedName = propertyName;
         }
@@ -139,7 +134,7 @@ class EffectiveType {
         // Find matching named property definition
         for (NodeState type : types) {
             NodeState definitions = type
-                    .getChildNode(OAK_NAMED_PROPERTY_DEFINITIONS)
+                    .getChildNode(REP_NAMED_PROPERTY_DEFINITIONS)
                     .getChildNode(escapedName);
 
             NodeState definition = definitions.getChildNode(definedType);
@@ -169,7 +164,7 @@ class EffectiveType {
         // Find matching residual property definition
         for (NodeState type : types) {
             NodeState residual =
-                    type.getChildNode(OAK_RESIDUAL_PROPERTY_DEFINITIONS);
+                    type.getChildNode(REP_RESIDUAL_PROPERTY_DEFINITIONS);
             NodeState definition = residual.getChildNode(definedType);
             if (!definition.exists()) {
                 definition = residual.getChildNode(undefinedType);
@@ -199,7 +194,7 @@ class EffectiveType {
         // Find matching named child node definition
         for (NodeState type : types) {
             NodeState definitions = type
-                    .getChildNode(OAK_NAMED_CHILD_NODE_DEFINITIONS)
+                    .getChildNode(REP_NAMED_CHILD_NODE_DEFINITIONS)
                     .getChildNode(name);
 
             for (String typeName : typeNames) {
@@ -226,7 +221,7 @@ class EffectiveType {
         // Find matching residual child node definition
         for (NodeState type : types) {
             NodeState residual =
-                    type.getChildNode(OAK_RESIDUAL_CHILD_NODE_DEFINITIONS);
+                    type.getChildNode(REP_RESIDUAL_CHILD_NODE_DEFINITIONS);
             for (String typeName : typeNames) {
                 NodeState definition = residual.getChildNode(typeName);
                 if (definition.exists() && snsMatch(sns, definition)) {
@@ -251,10 +246,10 @@ class EffectiveType {
 
         for (NodeState type : types) {
             NodeState named = type
-                    .getChildNode(OAK_NAMED_CHILD_NODE_DEFINITIONS)
+                    .getChildNode(REP_NAMED_CHILD_NODE_DEFINITIONS)
                     .getChildNode(name);
             NodeState residual = type
-                    .getChildNode(OAK_RESIDUAL_CHILD_NODE_DEFINITIONS);
+                    .getChildNode(REP_RESIDUAL_CHILD_NODE_DEFINITIONS);
 
             for (ChildNodeEntry entry : concat(
                     named.getChildNodeEntries(),
@@ -274,68 +269,10 @@ class EffectiveType {
         Set<String> names = newHashSet();
         for (NodeState type : types) {
             names.add(type.getName(JCR_NODETYPENAME));
-            addAll(names, type.getNames(OAK_SUPERTYPES));
+            addAll(names, type.getNames(REP_SUPERTYPES));
         }
         return names;
     }
-
-    /**
-     * Collects the primary and mixin types and all related supertypes
-     * of the given child node and returns them as an effective node type.
-     *
-     * @param types the {@code /jcr:system/jcr:nodeTypes} subtree
-     * @param path path of the parent node
-     * @param name name of the child node
-     * @param primary name of the primary type
-     * @param mixins names of the mixin types
-     * @throws CommitFailedException if the effective node type is invalid
-     */
-    EffectiveType computeEffectiveType(
-            NodeState types, String path,
-            String name, String primary, Iterable<String> mixins)
-            throws CommitFailedException {
-        List<NodeState> list = Lists.newArrayList();
-
-        NodeState type = types.getChildNode(primary);
-        if (!type.exists()) {
-            throw constraintViolation(
-                    1, path, "The primary type " + primary
-                    + " of child node " + name + " does not exist");
-        } else if (type.getBoolean(JCR_ISMIXIN)) {
-            throw constraintViolation(
-                    2, path, "Mixin type " + primary
-                    + " used as the primary type of child node " + name);
-        } else if (type.getBoolean(JCR_IS_ABSTRACT)) {
-            throw constraintViolation(
-                    3, path, "Abstract type " + primary
-                    + " used as the primary type of child node " + name);
-        } else {
-            list.add(type);
-        }
-
-        // mixin types
-        for (String mixin : mixins) {
-            type = types.getChildNode(mixin);
-            if (!type.exists()) {
-                throw constraintViolation(
-                        5, path, "The mixin type " + mixin
-                        + " of child node " + name + " does not exist");
-            } else if (!type.getBoolean(JCR_ISMIXIN)) {
-                throw constraintViolation(
-                        6, path, "Primary type " + mixin
-                        + " used as a mixin type of child node " + name);
-            } else if (type.getBoolean(JCR_IS_ABSTRACT)) {
-                throw constraintViolation(
-                        7, path, "Abstract type " + mixin
-                        + " used as a mixin type of child node " + name);
-            } else {
-                list.add(type);
-            }
-        }
-
-        return new EffectiveType(list);
-    }
-
 
     //------------------------------------------------------------< Object >--
 

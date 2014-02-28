@@ -16,24 +16,31 @@
  */
 package org.apache.jackrabbit.oak.security.user;
 
+import java.security.Principal;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import javax.annotation.Nonnull;
-import javax.security.auth.Subject;
 
+import org.apache.felix.scr.annotations.Activate;
 import org.apache.felix.scr.annotations.Component;
 import org.apache.felix.scr.annotations.Service;
 import org.apache.jackrabbit.api.security.user.UserManager;
 import org.apache.jackrabbit.oak.api.Root;
 import org.apache.jackrabbit.oak.namepath.NamePathMapper;
+import org.apache.jackrabbit.oak.security.user.autosave.AutoSaveEnabledManager;
+import org.apache.jackrabbit.oak.spi.commit.MoveTracker;
 import org.apache.jackrabbit.oak.spi.commit.ValidatorProvider;
 import org.apache.jackrabbit.oak.spi.lifecycle.WorkspaceInitializer;
 import org.apache.jackrabbit.oak.spi.security.ConfigurationBase;
+import org.apache.jackrabbit.oak.spi.security.ConfigurationParameters;
 import org.apache.jackrabbit.oak.spi.security.Context;
 import org.apache.jackrabbit.oak.spi.security.SecurityConfiguration;
 import org.apache.jackrabbit.oak.spi.security.SecurityProvider;
 import org.apache.jackrabbit.oak.spi.security.user.UserConfiguration;
+import org.apache.jackrabbit.oak.spi.security.user.UserConstants;
 import org.apache.jackrabbit.oak.spi.xml.ProtectedItemImporter;
 
 /**
@@ -48,7 +55,12 @@ public class UserConfigurationImpl extends ConfigurationBase implements UserConf
     }
 
     public UserConfigurationImpl(SecurityProvider securityProvider) {
-        super(securityProvider);
+        super(securityProvider, securityProvider.getParameters(NAME));
+    }
+
+    @Activate
+    private void activate(Map<String, Object> properties) {
+        setParameters(ConfigurationParameters.of(properties));
     }
 
     //----------------------------------------------< SecurityConfiguration >---
@@ -66,8 +78,7 @@ public class UserConfigurationImpl extends ConfigurationBase implements UserConf
 
     @Nonnull
     @Override
-    public List<? extends ValidatorProvider> getValidators(
-            String workspaceName, Subject subject) {
+    public List<? extends ValidatorProvider> getValidators(String workspaceName, Set<Principal> principals, MoveTracker moveTracker) {
         return Collections.singletonList(new UserValidatorProvider(getParameters()));
     }
 
@@ -87,6 +98,11 @@ public class UserConfigurationImpl extends ConfigurationBase implements UserConf
     @Nonnull
     @Override
     public UserManager getUserManager(Root root, NamePathMapper namePathMapper) {
-        return new UserManagerImpl(root, namePathMapper, getSecurityProvider());
+        UserManager umgr = new UserManagerImpl(root, namePathMapper, getSecurityProvider());
+        if (getParameters().getConfigValue(UserConstants.PARAM_SUPPORT_AUTOSAVE, false)) {
+            return new AutoSaveEnabledManager(umgr, root);
+        } else {
+            return umgr;
+        }
     }
 }

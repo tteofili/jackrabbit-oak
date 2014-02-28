@@ -16,6 +16,9 @@
  */
 package org.apache.jackrabbit.oak.plugins.segment;
 
+import static com.google.common.collect.Lists.newArrayList;
+import static junit.framework.Assert.fail;
+import static org.apache.jackrabbit.oak.api.Type.BINARIES;
 import static org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState.EMPTY_NODE;
 import static org.apache.jackrabbit.oak.plugins.segment.ListRecord.LEVEL_SIZE;
 import static org.junit.Assert.assertEquals;
@@ -100,12 +103,34 @@ public class RecordTest {
         assertEquals(LEVEL_SIZE * LEVEL_SIZE + 1, level2p.size());
         assertEquals(blockId, level2p.getEntry(0));
         assertEquals(blockId, level2p.getEntry(LEVEL_SIZE * LEVEL_SIZE));
+
+        try {
+            int count = 0;
+            for (RecordId entry : level2p.getEntries()) {
+                assertEquals(blockId, entry);
+                assertEquals(blockId, level2p.getEntry(count));
+                count++;
+            }
+            assertEquals(LEVEL_SIZE * LEVEL_SIZE + 1, count);
+        } catch (IllegalArgumentException e) {
+            fail("OAK-1287");
+        }
     }
 
     private ListRecord writeList(int size, RecordId id) {
         List<RecordId> list = Collections.nCopies(size, id);
         return new ListRecord(
                 writer.getDummySegment(), writer.writeList(list), size);
+    }
+
+    @Test
+    public void testListWithLotsOfReferences() { // OAK-1184
+        SegmentIdFactory factory = new SegmentIdFactory();
+        List<RecordId> list = newArrayList();
+        for (int i = 0; i < 1000; i++) {
+            list.add(new RecordId(factory.newBulkSegmentId(), 0));
+        }
+        writer.writeList(list);
     }
 
     @Test
@@ -153,7 +178,7 @@ public class RecordTest {
         RecordId hello = writer.writeString("Hello, World!");
 
         StringBuilder builder = new StringBuilder();
-        for (int i = 0; i < 100000; i++) {
+        for (int i = 0; i < 2 * Segment.MAX_SEGMENT_SIZE + 1000; i++) {
             builder.append((char) ('0' + i % 10));
         }
         RecordId large = writer.writeString(builder.toString());
@@ -300,6 +325,35 @@ public class RecordTest {
         }
         NodeState after = writer.writeNode(builder.getNodeState());
         assertEquals(builder.getNodeState(), after);
+    }
+
+    @Test
+    public void testMultiValuedBinaryPropertyAcrossSegments()
+            throws IOException {
+        // biggest possible inlined value record
+        byte[] data = new byte[Segment.MEDIUM_LIMIT - 1];
+        random.nextBytes(data);
+
+        // create enough copies of the value to fill a full segment
+        List<Blob> blobs = newArrayList();
+        while (blobs.size() * data.length < Segment.MAX_SEGMENT_SIZE) {
+            blobs.add(writer.writeStream(new ByteArrayInputStream(data)));
+        }
+
+        // write a simple node that'll now be stored in a separate segment
+        NodeBuilder builder = EMPTY_NODE.builder();
+        builder.setProperty("test", blobs, BINARIES);
+        NodeState state = writer.writeNode(builder.getNodeState());
+
+        // all the blobs should still be accessible, even if they're
+        // referenced from another segment
+        for (Blob blob : state.getProperty("test").getValue(BINARIES)) {
+            try {
+                blob.getNewStream().close();
+            } catch (IllegalStateException e) {
+                fail("OAK-1374");
+            }
+        }
     }
 
 }

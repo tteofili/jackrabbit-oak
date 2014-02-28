@@ -16,18 +16,14 @@
  */
 package org.apache.jackrabbit.oak.security.privilege;
 
-import static java.util.Arrays.asList;
-
 import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
-
 import javax.annotation.Nonnull;
 import javax.jcr.RepositoryException;
 
 import com.google.common.collect.ImmutableMap;
-
 import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.api.Root;
 import org.apache.jackrabbit.oak.api.Tree;
@@ -37,6 +33,8 @@ import org.apache.jackrabbit.oak.spi.security.privilege.PrivilegeBitsProvider;
 import org.apache.jackrabbit.oak.spi.security.privilege.PrivilegeConstants;
 import org.apache.jackrabbit.oak.spi.security.privilege.PrivilegeDefinition;
 import org.apache.jackrabbit.oak.util.NodeUtil;
+
+import static java.util.Arrays.asList;
 
 /**
  * PrivilegeDefinitionWriter is responsible for writing privilege definitions
@@ -54,7 +52,7 @@ class PrivilegeDefinitionWriter implements PrivilegeConstants {
             JCR_READ_ACCESS_CONTROL, JCR_MODIFY_ACCESS_CONTROL, JCR_NODE_TYPE_MANAGEMENT,
             JCR_VERSION_MANAGEMENT, JCR_LOCK_MANAGEMENT, JCR_LIFECYCLE_MANAGEMENT,
             JCR_RETENTION_MANAGEMENT, JCR_WORKSPACE_MANAGEMENT, JCR_NODE_TYPE_DEFINITION_MANAGEMENT,
-            JCR_NAMESPACE_MANAGEMENT, REP_PRIVILEGE_MANAGEMENT, REP_USER_MANAGEMENT};
+            JCR_NAMESPACE_MANAGEMENT, REP_PRIVILEGE_MANAGEMENT, REP_USER_MANAGEMENT, REP_INDEX_DEFINITION_MANAGEMENT};
 
     /**
      * The internal names and aggregation definition of all built-in privileges
@@ -78,7 +76,7 @@ class PrivilegeDefinitionWriter implements PrivilegeConstants {
         if (privilegesTree.exists() && privilegesTree.hasProperty(REP_NEXT)) {
             next = PrivilegeBits.getInstance(privilegesTree);
         } else {
-            next = PrivilegeBits.BUILT_IN.get(REP_USER_MANAGEMENT).nextBits();
+            next = PrivilegeBits.NEXT_AFTER_BUILT_INS;
         }
     }
 

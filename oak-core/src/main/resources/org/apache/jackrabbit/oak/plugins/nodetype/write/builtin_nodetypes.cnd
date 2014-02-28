@@ -263,10 +263,21 @@
   - * (UNDEFINED)
   + * (nt:base) = nt:unstructured sns VERSION
 
-[oak:unstructured]
+[oak:Unstructured]
  - * (UNDEFINED) multiple
  - * (UNDEFINED)
- + * (nt:base) = oak:unstructured VERSION
+ + * (nt:base) = oak:Unstructured VERSION
+
+/**
+ * Unstructured base node type for repository internal information that must not
+ * be copied to the version store OPV
+ *
+ * @since oak 1.0
+ */
+[rep:Unstructured]
+ - * (UNDEFINED) multiple IGNORE
+ - * (UNDEFINED) IGNORE
+ + * (nt:base) = rep:Unstructured IGNORE
 
 //------------------------------------------------------------------------------
 // R E F E R E N C E A B L E
@@ -428,42 +439,39 @@
 /**
  * @since oak 1.0
  */
-[oak:nodeType] > nt:nodeType
-  - oak:supertypes (NAME) protected multiple autocreated
-  - oak:primarySubtypes (NAME) protected multiple autocreated
-  - oak:mixinSubtypes (NAME) protected multiple autocreated
-  - oak:mandatoryProperties (NAME) protected multiple autocreated
-  - oak:mandatoryChildNodes (NAME) protected multiple autocreated
-  - oak:protectedProperties (NAME) protected multiple autocreated
-  - oak:protectedChildNodes (NAME) protected multiple autocreated
-  - oak:hasProtectedResidualProperties (BOOLEAN) protected autocreated
-  - oak:hasProtectedResidualChildNodes (BOOLEAN) protected autocreated
-  - oak:namedSingleValuedProperties (NAME) protected multiple autocreated
-  + oak:namedPropertyDefinitions (oak:namedPropertyDefinitions) = oak:namedPropertyDefinitions protected mandatory
-  + oak:residualPropertyDefinitions (oak:propertyDefinitions) = oak:propertyDefinitions protected mandatory
-  + oak:namedChildNodeDefinitions (oak:namedChildNodeDefinitions) = oak:namedChildNodeDefinitions protected mandatory
-  + oak:residualChildNodeDefinitions (oak:childNodeDefinitions) = oak:childNodeDefinitions protected mandatory
+[rep:NodeType] > nt:nodeType
+  - rep:supertypes (NAME) protected multiple autocreated
+  - rep:primarySubtypes (NAME) protected multiple autocreated
+  - rep:mixinSubtypes (NAME) protected multiple autocreated
+  - rep:mandatoryProperties (NAME) protected multiple autocreated
+  - rep:mandatoryChildNodes (NAME) protected multiple autocreated
+  - rep:protectedProperties (NAME) protected multiple autocreated
+  - rep:protectedChildNodes (NAME) protected multiple autocreated
+  - rep:hasProtectedResidualProperties (BOOLEAN) protected autocreated
+  - rep:hasProtectedResidualChildNodes (BOOLEAN) protected autocreated
+  - rep:namedSingleValuedProperties (NAME) protected multiple autocreated
+  + rep:namedPropertyDefinitions (rep:NamedPropertyDefinitions) = rep:NamedPropertyDefinitions protected
+  + rep:residualPropertyDefinitions (rep:PropertyDefinitions) = rep:PropertyDefinitions protected
+  + rep:namedChildNodeDefinitions (rep:NamedChildNodeDefinitions) = rep:NamedChildNodeDefinitions protected
+  + rep:residualChildNodeDefinitions (rep:ChildNodeDefinitions) = rep:ChildNodeDefinitions protected
 
-/**
- * @since oak 1.0
- */
-[oak:namedPropertyDefinitions]
-  + * (oak:propertyDefinitions) = oak:propertyDefinitions protected
+[rep:NamedPropertyDefinitions]
+  + * (rep:PropertyDefinitions) = rep:PropertyDefinitions protected
 
-/**
- * @since oak 1.0
- */
-[oak:propertyDefinitions]
-  + * (nt:propertyDefinition) = nt:propertyDefinition protected
+[rep:PropertyDefinitions]
+  + * (rep:PropertyDefinition) = rep:PropertyDefinition protected
 
-[oak:namedChildNodeDefinitions]
-  + * (oak:childNodeDefinitions) = oak:childNodeDefinitions protected
+[rep:PropertyDefinition] > nt:propertyDefinition
+  - rep:declaringNodeType (NAME) protected mandatory
 
-/**
- * @since oak 1.0
- */
-[oak:childNodeDefinitions]
-  + * (nt:childNodeDefinition) = nt:childNodeDefinition protected
+[rep:NamedChildNodeDefinitions]
+  + * (rep:ChildNodeDefinitions) = rep:ChildNodeDefinitions protected
+
+[rep:ChildNodeDefinitions]
+  + * (rep:ChildNodeDefinition) = rep:ChildNodeDefinition protected
+
+[rep:ChildNodeDefinition] > nt:childNodeDefinition
+  - rep:declaringNodeType (NAME) protected mandatory
 
 /**
  * This node type used to store a property definition within a node type definition,
@@ -522,10 +530,10 @@
  *
  * @since oak 0.6
  */
-[oak:queryIndexDefinition] > nt:unstructured
+[oak:QueryIndexDefinition] > oak:Unstructured
   - type (STRING) mandatory
   - async (STRING)
-  - reindex (BOOLEAN) mandatory IGNORE
+  - reindex (BOOLEAN) IGNORE
 
 //------------------------------------------------------------------------------
 // L I F E C Y C L E   M A N A G E M E N T
@@ -669,7 +677,9 @@
  * @since oak 1.0
  */
 [rep:PermissionStore]
-  - rep:accessControlledPath (STRING) protected
+  - rep:accessControlledPath (STRING) protected IGNORE
+  - rep:numPermissions (LONG) protected IGNORE
+  - rep:modCount (LONG) protected IGNORE
   + * (rep:PermissionStore) = rep:PermissionStore protected IGNORE
   + * (rep:Permissions) = rep:Permissions protected IGNORE
 
@@ -677,8 +687,8 @@
  * @since oak 1.0
  */
 [rep:Permissions]
-  - * (UNDEFINED) protected
-  - * (UNDEFINED) protected multiple
+  - * (UNDEFINED) protected IGNORE
+  - * (UNDEFINED) protected multiple IGNORE
   + * (rep:Permissions) = rep:Permissions protected IGNORE
 
 // -----------------------------------------------------------------------------
@@ -701,18 +711,33 @@
   - rep:password (STRING) protected
   - rep:disabled (STRING) protected
 
-[rep:Group] > rep:Authorizable
-  + rep:members (rep:Members) = rep:Members multiple protected VERSION /* FIXME: SNS definition */
-  - rep:members (WEAKREFERENCE) protected multiple < 'rep:Authorizable'
+[rep:Group] > rep:Authorizable, rep:MemberReferences
+  + rep:members (rep:Members) = rep:Members multiple protected VERSION /* @deprecated since oak 1.0 (remove?) */
+  + rep:membersList (rep:MemberReferencesList) = rep:MemberReferencesList protected COPY /* @since oak 1.0 */
 
 [rep:AuthorizableFolder] > nt:hierarchyNode
   + * (rep:Authorizable) = rep:User VERSION
   + * (rep:AuthorizableFolder) = rep:AuthorizableFolder VERSION
 
+/*
+ * @deprecated since oak 1.0
+ */
 [rep:Members]
   orderable
-  + * (rep:Members) = rep:Members protected multiple /* FIXME: SNS definition */
-  - * (WEAKREFERENCE) protected < 'rep:Authorizable' /* FIXME: OAK-482 */
+  + * (rep:Members) = rep:Members protected multiple
+  - * (WEAKREFERENCE) protected < 'rep:Authorizable'
+
+/**
+ * @since oak 1.0
+ */
+[rep:MemberReferences]
+  - rep:members (WEAKREFERENCE) protected multiple < 'rep:Authorizable'
+
+/**
+ * @since oak 1.0
+ */
+[rep:MemberReferencesList]
+  + * (rep:MemberReferences) = rep:MemberReferences protected COPY
 
 // -----------------------------------------------------------------------------
 // Privilege Management
@@ -761,4 +786,4 @@
 [rep:MergeConflict]
   mixin
   primaryitem rep:ours
-  + rep:ours (nt:unstructured) protected IGNORE
+  + rep:ours (rep:Unstructured) protected IGNORE

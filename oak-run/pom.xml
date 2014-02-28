@@ -23,7 +23,7 @@
   <parent>
     <groupId>org.apache.jackrabbit</groupId>
     <artifactId>oak-parent</artifactId>
-    <version>0.11-SNAPSHOT</version>
+    <version>0.18-SNAPSHOT</version>
     <relativePath>../oak-parent/pom.xml</relativePath>
   </parent>
 
@@ -110,6 +110,7 @@
             <excludes>
               <exclude>README.md</exclude>
               <exclude>src/main/resources/deepTree.xml</exclude>
+              <exclude>src/main/resources/deepTree_everyone.xml</exclude>
             </excludes>
           </configuration>
         </plugin>
@@ -126,6 +127,16 @@
     <dependency>
       <groupId>org.apache.jackrabbit</groupId>
       <artifactId>oak-http</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.jackrabbit</groupId>
+      <artifactId>oak-upgrade</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.jackrabbit</groupId>
+      <artifactId>oak-mk-remote</artifactId>
       <version>${project.version}</version>
     </dependency>
     <dependency>
@@ -148,6 +159,11 @@
       <version>${jackrabbit.version}</version>
     </dependency>
     <dependency>
+      <groupId>org.apache.jackrabbit</groupId>
+      <artifactId>jackrabbit-data</artifactId>
+      <version>${jackrabbit.version}</version>
+    </dependency>
+    <dependency>
       <groupId>org.apache.commons</groupId>
       <artifactId>commons-math</artifactId>
       <version>2.0</version>
@@ -166,7 +182,10 @@
       <groupId>ch.qos.logback</groupId>
       <artifactId>logback-classic</artifactId>
     </dependency>
-
+    <dependency>
+      <groupId>org.apache.jclouds.provider</groupId>
+      <artifactId>aws-s3</artifactId>
+    </dependency>
     <!-- Test dependencies -->
     <dependency>
       <groupId>junit</groupId>

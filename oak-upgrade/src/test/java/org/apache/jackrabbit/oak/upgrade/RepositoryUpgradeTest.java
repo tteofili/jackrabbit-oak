@@ -18,45 +18,38 @@
  */
 package org.apache.jackrabbit.oak.upgrade;
 
-import static junit.framework.Assert.assertEquals;
-import static junit.framework.Assert.assertFalse;
-import static junit.framework.Assert.assertTrue;
-
 import java.io.ByteArrayInputStream;
-import java.io.File;
 import java.io.InputStream;
 import java.math.BigDecimal;
 import java.util.Calendar;
 import java.util.Random;
 
 import javax.jcr.Binary;
-import javax.jcr.Credentials;
 import javax.jcr.NamespaceRegistry;
 import javax.jcr.Node;
+import javax.jcr.PropertyIterator;
 import javax.jcr.PropertyType;
 import javax.jcr.Repository;
 import javax.jcr.Session;
-import javax.jcr.SimpleCredentials;
 import javax.jcr.Value;
 import javax.jcr.nodetype.NodeType;
 import javax.jcr.nodetype.NodeTypeManager;
 import javax.jcr.nodetype.NodeTypeTemplate;
+import javax.jcr.security.Privilege;
 
-import org.apache.commons.io.FileUtils;
-import org.apache.jackrabbit.core.RepositoryImpl;
-import org.apache.jackrabbit.core.config.RepositoryConfig;
-import org.apache.jackrabbit.mk.core.MicroKernelImpl;
-import org.apache.jackrabbit.oak.Oak;
-import org.apache.jackrabbit.oak.jcr.Jcr;
-import org.apache.jackrabbit.oak.kernel.KernelNodeStore;
-import org.apache.jackrabbit.oak.spi.state.NodeStore;
-import org.apache.jackrabbit.oak.upgrade.RepositoryUpgrade;
+import org.apache.jackrabbit.api.JackrabbitSession;
+import org.apache.jackrabbit.api.JackrabbitWorkspace;
+import org.apache.jackrabbit.api.security.authorization.PrivilegeManager;
+import org.apache.jackrabbit.oak.plugins.index.IndexConstants;
+import org.apache.jackrabbit.oak.spi.security.user.UserConstants;
 import org.junit.Test;
 
-public class RepositoryUpgradeTest {
+import static junit.framework.Assert.assertEquals;
+import static junit.framework.Assert.assertFalse;
+import static junit.framework.Assert.assertNotNull;
+import static junit.framework.Assert.assertTrue;
 
-    private static final Credentials CREDENTIALS =
-            new SimpleCredentials("admin", "admin".toCharArray());
+public class RepositoryUpgradeTest extends AbstractRepositoryUpgradeTest {
 
     private static final Calendar DATE = Calendar.getInstance();
 
@@ -66,50 +59,40 @@ public class RepositoryUpgradeTest {
         new Random().nextBytes(BINARY);
     }
 
-    private String identifier;
+    // needs to be static because the content is created during the @BeforeClass phase
+    private static String testNodeIdentifier;
 
-    @Test
-    public void testUpgrade() throws Exception{
-        File directory = new File("target", "upgrade");
-        FileUtils.deleteQuietly(directory);
-
-        File source = new File(directory, "source");
-        RepositoryConfig config = RepositoryConfig.install(source);
-        RepositoryImpl repository = RepositoryImpl.create(config);
-        try {
-            createSourceContent(repository);
-        } finally {
-            repository.shutdown();
-        }
-
-        NodeStore target = new KernelNodeStore(new MicroKernelImpl());
-        RepositoryUpgrade.copy(source, target);
-        Jcr jcr = new Jcr(new Oak(target));
-        verifyTargetContent(jcr.createRepository());
-    }
-
-    private void createSourceContent(Repository repository) throws Exception {
+    protected void createSourceContent(Repository repository) throws Exception {
         Session session = repository.login(CREDENTIALS);
         try {
-            NamespaceRegistry registry =
-                session.getWorkspace().getNamespaceRegistry();
+            JackrabbitWorkspace workspace =
+                    (JackrabbitWorkspace) session.getWorkspace();
+
+            NamespaceRegistry registry = workspace.getNamespaceRegistry();
             registry.registerNamespace("test", "http://www.example.org/");
 
-            NodeTypeManager manager =
-                session.getWorkspace().getNodeTypeManager();
-            NodeTypeTemplate template = manager.createNodeTypeTemplate();
+            PrivilegeManager privilegeManager = workspace.getPrivilegeManager();
+            privilegeManager.registerPrivilege("test:privilege", false, null);
+            privilegeManager.registerPrivilege(
+                    "test:aggregate", false, new String[] { "jcr:read", "test:privilege" });
+
+            NodeTypeManager nodeTypeManager = workspace.getNodeTypeManager();
+            NodeTypeTemplate template = nodeTypeManager.createNodeTypeTemplate();
             template.setName("test:unstructured");
             template.setDeclaredSuperTypeNames(
                     new String[] { "nt:unstructured" });
-            manager.registerNodeType(template, false);
+            nodeTypeManager.registerNodeType(template, false);
 
             Node root = session.getRootNode();
 
             Node referenceable =
                 root.addNode("referenceable", "test:unstructured");
             referenceable.addMixin(NodeType.MIX_REFERENCEABLE);
+            Node referenceable2 =
+                root.addNode("referenceable2", "test:unstructured");
+            referenceable2.addMixin(NodeType.MIX_REFERENCEABLE);
             session.save();
-            identifier = referenceable.getIdentifier();
+            testNodeIdentifier = referenceable.getIdentifier();
 
             Node properties = root.addNode("properties", "test:unstructured");
             properties.setProperty("boolean", true);
@@ -125,6 +108,9 @@ public class RepositoryUpgradeTest {
             properties.setProperty("double", Math.PI);
             properties.setProperty("long", 9876543210L);
             properties.setProperty("reference", referenceable);
+            properties.setProperty("weak_reference", session.getValueFactory().createValue(referenceable, true));
+            properties.setProperty("mv_reference", new Value[]{session.getValueFactory().createValue(referenceable2, false)});
+            properties.setProperty("mv_weak_reference", new Value[]{session.getValueFactory().createValue(referenceable2, true)});
             properties.setProperty("string", "test");
             properties.setProperty("multiple", "a,b,c".split(","));
             session.save();
@@ -133,8 +119,8 @@ public class RepositoryUpgradeTest {
             try {
                 InputStream stream = binary.getStream();
                 try {
-                    for (int i = 0; i < BINARY.length; i++) {
-                        assertEquals(BINARY[i], (byte) stream.read());
+                    for (byte aBINARY : BINARY) {
+                        assertEquals(aBINARY, (byte) stream.read());
                     }
                     assertEquals(-1, stream.read());
                 } finally {
@@ -148,20 +134,86 @@ public class RepositoryUpgradeTest {
         }
     }
 
-    private void verifyTargetContent(Repository repository) throws Exception {
-        Session session = repository.login(CREDENTIALS);
+    @Test
+    public void verifyNameSpaces() throws Exception {
+        Session session = createAdminSession();
         try {
             assertEquals(
                     "http://www.example.org/",
                     session.getNamespaceURI("test"));
+        } finally {
+            session.logout();
+        }
+    }
 
-            NodeTypeManager manager =
-                    session.getWorkspace().getNodeTypeManager();
+    @Test
+    public void verifyCustomPrivileges() throws Exception {
+        JackrabbitSession session = createAdminSession();
+        try {
+            JackrabbitWorkspace workspace =
+                    (JackrabbitWorkspace) session.getWorkspace();
+            PrivilegeManager manager = workspace.getPrivilegeManager();
+
+            Privilege privilege = manager.getPrivilege("test:privilege");
+            assertNotNull(privilege);
+            assertFalse(privilege.isAbstract());
+            assertFalse(privilege.isAggregate());
+            assertEquals(0, privilege.getDeclaredAggregatePrivileges().length);
+
+            Privilege aggregate = manager.getPrivilege("test:aggregate");
+            assertNotNull(aggregate);
+            assertFalse(aggregate.isAbstract());
+            assertTrue(aggregate.isAggregate());
+            assertEquals(2, aggregate.getDeclaredAggregatePrivileges().length);
+        } finally {
+            session.logout();
+        }
+    }
+
+    @Test
+    public void verifyCustomNodeTypes() throws Exception {
+        Session session = createAdminSession();
+        try {
+            NodeTypeManager manager = session.getWorkspace().getNodeTypeManager();
             assertTrue(manager.hasNodeType("test:unstructured"));
+
             NodeType type = manager.getNodeType("test:unstructured");
             assertFalse(type.isMixin());
             assertTrue(type.isNodeType("nt:unstructured"));
 
+        } finally {
+            session.logout();
+        }
+    }
+
+    @Test
+    public void verifyNewBuiltinNodeTypes() throws Exception {
+        Session session = createAdminSession();
+        try {
+            NodeTypeManager manager = session.getWorkspace().getNodeTypeManager();
+            assertTrue(manager.hasNodeType(UserConstants.NT_REP_MEMBER_REFERENCES));
+            assertTrue(manager.hasNodeType(IndexConstants.INDEX_DEFINITIONS_NODE_TYPE));
+        } finally {
+            session.logout();
+        }
+    }
+
+    @Test
+    public void verifyReplacedBuiltinNodeTypes() throws Exception {
+        Session session = createAdminSession();
+        try {
+            NodeTypeManager manager = session.getWorkspace().getNodeTypeManager();
+            NodeType nt = manager.getNodeType(UserConstants.NT_REP_GROUP);
+            assertTrue("Migrated repository must have new nodetype definitions", nt.isNodeType(UserConstants.NT_REP_MEMBER_REFERENCES));
+        } finally {
+            session.logout();
+        }
+    }
+
+    @Test
+    public void verifyGenericProperties() throws Exception {
+        Session session = createAdminSession();
+        try {
             assertTrue(session.nodeExists("/properties"));
             Node properties = session.getNode("/properties");
             assertEquals(
@@ -176,8 +228,8 @@ public class RepositoryUpgradeTest {
             try {
                 InputStream stream = binary.getStream();
                 try {
-                    for (int i = 0; i < BINARY.length; i++) {
-                        assertEquals(BINARY[i], (byte) stream.read());
+                    for (byte aBINARY : BINARY) {
+                        assertEquals(aBINARY, (byte) stream.read());
                     }
                     assertEquals(-1, stream.read());
                 } finally {
@@ -209,15 +261,6 @@ public class RepositoryUpgradeTest {
             assertEquals(
                     9876543210L, properties.getProperty("long").getLong());
             assertEquals(
-                    PropertyType.REFERENCE,
-                    properties.getProperty("reference").getType());
-            assertEquals(
-                    identifier,
-                    properties.getProperty("reference").getString());
-            assertEquals(
-                    "/referenceable",
-                    properties.getProperty("reference").getNode().getPath());
-            assertEquals(
                     PropertyType.STRING,
                     properties.getProperty("string").getType());
             assertEquals(
@@ -230,6 +273,54 @@ public class RepositoryUpgradeTest {
             assertEquals("a", values[0].getString());
             assertEquals("b", values[1].getString());
             assertEquals("c", values[2].getString());
+        } finally {
+            session.logout();
+        }
+    }
+
+    @Test
+    public void verifyReferencePropertiesContent() throws Exception {
+        Session session = createAdminSession();
+        try {
+            assertTrue(session.nodeExists("/properties"));
+            Node properties = session.getNode("/properties");
+
+            assertEquals(
+                    PropertyType.REFERENCE,
+                    properties.getProperty("reference").getType());
+            assertEquals(
+                    testNodeIdentifier,
+                    properties.getProperty("reference").getString());
+            assertEquals(
+                    "/referenceable",
+                    properties.getProperty("reference").getNode().getPath());
+            PropertyIterator refs = session.getNode("/referenceable").getReferences();
+            assertTrue(refs.hasNext());
+            assertEquals(properties.getPath() + "/reference", refs.nextProperty().getPath());
+            assertFalse(refs.hasNext());
+
+            PropertyIterator refs2 = session.getNode("/referenceable2").getReferences();
+            assertTrue(refs2.hasNext());
+            assertEquals(properties.getPath() + "/mv_reference", refs2.nextProperty().getPath());
+            assertFalse(refs2.hasNext());
+
+            assertEquals(
+                    PropertyType.WEAKREFERENCE,
+                    properties.getProperty("weak_reference").getType());
+            assertEquals(
+                    testNodeIdentifier,
+                    properties.getProperty("weak_reference").getString());
+            assertEquals(
+                    "/referenceable",
+                    properties.getProperty("weak_reference").getNode().getPath());
+            PropertyIterator weakRefs = session.getNode("/referenceable").getWeakReferences();
+            assertTrue(weakRefs.hasNext());
+            assertEquals(properties.getPath() + "/weak_reference", weakRefs.nextProperty().getPath());
+            assertFalse(weakRefs.hasNext());
+            PropertyIterator weakRefs2 = session.getNode("/referenceable2").getWeakReferences();
+            assertTrue(weakRefs2.hasNext());
+            assertEquals(properties.getPath() + "/mv_weak_reference", weakRefs2.nextProperty().getPath());
+            assertFalse(weakRefs2.hasNext());
         } finally {
             session.logout();
         }

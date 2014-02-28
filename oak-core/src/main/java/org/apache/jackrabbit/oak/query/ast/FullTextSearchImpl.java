@@ -96,16 +96,14 @@ public class FullTextSearchImpl extends ConstraintImpl {
         builder.append("contains(");
         builder.append(quote(selectorName));
         builder.append('.');
-        String propertyName = this.propertyName;
-        if (propertyName == null) {
-            propertyName = "*";
+        String pn = propertyName;
+        if (pn == null) {
+            pn = "*";
         }
-        
         if (relativePath != null) {
-            propertyName = relativePath + "/" + propertyName;
+            pn = relativePath + "/" + pn;
         }
-        
-        builder.append(quote(propertyName));
+        builder.append(quote(pn));
         builder.append(", ");
         builder.append(getFullTextSearchExpression());
         builder.append(')');
@@ -128,7 +126,7 @@ public class FullTextSearchImpl extends ConstraintImpl {
 
     @Override
     public FullTextExpression getFullTextConstraint(SelectorImpl s) {
-        if (s != selector) {
+        if (!s.equals(selector)) {
             return null;
         }
         PropertyValue v = fullTextSearchExpression.currentValue();
@@ -140,7 +138,8 @@ public class FullTextSearchImpl extends ConstraintImpl {
                 }
                 p = PathUtils.concat(relativePath, p);
             }
-            return FullTextParser.parse(p, v.getValue(Type.STRING));
+            String p2 = normalizePropertyName(p);
+            return FullTextParser.parse(p2, v.getValue(Type.STRING));
         } catch (ParseException e) {
             throw new IllegalArgumentException("Invalid expression: " + fullTextSearchExpression, e);
         }
@@ -162,7 +161,7 @@ public class FullTextSearchImpl extends ConstraintImpl {
         // to avoid running out of memory if the node is large,
         // and because we might not implement all features
         // such as index aggregation
-        if (selector.index instanceof FulltextQueryIndex) {
+        if (selector.getIndex() instanceof FulltextQueryIndex) {
             // first verify if a property level condition exists and if that
             // condition checks out, this takes out some extra rows from the index
             // aggregation bits
@@ -189,16 +188,18 @@ public class FullTextSearchImpl extends ConstraintImpl {
                         PropertyValues.newString(PathUtils.getName(path)));
             }
             if (relativePath != null) {
-                path = PathUtils.concat(path, relativePath);
+                String rp = normalizePath(relativePath);
+                path = PathUtils.concat(path, rp);
             }
 
-            Tree tree = getTree(path);
+            Tree tree = selector.getTree(path);
             if (tree == null || !tree.exists()) {
                 return false;
             }
 
             if (propertyName != null) {
-                PropertyState p = tree.getProperty(propertyName);
+                String pn = normalizePropertyName(propertyName);
+                PropertyState p = tree.getProperty(pn);
                 if (p == null) {
                     return false;
                 }
@@ -229,8 +230,9 @@ public class FullTextSearchImpl extends ConstraintImpl {
     @Override
     public void restrict(FilterImpl f) {
         if (propertyName != null) {
-            if (f.getSelector() == selector) {
-                f.restrictProperty(propertyName, Operator.NOT_EQUAL, null);
+            if (f.getSelector().equals(selector)) {
+                String pn = normalizePropertyName(propertyName);
+                f.restrictProperty(pn, Operator.NOT_EQUAL, null);
             }
         }
         f.restrictFulltextCondition(fullTextSearchExpression.currentValue().getValue(Type.STRING));
@@ -238,7 +240,7 @@ public class FullTextSearchImpl extends ConstraintImpl {
 
     @Override
     public void restrictPushDown(SelectorImpl s) {
-        if (s == selector) {
+        if (s.equals(selector)) {
             selector.restrictSelector(this);
         }
     }

@@ -18,9 +18,10 @@ script:   mvn verify -Ppedantic,integrationTesting
 language: java
 jdk:
   - oraclejdk7
+services: mongodb
 notifications:
   email: false
   webhooks:
     urls:       http://zitting.name/travis/notify
     on_success: change
-    on_failure: always
+    on_failure: change

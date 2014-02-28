@@ -48,8 +48,9 @@ public class ObservationTest extends Benchmark {
     public static final int EVENT_TYPES = NODE_ADDED | NODE_REMOVED | NODE_MOVED |
             PROPERTY_ADDED | PROPERTY_REMOVED | PROPERTY_CHANGED | PERSIST;
     private static final int EVENTS_PER_NODE = 2; // NODE_ADDED and PROPERTY_ADDED
-    private static final int SAVE_INTERVAL = 100;
+    private static final int SAVE_INTERVAL = Integer.getInteger("saveInterval", 100);
     private static final int OUTPUT_RESOLUTION = 100;
+    private static final int LISTENER_COUNT = Integer.getInteger("listenerCount", 100);
 
     @Override
     public void run(Iterable<RepositoryFixture> fixtures) {
@@ -71,33 +72,33 @@ public class ObservationTest extends Benchmark {
     }
 
     private void run(Repository repository) throws RepositoryException, ExecutionException, InterruptedException {
-        Session session = repository.login(new SimpleCredentials("admin", "admin".toCharArray()));
+        Session session = createSession(repository);
         long t0 = System.currentTimeMillis();
         try {
-            observationThroughput(repository, session.getWorkspace().getObservationManager());
+            observationThroughput(repository);
         } finally {
             System.out.println("Time elapsed: " + (System.currentTimeMillis() - t0) + " ms");
             session.logout();
         }
     }
 
-    public void observationThroughput(final Repository repository, ObservationManager observationManager)
+    public void observationThroughput(final Repository repository)
             throws RepositoryException, InterruptedException, ExecutionException {
         long t = 0;
         final AtomicInteger eventCount = new AtomicInteger();
         final AtomicInteger nodeCount = new AtomicInteger();
 
-        EventListener listener = new EventListener() {
-            @Override
-            public void onEvent(EventIterator events) {
-                for (; events.hasNext(); events.nextEvent()) {
-                    eventCount.incrementAndGet();
-                }
-            }
-        };
+        Session[] sessions = new Session[LISTENER_COUNT];
+        EventListener[] listeners = new Listener[LISTENER_COUNT];
 
         try {
-            observationManager.addEventListener(listener, EVENT_TYPES, "/", true, null, null, false);
+            for (int k = 0; k < LISTENER_COUNT; k++) {
+                sessions[k] = createSession(repository);
+                listeners[k] = new Listener(eventCount);
+                ObservationManager obsMgr = sessions[k].getWorkspace().getObservationManager();
+                obsMgr.addEventListener(listeners[k], EVENT_TYPES, "/", true, null, null, false);
+            }
+
             Future<?> createNodes = Executors.newSingleThreadExecutor().submit(new Runnable() {
                 private final Session session = repository.login(new SimpleCredentials("admin", "admin".toCharArray()));
 
@@ -137,7 +138,7 @@ public class ObservationTest extends Benchmark {
                 t += System.currentTimeMillis() - t0;
 
                 int nc = nodeCount.get();
-                int ec = eventCount.get();
+                int ec = eventCount.get() / LISTENER_COUNT;
 
                 double nps = (double) nc / t * 1000;
                 double eps = (double) ec / t * 1000;
@@ -147,8 +148,30 @@ public class ObservationTest extends Benchmark {
             }
             createNodes.get();
         } finally {
-            observationManager.removeEventListener(listener);
+            for (int k = 0; k < LISTENER_COUNT; k++) {
+                sessions[k].getWorkspace().getObservationManager().removeEventListener(listeners[k]);
+                sessions[k].logout();
+            }
         }
     }
 
+    private static Session createSession(Repository repository)
+            throws RepositoryException {
+        return repository.login(new SimpleCredentials("admin", "admin".toCharArray()));
+    }
+
+    private static class Listener implements EventListener {
+        private final AtomicInteger eventCount;
+
+        public Listener(AtomicInteger eventCount) {
+            this.eventCount = eventCount;
+        }
+
+        @Override
+        public void onEvent(EventIterator events) {
+            for (; events.hasNext(); events.nextEvent()) {
+                eventCount.incrementAndGet();
+            }
+        }
+    }
 }

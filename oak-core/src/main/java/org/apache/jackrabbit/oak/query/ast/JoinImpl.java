@@ -13,7 +13,12 @@
  */
 package org.apache.jackrabbit.oak.query.ast;
 
-import org.apache.jackrabbit.oak.query.QueryImpl;
+import java.util.ArrayList;
+import java.util.List;
+
+import org.apache.jackrabbit.oak.query.plan.ExecutionPlan;
+import org.apache.jackrabbit.oak.query.plan.JoinExecutionPlan;
+import org.apache.jackrabbit.oak.spi.query.Filter;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 
 /**
@@ -32,6 +37,8 @@ public class JoinImpl extends SourceImpl {
     private boolean foundJoinedRow;
     private boolean end;
     private NodeState rootState;
+    
+    private JoinExecutionPlan plan;
 
     public JoinImpl(SourceImpl left, SourceImpl right, JoinType joinType,
             JoinConditionImpl joinCondition) {
@@ -39,6 +46,36 @@ public class JoinImpl extends SourceImpl {
         this.right = right;
         this.joinType = joinType;
         this.joinCondition = joinCondition;
+    }
+    
+    @Override
+    public ArrayList<SourceImpl> getInnerJoinSelectors() {
+        ArrayList<SourceImpl> list = new ArrayList<SourceImpl>();
+        switch (joinType) {
+        case INNER:
+            list.addAll(left.getInnerJoinSelectors());
+            list.addAll(right.getInnerJoinSelectors());
+            break;
+        case LEFT_OUTER:
+            list.addAll(left.getInnerJoinSelectors());
+            break;
+        case RIGHT_OUTER:
+            list.addAll(right.getInnerJoinSelectors());
+        }
+        return list;
+    }
+    
+    @Override
+    public List<JoinConditionImpl> getInnerJoinConditions() {
+        ArrayList<JoinConditionImpl> set = new ArrayList<JoinConditionImpl>();
+        switch (joinType) {
+        case INNER:
+            set.add(joinCondition);
+            set.addAll(left.getInnerJoinConditions());
+            set.addAll(right.getInnerJoinConditions());
+            break;
+        }
+        return set;
     }
 
     public JoinConditionImpl getJoinCondition() {
@@ -76,9 +113,15 @@ public class JoinImpl extends SourceImpl {
         return left + " " + joinType +
                 " " + right + " on " + joinCondition;
     }
-
+    
     @Override
-    public void init(QueryImpl query) {
+    public void unprepare() {
+        left.unprepare();
+        right.unprepare();
+        plan = null;
+    }
+    
+    private void applyJoinConditions() {
         switch (joinType) {
         case INNER:
             left.addJoinCondition(joinCondition, false);
@@ -104,16 +147,38 @@ public class JoinImpl extends SourceImpl {
             right.addJoinCondition(joinCondition, true);
             break;
         }
-        left.setQueryConstraint(queryConstraint);
-        right.setQueryConstraint(queryConstraint);
-        right.init(query);
-        left.init(query);
+    }
+    
+    @Override
+    public void prepare(ExecutionPlan p) {
+        if (!(p instanceof JoinExecutionPlan)) {
+            throw new IllegalArgumentException("Not a join plan");
+        }
+        JoinExecutionPlan joinPlan = (JoinExecutionPlan) p;
+        if (joinPlan.getJoin() != this) {
+            throw new IllegalArgumentException("Not a plan for this join");
+        }
+        this.plan = joinPlan;
+        applyJoinConditions();
+        left.prepare(joinPlan.getLeftPlan());
+        right.prepare(joinPlan.getRightPlan());
     }
 
     @Override
-    public void prepare() {
-        left.prepare();
-        right.prepare();
+    public ExecutionPlan prepare() {
+        if (plan != null) {
+            return plan;
+        }
+        applyJoinConditions();
+        // the estimated cost is the cost of the left selector,
+        // plus twice the cost of the right selector (we expect
+        // two rows for the right selector for each node 
+        // on the left selector)
+        ExecutionPlan leftPlan = left.prepare();
+        ExecutionPlan rightPlan = right.prepare();
+        double cost = leftPlan.getEstimatedCost() + 2 * rightPlan.getEstimatedCost();
+        plan = new JoinExecutionPlan(this, leftPlan, rightPlan, cost);
+        return plan;
     }
 
     @Override
@@ -130,6 +195,30 @@ public class JoinImpl extends SourceImpl {
         this.rootState = rootState;
         leftNeedExecute = true;
         end = false;
+    }
+
+    @Override
+    public Filter createFilter(boolean preparing) {
+        // TODO is a join filter needed?
+        return left.createFilter(preparing);
+    }
+
+    @Override
+    public void setQueryConstraint(ConstraintImpl queryConstraint) {
+        left.setQueryConstraint(queryConstraint);
+        right.setQueryConstraint(queryConstraint);
+    }    
+
+    @Override
+    public void setOuterJoin(boolean outerJoinLeftHandSide, boolean outerJoinRightHandSide) {
+        left.setOuterJoin(outerJoinLeftHandSide, outerJoinRightHandSide);
+        right.setOuterJoin(outerJoinLeftHandSide, outerJoinRightHandSide);
+    }
+    
+    @Override
+    public void addJoinCondition(JoinConditionImpl joinCondition, boolean forThisSelector) {
+        left.addJoinCondition(joinCondition, forThisSelector);
+        right.addJoinCondition(joinCondition, forThisSelector);
     }
 
     @Override
@@ -166,10 +255,15 @@ public class JoinImpl extends SourceImpl {
             }
             // for an outer join, if no matching result was found,
             // one row returned (with all values set to null)
-            if (right.outerJoinRightHandSide && leftNeedNext && !foundJoinedRow) {
+            if (right.isOuterJoinRightHandSide() && leftNeedNext && !foundJoinedRow) {
                 return true;
             }
         }
+    }
+    
+    @Override
+    public boolean isOuterJoinRightHandSide() {
+        return left.isOuterJoinRightHandSide() || right.isOuterJoinRightHandSide();
     }
 
 }

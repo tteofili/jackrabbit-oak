@@ -21,7 +21,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 
-import org.apache.jackrabbit.mk.json.JsonObject;
+import org.apache.jackrabbit.mk.api.MicroKernel;
+import org.apache.jackrabbit.oak.commons.json.JsonObject;
 import org.apache.jackrabbit.mk.store.NotFoundException;
 import org.apache.jackrabbit.mk.store.RevisionStore;
 import org.apache.jackrabbit.mk.store.RevisionStore.PutToken;
@@ -142,6 +143,9 @@ public class StagedNodeTree {
      *                   or if another error occurs
      */
     public void add(String parentNodePath, String nodeName, JsonObject nodeData) throws Exception {
+        if (nodeName.isEmpty()) {
+            throw new Exception("cannot add a node with an empty name");
+        }
         StagedNode parent = getStagedNode(parentNodePath, true);
         if (parent.getChildNodeEntry(nodeName) != null) {
             throw new Exception("there's already a child node with name '" + nodeName + "'");
@@ -180,6 +184,9 @@ public class StagedNodeTree {
      * @throws Exception if another error occurs
      */
     public void setProperty(String nodePath, String propName, String propValue) throws Exception {
+        if (propName.isEmpty()) {
+            throw new Exception("cannot set a property with an empty name");
+        }
         StagedNode node = getStagedNode(nodePath, true);
 
         Map<String, String> properties = node.getProperties();
@@ -490,7 +497,7 @@ public class StagedNodeTree {
     }
 
     private StagedNode getOrAddConflictMarker(StagedNode parent, String name) {
-        StagedNode conflict = getOrAddNode(parent, ":conflict");
+        StagedNode conflict = getOrAddNode(parent, MicroKernel.CONFLICT);
         return getOrAddNode(conflict, name);
     }
 

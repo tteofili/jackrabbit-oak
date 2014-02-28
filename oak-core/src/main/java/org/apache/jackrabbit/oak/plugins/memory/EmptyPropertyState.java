@@ -22,7 +22,6 @@ import java.util.Collections;
 
 import javax.annotation.Nonnull;
 
-import org.apache.jackrabbit.oak.api.AbstractPropertyState;
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Type;
 
@@ -34,7 +33,7 @@ import static com.google.common.base.Preconditions.checkNotNull;
  * providing default implementation which correspond to a property
  * without any value.
  */
-abstract class EmptyPropertyState extends AbstractPropertyState {
+public abstract class EmptyPropertyState extends AbstractPropertyState {
 
     private final String name;
 

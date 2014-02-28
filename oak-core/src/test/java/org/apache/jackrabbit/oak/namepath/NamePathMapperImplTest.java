@@ -22,12 +22,14 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.fail;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
 import javax.jcr.RepositoryException;
 
 import com.google.common.collect.ImmutableMap;
+
 import org.apache.jackrabbit.oak.plugins.identifier.IdentifierManager;
 import org.junit.Test;
 
@@ -47,17 +49,7 @@ public class NamePathMapperImplTest {
             "foo", "http://www.example.com/foo",
             "quu", "http://www.example.com/quu");
 
-    private final NameMapper mapper = new LocalNameMapper() {
-        @Override
-        protected Map<String, String> getNamespaceMap() {
-            return GLOBAL;
-        }
-
-        @Override
-        protected Map<String, String> getSessionLocalMappings() {
-            return LOCAL;
-        }
-    };
+    private final NameMapper mapper = new LocalNameMapper(GLOBAL, LOCAL);
 
     private NamePathMapper npMapper = new NamePathMapperImpl(mapper);
 
@@ -136,12 +128,7 @@ public class NamePathMapperImplTest {
 
     @Test
     public void testJcrToOakKeepIndexNoRemap() {
-        NameMapper mapper = new GlobalNameMapper() {
-            @Override
-            protected Map<String, String> getNamespaceMap() {
-                return GLOBAL;
-            }
-        };
+        NameMapper mapper = new GlobalNameMapper(GLOBAL);
         NamePathMapper npMapper = new NamePathMapperImpl(mapper);
 
         assertEquals("/", npMapper.getOakPathKeepIndex("/"));
@@ -172,10 +159,27 @@ public class NamePathMapperImplTest {
 
     @Test
     public void testInvalidJcrPaths() {
-        String[] paths = {"//", "/foo//", "/..//", "/..", "/foo/../.."};
+        String[] paths = {
+                "//",
+                "/foo//",
+                "/..//",
+                "/..",
+                "/foo/../..",
+                "foo::bar",
+                "foo:bar:baz",
+//                "foo:bar]baz",  FIXME OAK-1168
+        };
 
-        for (String path : paths) {
-            assertNull(npMapper.getOakPath(path));
+        NamePathMapper[] mappers = {
+                npMapper,
+                new NamePathMapperImpl(new LocalNameMapper(
+                        GLOBAL, Collections.<String, String>emptyMap()))
+        };
+
+        for (NamePathMapper mapper : mappers) {
+            for (String path : paths) {
+                assertNull(path, mapper.getOakPath(path));
+            }
         }
     }
 

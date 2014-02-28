@@ -19,7 +19,6 @@ package org.apache.jackrabbit.oak.plugins.index.lucene;
 import static org.apache.jackrabbit.JcrConstants.JCR_DATA;
 import static org.apache.jackrabbit.oak.commons.PathUtils.concat;
 import static org.apache.jackrabbit.oak.commons.PathUtils.getName;
-import static org.apache.jackrabbit.oak.plugins.index.IndexUtils.getString;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.FieldFactory.newFulltextField;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.FieldFactory.newPathField;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.FieldFactory.newPropertyField;
@@ -34,6 +33,7 @@ import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.plugins.index.IndexEditor;
+import org.apache.jackrabbit.oak.plugins.index.IndexUpdateCallback;
 import org.apache.jackrabbit.oak.spi.commit.Editor;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
@@ -71,11 +71,13 @@ public class LuceneIndexEditor implements IndexEditor {
 
     private boolean propertiesChanged = false;
 
-    LuceneIndexEditor(NodeBuilder definition, Analyzer analyzer) throws CommitFailedException {
+    LuceneIndexEditor(NodeBuilder definition, Analyzer analyzer,
+            IndexUpdateCallback updateCallback) throws CommitFailedException {
         this.parent = null;
         this.name = null;
         this.path = "/";
-        this.context = new LuceneIndexEditorContext(definition, analyzer);
+        this.context = new LuceneIndexEditorContext(definition, analyzer,
+                updateCallback);
     }
 
     private LuceneIndexEditor(LuceneIndexEditor parent, String name) {
@@ -102,16 +104,11 @@ public class LuceneIndexEditor implements IndexEditor {
             throws CommitFailedException {
         if (propertiesChanged || !before.exists()) {
             String path = getPath();
-            try {
-                context.getWriter().updateDocument(newPathTerm(path),
-                        makeDocument(path, after));
-            } catch (IOException e) {
-                throw new CommitFailedException(
-                        "Lucene", 3, "Failed to index the node " + path, e);
-            }
-            long indexed = context.incIndexedNodes();
-            if (indexed % 1000 == 0) {
-                log.debug("Indexed {} nodes...", indexed);
+            if (addOrUpdate(path, after, before.exists())) {
+                long indexed = context.incIndexedNodes();
+                if (indexed % 1000 == 0) {
+                    log.debug("Indexed {} nodes...", indexed);
+                }
             }
         }
 
@@ -164,6 +161,7 @@ public class LuceneIndexEditor implements IndexEditor {
             // Remove all index entries in the removed subtree
             writer.deleteDocuments(newPathTerm(path));
             writer.deleteDocuments(new PrefixQuery(newPathTerm(path + "/")));
+            this.context.indexUpdate();
         } catch (IOException e) {
             throw new CommitFailedException(
                     "Lucene", 5, "Failed to remove the index entries of"
@@ -173,30 +171,53 @@ public class LuceneIndexEditor implements IndexEditor {
         return null; // no need to recurse down the removed subtree
     }
 
-    private Document makeDocument(String path, NodeState state) {
-        Document document = new Document();
-        document.add(newPathField(path));
-        String name = getName(path);
-        if (name != null) {
-            document.add(newFulltextField(name));
+    private boolean addOrUpdate(String path, NodeState state, boolean isUpdate)
+            throws CommitFailedException {
+        try {
+            Document d = makeDocument(path, state, isUpdate);
+            if (d != null) {
+                context.getWriter().updateDocument(newPathTerm(path), d);
+                return true;
+            }
+        } catch (IOException e) {
+            throw new CommitFailedException("Lucene", 3,
+                    "Failed to index the node " + path, e);
         }
+        return false;
+    }
 
+    private Document makeDocument(String path, NodeState state, boolean isUpdate) throws CommitFailedException {
+        Document document = new Document();
+        boolean dirty = false;
         for (PropertyState property : state.getProperties()) {
             String pname = property.getName();
             if (isVisible(pname)
                     && (context.getPropertyTypes() & (1 << property.getType()
                             .tag())) != 0 && context.includeProperty(pname)) {
                 if (Type.BINARY.tag() == property.getType().tag()) {
+                    this.context.indexUpdate();
                     addBinaryValue(document, property, state);
+                    dirty = true;
                 } else {
                     for (String value : property.getValue(Type.STRINGS)) {
+                        this.context.indexUpdate();
                         document.add(newPropertyField(pname, value));
                         document.add(newFulltextField(value));
+                        dirty = true;
                     }
                 }
             }
         }
 
+        if (isUpdate && !dirty) {
+            // updated the state but had no relevant changes
+            return null;
+        }
+        document.add(newPathField(path));
+        String name = getName(path);
+        if (name != null) {
+            document.add(newFulltextField(name));
+        }
         return document;
     }
 
@@ -208,11 +229,11 @@ public class LuceneIndexEditor implements IndexEditor {
             Document doc, PropertyState property, NodeState state) {
         Metadata metadata = new Metadata();
         if (JCR_DATA.equals(property.getName())) {
-            String type = getString(state, JcrConstants.JCR_MIMETYPE);
+            String type = state.getString(JcrConstants.JCR_MIMETYPE);
             if (type != null) { // not mandatory
                 metadata.set(Metadata.CONTENT_TYPE, type);
             }
-            String encoding = getString(state, JcrConstants.JCR_ENCODING);
+            String encoding = state.getString(JcrConstants.JCR_ENCODING);
             if (encoding != null) { // not mandatory
                 metadata.set(Metadata.CONTENT_ENCODING, encoding);
             }

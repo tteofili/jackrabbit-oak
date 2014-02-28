@@ -23,9 +23,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 
-import org.apache.jackrabbit.oak.jcr.OakMongoMKRepositoryStub;
-import org.apache.jackrabbit.oak.jcr.OakRepositoryStub;
-import org.apache.jackrabbit.oak.jcr.OakSegmentMKRepositoryStub;
+import org.apache.jackrabbit.oak.jcr.OakDocumentRDBRepositoryStub;
+import org.apache.jackrabbit.oak.jcr.OakMongoNSRepositoryStub;
 import org.apache.jackrabbit.oak.jcr.OakTarMKRepositoryStub;
 import org.apache.jackrabbit.test.RepositoryHelper;
 import org.apache.jackrabbit.test.RepositoryHelperPool;
@@ -48,14 +47,12 @@ public abstract class TCKBase extends TestSuite {
 
     public TCKBase(String name) {
         super(name);
-        Setup.wrap(this, OakRepositoryStub.class.getName());
         Setup.wrap(this, OakTarMKRepositoryStub.class.getName());
-        if (OakSegmentMKRepositoryStub.isAvailable()) {
-            // disabled for now. see OAK-1087
-            // Setup.wrap(this, OakSegmentMKRepositoryStub.class.getName());
+        if (OakMongoNSRepositoryStub.isMongoDBAvailable()) {
+            Setup.wrap(this, OakMongoNSRepositoryStub.class.getName());
         }
-        if (OakMongoMKRepositoryStub.isMongoDBAvailable()) {
-            Setup.wrap(this, OakMongoMKRepositoryStub.class.getName());
+        if (OakDocumentRDBRepositoryStub.isAvailable()) {
+            Setup.wrap(this, OakDocumentRDBRepositoryStub.class.getName());
         }
     }
 

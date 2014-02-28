@@ -18,23 +18,23 @@
  */
 package org.apache.jackrabbit.oak.security.authorization.evaluation;
 
+import org.apache.jackrabbit.JcrConstants;
+import org.apache.jackrabbit.oak.api.CommitFailedException;
+import org.apache.jackrabbit.oak.api.Root;
+import org.apache.jackrabbit.oak.api.Tree;
+import org.apache.jackrabbit.oak.spi.security.privilege.PrivilegeConstants;
+import org.apache.jackrabbit.oak.util.NodeUtil;
+import org.junit.Test;
+
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
-import org.apache.jackrabbit.oak.api.CommitFailedException;
-import org.apache.jackrabbit.oak.api.Root;
-import org.apache.jackrabbit.oak.api.Tree;
-import org.apache.jackrabbit.oak.spi.security.privilege.PrivilegeConstants;
-import org.junit.Ignore;
-import org.junit.Test;
-
 public class ShadowInvisibleContentTest extends AbstractOakCoreTest {
      
     @Test
-    @Ignore // FIXME OAK-709 - see TODO in SecureNodeBuilder.exists()
     public void testShadowInvisibleNode() throws Exception {
         setupPermission("/a", testPrincipal, true, PrivilegeConstants.JCR_ALL);
         setupPermission("/a/b", testPrincipal, false, PrivilegeConstants.JCR_ALL);
@@ -55,12 +55,11 @@ public class ShadowInvisibleContentTest extends AbstractOakCoreTest {
             testRoot.commit();
             fail();
         } catch (CommitFailedException e) {
-            assertTrue(e.isAccessViolation());
+            assertTrue(e.isConstraintViolation());
         }
     }
 
     @Test
-    @Ignore  // TODO incomplete implementation of PermissionValidator.childNodeChanged()
     public void testShadowInvisibleProperty() throws Exception {
         setupPermission("/a", testPrincipal, true, PrivilegeConstants.JCR_ALL);
         setupPermission("/a", testPrincipal, false, PrivilegeConstants.REP_READ_PROPERTIES);
@@ -68,43 +67,65 @@ public class ShadowInvisibleContentTest extends AbstractOakCoreTest {
         Root testRoot = getTestRoot();
         Tree a = testRoot.getTree("/a");
 
-        // /a/x not visible to this session
-        assertNull(a.getProperty("x"));
+        // /a/aProp not visible to this session
+        assertNull(a.getProperty("aProp"));
+        assertFalse(a.hasProperty("aProp"));
 
-        // shadow /a/x with transient property of the same name
-        a.setProperty("x", "xValue1");
-        assertNotNull(a.getProperty("x"));
+        // shadow /a/aProp with transient property of the same name
+        a.setProperty("aProp", "aValue1");
+        assertNotNull(a.getProperty("aProp"));
+        assertTrue(a.hasProperty("aProp"));
 
-        try {
-            testRoot.commit();
-            fail();
-        } catch (CommitFailedException e) {
-            assertTrue(e.isAccessViolation());
-        }
+        // after commit() normal access control again takes over!
+        testRoot.commit(); // does not fail since only read access is denied
+        assertNull(a.getProperty("aProp"));
+        assertFalse(a.hasProperty("aProp"));
     }
 
     @Test
-    @Ignore // FIXME how do we handle the case where the shadowing item is the same as the shadowing item?
     public void testShadowInvisibleProperty2() throws Exception {
         setupPermission("/a", testPrincipal, true, PrivilegeConstants.JCR_ALL);
         setupPermission("/a", testPrincipal, false, PrivilegeConstants.REP_READ_PROPERTIES);
+        setupPermission("/a", testPrincipal, false, PrivilegeConstants.REP_ALTER_PROPERTIES);
 
         Root testRoot = getTestRoot();
         Tree a = testRoot.getTree("/a");
 
-        // /a/x not visible to this session
-        assertNull(a.getProperty("x"));
+        // /a/aProp not visible to this session
+        assertNull(a.getProperty("aProp"));
+        assertFalse(a.hasProperty("aProp"));
 
-        // shadow /a/x with transient property of the same name
-        a.setProperty("x", "xValue");
-        assertNotNull(a.getProperty("x"));
+        // shadow /a/aProp with transient property of the same name *and value*
+        a.setProperty("aProp", "aValue");
+        assertNotNull(a.getProperty("aProp"));
+        assertTrue(a.hasProperty("aProp"));
 
-        try {
-            testRoot.commit();
-            fail();
-        } catch (CommitFailedException e) {
-            assertTrue(e.isAccessViolation());
-        }
+        // after commit() normal access control again takes over
+        testRoot.commit(); // does not fail since no changes are detected, even when write access is denied
+        assertNull(a.getProperty("aProp"));
+        assertFalse(a.hasProperty("aProp"));
+    }
+
+    public void testAddNodeCollidingWithInvisibleNode() throws Exception {
+        setupPermission("/a", testPrincipal, true, PrivilegeConstants.JCR_ALL);
+        setupPermission("/a/b", testPrincipal, false, PrivilegeConstants.JCR_READ);
+        setupPermission("/a/b/c", testPrincipal, true, PrivilegeConstants.JCR_ALL);
+
+        Root testRoot = getTestRoot();
+        Tree a = testRoot.getTree("/a");
+
+        assertFalse(a.getChild("b").exists());
+        assertTrue(a.getChild("b").getChild("c").exists());
+
+        new NodeUtil(a).addChild("b", JcrConstants.NT_UNSTRUCTURED);
+        assertTrue(a.getChild("b").exists());
+        assertFalse(a.getChild("b").getChild("c").exists()); // now shadowed
+
+        // since we have write access, the old content gets replaced
+        testRoot.commit(); // note that also the deny-read ACL gets replaced
+
+        assertTrue(a.getChild("b").exists());
+        assertFalse(a.getChild("b").getChild("c").exists());
     }
 
 }

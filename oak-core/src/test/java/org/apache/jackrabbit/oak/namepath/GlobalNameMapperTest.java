@@ -16,18 +16,20 @@
  */
 package org.apache.jackrabbit.oak.namepath;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.fail;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+
 import javax.jcr.RepositoryException;
 
-import com.google.common.collect.ImmutableMap;
 import org.junit.Test;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.fail;
+import com.google.common.collect.ImmutableMap;
 
 public class GlobalNameMapperTest {
 
@@ -38,12 +40,7 @@ public class GlobalNameMapperTest {
             "foo", "http://www.example.com/foo",
             "quu", "http://www.example.com/quu");
 
-    private NameMapper mapper = new GlobalNameMapper() {
-        @Override
-        protected Map<String, String> getNamespaceMap() {
-            return NAMESPACES;
-        }
-    };
+    private NameMapper mapper = new GlobalNameMapper(NAMESPACES);
 
     @Test
     public void testEmptyName() throws RepositoryException {

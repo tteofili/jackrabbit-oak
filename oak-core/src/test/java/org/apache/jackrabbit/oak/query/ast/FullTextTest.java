@@ -25,12 +25,23 @@ import java.text.ParseException;
 
 import org.apache.jackrabbit.oak.query.fulltext.FullTextExpression;
 import org.apache.jackrabbit.oak.query.fulltext.FullTextParser;
+import org.apache.jackrabbit.oak.query.fulltext.FullTextTerm;
 import org.junit.Test;
 
 /**
  * Test the fulltext parsing and evaluation.
  */
 public class FullTextTest {
+    
+    @Test
+    public void fulltextChars() {
+        for (char c : "a\u00e4\u00dfzAZ\u00c409+\u3360".toCharArray()) {
+            assertTrue("char:" + c, FullTextTerm.isFullTextCharacter(c));
+        }
+        for (char c : "@-.,;!?\t\n\f".toCharArray()) {
+            assertFalse("char:" + c, FullTextTerm.isFullTextCharacter(c));
+        }
+    }
 
     @Test
     public void and() throws ParseException {

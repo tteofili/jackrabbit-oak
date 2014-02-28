@@ -116,7 +116,6 @@ public class VersionManagementTest extends AbstractEvaluationTest {
     /**
      * @since oak (DIFF: jr required jcr:versionManagement privilege on the version store)
      */
-    @Ignore("OAK-168") // FIXME: waiting for basic version mgt
     @Test
     public void testRemoveVersion() throws Exception {
         Node n = createVersionableNode(superuser.getNode(path));
@@ -127,6 +126,7 @@ public class VersionManagementTest extends AbstractEvaluationTest {
         Node testNode = trn.getNode(n.getName());
         Version v = testNode.checkin();
         testNode.checkout();
+        testNode.checkin();
 
         // removing a version must be allowed
         testNode.getVersionHistory().removeVersion(v.getName());
@@ -135,7 +135,6 @@ public class VersionManagementTest extends AbstractEvaluationTest {
     /**
      * @since oak (DIFF: jr required jcr:versionManagement privilege on the version store)
      */
-    @Ignore("OAK-168") // FIXME: waiting for basic version mgt
     @Test
     public void testRemoveVersion2() throws Exception {
         Node n = createVersionableNode(superuser.getNode(path));
@@ -146,6 +145,7 @@ public class VersionManagementTest extends AbstractEvaluationTest {
         Node testNode = trn.getNode(n.getName());
         Version v = testNode.checkin();
         testNode.checkout();
+        testNode.checkin();
 
         // remove ability to edit version information
         // -> VersionHistory.removeVersion must not be allowed.
@@ -161,12 +161,12 @@ public class VersionManagementTest extends AbstractEvaluationTest {
     /**
      * @since oak (DIFF: jr required jcr:versionManagement privilege on the version store)
      */
-    @Ignore("OAK-168") // FIXME: waiting for basic version mgt
     @Test
     public void testRemoveVersion3() throws Exception {
         Node n = createVersionableNode(superuser.getNode(path));
         Version v = n.checkin();
         n.checkout();
+        n.checkin();
 
         testSession.refresh(false);
         assertFalse(testAcMgr.hasPrivileges(n.getPath(), versionPrivileges));
@@ -295,6 +295,42 @@ public class VersionManagementTest extends AbstractEvaluationTest {
      * @since oak
      */
     @Test
+    public void testAccessVersionHistoryVersionableNodeRemoved() throws Exception {
+        Node n = createVersionableNode(superuser.getNode(path));
+        allow(n.getPath(), versionPrivileges);
+
+        n.checkin();
+        n.checkout();
+
+        String versionablePath = n.getPath();
+        VersionHistory vh = n.getVersionHistory();
+        String vhPath = vh.getPath();
+        String vhUUID = vh.getIdentifier();
+
+        // remove the versionable node
+        n.remove();
+        superuser.save();
+
+        testSession.refresh(false);
+        assertTrue(testSession.nodeExists(path));
+        assertFalse(testSession.nodeExists(versionablePath));
+
+        // accessing the version history directly should still succeed as
+        // read permission is still granted on the tree defined by the parent.
+        VersionHistory history = (VersionHistory) testSession.getNode(vhPath);
+        history = (VersionHistory) testSession.getNodeByIdentifier(vhUUID);
+        history = (VersionHistory) testSession.getNodeByUUID(vhUUID);
+
+        // revoking read permission on the parent node -> version history
+        // must no longer be accessible
+        modify(path, Privilege.JCR_READ, false);
+        assertFalse(testSession.nodeExists(vhPath));
+    }
+
+    /**
+     * @since oak
+     */
+    @Test
     public void testAddVersionLabel() throws Exception {
         Node n = createVersionableNode(superuser.getNode(path));
         allow(n.getPath(), versionPrivileges);
@@ -313,5 +349,66 @@ public class VersionManagementTest extends AbstractEvaluationTest {
         VersionManager vMgr = testSession.getWorkspace().getVersionManager();
         history = vMgr.getVersionHistory(testNode.getPath());
         history.addVersionLabel(v.getName(), "testLabel", true);
+    }
+
+    /**
+     * @since oak
+     */
+    @Test
+    public void testVersionablePath() throws Exception {
+        Node n = createVersionableNode(superuser.getNode(path));
+
+        VersionHistory vh = n.getVersionHistory();
+        Property versionablePath = vh.getProperty(superuser.getWorkspace().getName());
+        assertEquals(n.getPath(), versionablePath.getString());
+    }
+
+    @Test
+    public void testAddNewVersionableNode() throws Exception {
+        modify(path, REP_WRITE, true);
+        modify(path, Privilege.JCR_VERSION_MANAGEMENT, true);
+
+        Node testNode = testSession.getNode(path);
+        Node newNode = testNode.addNode("versionable");
+        newNode.addMixin("mix:versionable");
+        testSession.save();
+    }
+
+    /**
+     * @since oak
+     */
+    @Test
+    public void testVersionableChildNode() throws Exception {
+        Node testNode = superuser.getNode(path).addNode("n1").addNode("n2").addNode("n3").addNode("jcr:content");
+        superuser.save();
+
+        testNode.addMixin("mix:versionable");
+        superuser.save();
+
+        assertTrue(testNode.isNodeType("mix:versionable"));
+        VersionHistory vh = testNode.getVersionHistory();
+        Property versionablePath = vh.getProperty(superuser.getWorkspace().getName());
+        assertEquals(testNode.getPath(), versionablePath.getString());
+    }
+
+    /**
+     * @since oak
+     */
+    @Test
+    public void testVersionableChildNode2() throws Exception {
+        Node testNode = superuser.getNode(path).addNode("n1").addNode("n2").addNode("n3").addNode("jcr:content");
+        testNode.addMixin("mix:versionable");
+        superuser.save();
+
+
+        testNode.remove();
+        testNode = superuser.getNode(path).getNode("n1").getNode("n2").getNode("n3").addNode("jcr:content");
+        testNode.addMixin("mix:versionable");
+        superuser.save();
+
+        assertTrue(testNode.isNodeType("mix:versionable"));
+        VersionHistory vh = testNode.getVersionHistory();
+        Property versionablePath = vh.getProperty(superuser.getWorkspace().getName());
+        assertEquals(testNode.getPath(), versionablePath.getString());
     }
 }

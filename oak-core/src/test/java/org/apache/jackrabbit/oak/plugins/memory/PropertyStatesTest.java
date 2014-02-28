@@ -25,11 +25,12 @@ import javax.jcr.PropertyType;
 import javax.jcr.RepositoryException;
 import javax.jcr.Value;
 
-import org.apache.jackrabbit.oak.TestNameMapper;
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Type;
+import org.apache.jackrabbit.oak.namepath.LocalNameMapper;
 import org.apache.jackrabbit.oak.namepath.NamePathMapperImpl;
 import org.apache.jackrabbit.oak.plugins.value.ValueFactoryImpl;
+import org.apache.jackrabbit.util.ISO8601;
 import org.junit.Test;
 
 import static java.util.Collections.singletonMap;
@@ -37,9 +38,10 @@ import static org.junit.Assert.assertEquals;
 
 public class PropertyStatesTest {
 
-    private final NamePathMapperImpl namePathMapper = new NamePathMapperImpl(new TestNameMapper(
-        singletonMap("oak-prefix", TestNameMapper.TEST_URI),
-        singletonMap("jcr-prefix", TestNameMapper.TEST_URI) ));
+    private final NamePathMapperImpl namePathMapper =
+            new NamePathMapperImpl(new LocalNameMapper(
+                    singletonMap("oak-prefix", "http://jackrabbit.apache.org"),
+                    singletonMap("jcr-prefix", "http://jackrabbit.apache.org")));
 
     @Test
     public void namePropertyFromNameValue() throws RepositoryException {
@@ -59,10 +61,10 @@ public class PropertyStatesTest {
 
     @Test
     public void dateValueFromDateProperty() throws RepositoryException {
-        long expected = Calendar.getInstance().getTimeInMillis();
+        String expected = ISO8601.format(Calendar.getInstance());
         PropertyState dateProperty = PropertyStates.createProperty(
                 "date", expected, Type.DATE);
-        long actual = dateProperty.getValue(Type.DATE);
+        String actual = dateProperty.getValue(Type.DATE);
         assertEquals(expected, actual);
     }
 }

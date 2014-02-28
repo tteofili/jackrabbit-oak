@@ -32,16 +32,16 @@ import com.google.common.io.ByteStreams;
 public class SegmentStream extends InputStream {
 
     @CheckForNull
-    public static RecordId getRecordIdIfAvailable(InputStream stream) {
+    public static RecordId getRecordIdIfAvailable(
+            InputStream stream, SegmentStore store) {
         if (stream instanceof SegmentStream) {
             SegmentStream sstream = (SegmentStream) stream;
-            if (sstream.position == 0) {
+            if (sstream.position == 0 && sstream.store == store) {
                 return sstream.recordId;
             }
         }
         return null;
     }
-
 
     private final SegmentStore store;
 
@@ -175,6 +175,15 @@ public class SegmentStream extends InputStream {
         }
         position += n;
         return n;
+    }
+
+    @Override
+    public int available() {
+        if (inline != null) {
+            return (int) (length - position); // <= inline.length
+        } else {
+            return 0;
+        }
     }
 
     @Override

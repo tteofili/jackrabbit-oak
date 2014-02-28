@@ -18,18 +18,20 @@ package org.apache.jackrabbit.oak.kernel;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 
+import javax.annotation.Nonnull;
+
 import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.plugins.memory.MemoryNodeBuilder;
 import org.apache.jackrabbit.oak.spi.commit.CommitHook;
-import org.apache.jackrabbit.oak.spi.commit.PostCommitHook;
+import org.apache.jackrabbit.oak.spi.commit.CommitInfo;
+import org.apache.jackrabbit.oak.spi.state.ConflictAnnotatingRebaseDiff;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
-import org.apache.jackrabbit.oak.spi.state.NodeStoreBranch;
 
 /**
  * This implementation tracks the number of pending changes and purges them to
  * a private branch of the underlying store if a certain threshold is met.
  */
-class KernelRootBuilder extends MemoryNodeBuilder implements FastCopyMove {
+class KernelRootBuilder extends MemoryNodeBuilder implements FastMove {
 
     /**
      * Number of content updates that need to happen before the updates
@@ -48,12 +50,13 @@ class KernelRootBuilder extends MemoryNodeBuilder implements FastCopyMove {
      * This differs from the base state of super since the latter one reflects
      * the base created by the last purge.
      */
+    @Nonnull
     private NodeState base;
 
     /**
      * Private branch used to hold pending changes exceeding {@link #UPDATE_LIMIT}
      */
-    private NodeStoreBranch branch;
+    private KernelNodeStoreBranch branch;
 
     /**
      * Number of updated not yet persisted to the private {@link #branch}
@@ -70,14 +73,14 @@ class KernelRootBuilder extends MemoryNodeBuilder implements FastCopyMove {
     //--------------------------------------------------< MemoryNodeBuilder >---
 
 
-    @Override
+    @Override @Nonnull
     public NodeState getBaseState() {
         return base;
     }
 
     @Override
-    public void reset(NodeState newBase) {
-        base = newBase;
+    public void reset(@Nonnull NodeState newBase) {
+        base = checkNotNull(newBase);
         super.reset(newBase);
     }
 
@@ -99,23 +102,25 @@ class KernelRootBuilder extends MemoryNodeBuilder implements FastCopyMove {
         return move(sourcePath, '/' + newName);
     }
 
-    @Override
-    public boolean copyFrom(KernelNodeBuilder source, String newName) {
-        String sourcePath = source.getPath();
-        return copy(sourcePath, '/' + newName);
-    }
-
     //------------------------------------------------------------< internal >---
 
     /**
      * Rebase this builder on top of the head of the underlying store
      */
     NodeState rebase() {
-        purge();
+        NodeState head = getNodeState();
+        NodeState inMemBase = super.getBaseState();
+
+        // Rebase branch
         branch.rebase();
-        NodeState head = branch.getHead();
-        reset(head);
-        return head;
+
+        // Rebase in memory changes on top of the head of the rebased branch
+        super.reset(branch.getHead());
+        head.compareAgainstBaseState(inMemBase, new ConflictAnnotatingRebaseDiff(this));
+
+        // Set new base and return rebased head
+        base = branch.getBase();
+        return getNodeState();
     }
 
     /**
@@ -132,9 +137,21 @@ class KernelRootBuilder extends MemoryNodeBuilder implements FastCopyMove {
     /**
      * Merge all changes tracked in this builder into the underlying store.
      */
-    NodeState merge(CommitHook hook, PostCommitHook committed) throws CommitFailedException {
+    NodeState merge(CommitHook hook, CommitInfo info) throws CommitFailedException {
         purge();
-        branch.merge(hook, committed);
+        boolean success = false;
+        try {
+            branch.merge(hook, info);
+            success = true;
+        } finally {
+            if (!success) {
+                // need to adjust base and head of this builder
+                // in case branch.merge() did a rebase and then
+                // a commit hook failed the merge
+                super.reset(branch.getHead());
+                this.base = branch.getBase();
+            }
+        }
         return reset();
     }
 

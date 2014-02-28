@@ -16,8 +16,12 @@
  */
 package org.apache.jackrabbit.oak.jcr;
 
-import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
+
 import javax.jcr.GuestCredentials;
 import javax.jcr.Repository;
 import javax.jcr.RepositoryException;
@@ -25,6 +29,7 @@ import javax.jcr.Session;
 import javax.jcr.SimpleCredentials;
 import javax.jcr.security.Privilege;
 
+import org.apache.jackrabbit.api.JackrabbitRepository;
 import org.apache.jackrabbit.commons.jackrabbit.authorization.AccessControlUtils;
 import org.apache.jackrabbit.oak.spi.security.principal.EveryonePrincipal;
 import org.apache.jackrabbit.oak.spi.state.NodeStore;
@@ -44,40 +49,73 @@ import org.junit.runners.Parameterized;
 @Ignore("This abstract base class does not have any tests")
 public abstract class AbstractRepositoryTest {
 
-    @Parameterized.Parameters
-    public static Collection<Object[]> fixtures() {
-        Object[][] fixtures = new Object[][] {
-                {NodeStoreFixture.MK_IMPL},
-                {NodeStoreFixture.MONGO_MK},
-                {NodeStoreFixture.SEGMENT_MK},
-        };
-        return Arrays.asList(fixtures);
-    }
-
     protected NodeStoreFixture fixture;
-    private NodeStore nodeStore = null;
-    private Repository repository = null;
-    private Session adminSession = null;
+    private NodeStore nodeStore;
+    private Repository repository;
+    private Session adminSession;
+
+    /**
+     * The system property "ns-fixtures" can be used to provide a
+     * whitespace-separated list of fixtures names for which the
+     * tests should be run (the default is to use all fixtures).
+     */
+    private static Set<String> FIXTURES;
+    static {
+        String raw = System.getProperty("ns-fixtures", "");
+        String[] fs = raw.split("\\s");
+        Set<String> tmp = new HashSet<String>();
+        for (String f : fs) {
+            String x = f.trim();
+            if (x.length() > 0) {
+                tmp.add(f.trim());
+            }
+        }
+        FIXTURES = Collections.unmodifiableSet(tmp);
+    }
 
     public AbstractRepositoryTest(NodeStoreFixture fixture) {
         this.fixture = fixture;
     }
 
+    @Parameterized.Parameters
+    public static Collection<Object[]> fixtures() {
+        Collection<Object[]> result = new ArrayList<Object[]>();
+        if (FIXTURES.isEmpty() || FIXTURES.contains("MK_IMPL")) {
+            result.add(new Object[] { NodeStoreFixture.MK_IMPL });
+        }
+        if (FIXTURES.isEmpty() || FIXTURES.contains("DOCUMENT_MK")) {
+            result.add(new Object[] { NodeStoreFixture.DOCUMENT_MK });
+        }
+        if (FIXTURES.isEmpty() || FIXTURES.contains("DOCUMENT_NS")) {
+            result.add(new Object[] { NodeStoreFixture.DOCUMENT_NS });
+        }
+        if (FIXTURES.isEmpty() || FIXTURES.contains("SEGMENT_MK")) {
+            result.add(new Object[] { NodeStoreFixture.SEGMENT_MK });
+        }
+        if (FIXTURES.isEmpty() || FIXTURES.contains("DOCUMENT_JDBC")) {
+            result.add(new Object[] { NodeStoreFixture.DOCUMENT_JDBC });
+        }
+        return result;
+    }
+
     @After
-    public void logout() throws RepositoryException {
+    public void logout() {
         // release session field
         if (adminSession != null) {
             adminSession.logout();
             adminSession = null;
         }
         // release repository field
+        if (repository instanceof JackrabbitRepository) {
+            ((JackrabbitRepository) repository).shutdown();
+        }
         repository = null;
         if (nodeStore != null) {
             fixture.dispose(nodeStore);
         }
     }
 
-    protected Repository getRepository() throws RepositoryException {
+    protected Repository getRepository() {
         if (repository == null) {
             nodeStore = fixture.createNodeStore();
             repository  = new Jcr(nodeStore).createRepository();
@@ -100,7 +138,18 @@ public abstract class AbstractRepositoryTest {
     }
 
     protected Session createAdminSession() throws RepositoryException {
-        return getRepository().login(new SimpleCredentials("admin", "admin".toCharArray()));
+        return getRepository().login(getAdminCredentials());
+    }
+
+    protected SimpleCredentials getAdminCredentials() {
+        return new SimpleCredentials("admin", "admin".toCharArray());
+    }
+
+    public static <R extends Repository> R dispose(R repository) {
+        if (repository instanceof JackrabbitRepository) {
+            ((JackrabbitRepository) repository).shutdown();
+        }
+        return null;
     }
 
 }

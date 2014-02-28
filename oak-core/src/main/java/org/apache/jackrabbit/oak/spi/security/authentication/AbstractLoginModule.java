@@ -35,20 +35,22 @@ import javax.security.auth.login.LoginException;
 import javax.security.auth.spi.LoginModule;
 
 import org.apache.jackrabbit.api.security.user.UserManager;
+import org.apache.jackrabbit.oak.api.AuthInfo;
 import org.apache.jackrabbit.oak.api.ContentRepository;
 import org.apache.jackrabbit.oak.api.ContentSession;
 import org.apache.jackrabbit.oak.api.Root;
 import org.apache.jackrabbit.oak.namepath.NamePathMapper;
-import org.apache.jackrabbit.oak.security.authentication.SystemSubject;
 import org.apache.jackrabbit.oak.spi.security.ConfigurationParameters;
 import org.apache.jackrabbit.oak.spi.security.SecurityProvider;
 import org.apache.jackrabbit.oak.spi.security.authentication.callback.CredentialsCallback;
 import org.apache.jackrabbit.oak.spi.security.authentication.callback.PrincipalProviderCallback;
 import org.apache.jackrabbit.oak.spi.security.authentication.callback.RepositoryCallback;
 import org.apache.jackrabbit.oak.spi.security.authentication.callback.UserManagerCallback;
+import org.apache.jackrabbit.oak.spi.security.authentication.callback.WhiteboardCallback;
 import org.apache.jackrabbit.oak.spi.security.principal.PrincipalConfiguration;
 import org.apache.jackrabbit.oak.spi.security.principal.PrincipalProvider;
 import org.apache.jackrabbit.oak.spi.security.user.UserConfiguration;
+import org.apache.jackrabbit.oak.spi.whiteboard.Whiteboard;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -155,12 +157,20 @@ public abstract class AbstractLoginModule implements LoginModule {
      */
     public static final String SHARED_KEY_LOGIN_NAME = "javax.security.auth.login.name";
 
+    /**
+     * Key of the sharedState entry referring to public attributes that are shared
+     * between multiple login modules.
+     */
+    public static final String SHARED_KEY_ATTRIBUTES = "javax.security.auth.login.attributes";
+
     protected Subject subject;
     protected CallbackHandler callbackHandler;
     protected Map sharedState;
     protected ConfigurationParameters options;
 
     private SecurityProvider securityProvider;
+
+    private Whiteboard whiteboard;
 
     private ContentSession systemSession;
     private Root root;
@@ -171,7 +181,7 @@ public abstract class AbstractLoginModule implements LoginModule {
         this.subject = subject;
         this.callbackHandler = callbackHandler;
         this.sharedState = sharedState;
-        this.options = ConfigurationParameters.of(options);
+        this.options = (options == null) ? ConfigurationParameters.EMPTY : ConfigurationParameters.of(options);
     }
 
     @Override
@@ -317,13 +327,34 @@ public abstract class AbstractLoginModule implements LoginModule {
             try {
                 callbackHandler.handle(new Callback[]{rcb});
                 securityProvider = rcb.getSecurityProvider();
-            } catch (UnsupportedCallbackException e) {
-                log.debug(e.getMessage());
-            } catch (IOException e) {
-                log.debug(e.getMessage());
+            } catch (Exception e) {
+                log.debug("Unable to retrieve the SecurityProvider via callback", e);
             }
         }
         return securityProvider;
+    }
+
+    /**
+     * Tries to obtain the {@code Whiteboard} object from the callback
+     * handler using a new WhiteboardCallback and keeps the value as
+     * private field. If the callback handler isn't able to handle the
+     * WhiteboardCallback this method returns {@code null}.
+     *
+     * @return The {@code Whiteboard} associated with this
+     *         {@code LoginModule} or {@code null}.
+     */
+    @CheckForNull
+    protected Whiteboard getWhiteboard() {
+        if (whiteboard == null && callbackHandler != null) {
+            WhiteboardCallback cb = new WhiteboardCallback();
+            try {
+                callbackHandler.handle(new Callback[]{cb});
+                whiteboard = cb.getWhiteboard();
+            } catch (Exception e) {
+                log.debug("Unable to retrieve the Whiteboard via callback", e);
+            }
+        }
+        return whiteboard;
     }
 
     /**
@@ -372,10 +403,10 @@ public abstract class AbstractLoginModule implements LoginModule {
     protected UserManager getUserManager() {
         UserManager userManager = null;
         SecurityProvider sp = getSecurityProvider();
-        Root root = getRoot();
-        if (root != null && sp != null) {
+        Root r = getRoot();
+        if (r != null && sp != null) {
             UserConfiguration uc = securityProvider.getConfiguration(UserConfiguration.class);
-            userManager = uc.getUserManager(root, NamePathMapper.DEFAULT);
+            userManager = uc.getUserManager(r, NamePathMapper.DEFAULT);
         }
 
         if (userManager == null && callbackHandler != null) {
@@ -404,10 +435,10 @@ public abstract class AbstractLoginModule implements LoginModule {
     protected PrincipalProvider getPrincipalProvider() {
         PrincipalProvider principalProvider = null;
         SecurityProvider sp = getSecurityProvider();
-        Root root = getRoot();
-        if (root != null && sp != null) {
+        Root r = getRoot();
+        if (r != null && sp != null) {
             PrincipalConfiguration pc = sp.getConfiguration(PrincipalConfiguration.class);
-            principalProvider = pc.getPrincipalProvider(root, NamePathMapper.DEFAULT);
+            principalProvider = pc.getPrincipalProvider(r, NamePathMapper.DEFAULT);
         }
 
         if (principalProvider == null && callbackHandler != null) {
@@ -441,5 +472,13 @@ public abstract class AbstractLoginModule implements LoginModule {
         } else {
             return principalProvider.getPrincipals(userId);
         }
+    }
+
+    static protected void setAuthInfo(@Nonnull AuthInfo authInfo, @Nonnull Subject subject) {
+        Set<AuthInfo> ais = subject.getPublicCredentials(AuthInfo.class);
+        if (!ais.isEmpty()) {
+            subject.getPublicCredentials().removeAll(ais);
+        }
+        subject.getPublicCredentials().add(authInfo);
     }
 }

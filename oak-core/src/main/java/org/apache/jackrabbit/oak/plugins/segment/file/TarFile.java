@@ -24,6 +24,7 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 class TarFile {
@@ -46,7 +47,9 @@ class TarFile {
 
     }
 
-    private final FileAccess file;
+    private final File file;
+
+    private final FileAccess access;
 
     private int position = 0;
 
@@ -60,16 +63,26 @@ class TarFile {
         checkState(len <= Integer.MAX_VALUE);
         this.maxFileSize = Math.max((int) len, maxFileSize);
 
+        this.file = file;
         if (memoryMapping) {
-            this.file = new MappedAccess(file, this.maxFileSize);
+            this.access = new MappedAccess(file, this.maxFileSize);
         } else {
-            this.file = new RandomAccess(file);
+            this.access = new RandomAccess(file);
+        }
+        if (len == 0) {
+            // allocate the full file by writing the last two blocks
+            access.write(
+                    maxFileSize - ZERO_BYTES.length * 2,
+                    ZERO_BYTES, 0, ZERO_BYTES.length);
+            access.write(
+                    maxFileSize - ZERO_BYTES.length,
+                    ZERO_BYTES, 0, ZERO_BYTES.length);
         }
 
         this.position = 0;
         while (position + BLOCK_SIZE <= len) {
             // read the tar header block
-            ByteBuffer buffer = this.file.read(position, BLOCK_SIZE);
+            ByteBuffer buffer = this.access.read(position, BLOCK_SIZE);
             String name = readString(buffer, 100);
             buffer.position(124);
             int size = readNumber(buffer, 12);
@@ -77,6 +90,8 @@ class TarFile {
 
             if (name.isEmpty() && size == 0) {
                 break; // no more entries in this file
+            } else if (position + BLOCK_SIZE + size > len) {
+                break; // invalid entry, truncate the file at this point
             }
 
             try {
@@ -90,10 +105,14 @@ class TarFile {
         }
     }
 
+    Set<UUID> getUUIDs() {
+        return entries.keySet();
+    }
+
     ByteBuffer readEntry(UUID id) throws IOException {
         Location location = entries.get(id);
         if (location != null) {
-            return file.read(location.offset, location.size);
+            return access.read(location.offset, location.size);
         } else {
             return null;
         }
@@ -155,25 +174,30 @@ class TarFile {
                 header, 148, 6);
         header[154] = 0;
 
-        file.write(position, header, 0, BLOCK_SIZE);
+        access.write(position, header, 0, BLOCK_SIZE);
         position += BLOCK_SIZE;
 
-        file.write(position, b, offset, size);
+        access.write(position, b, offset, size);
         entries.put(id, new Location(position, size));
         position += size;
 
         int padding = BLOCK_SIZE - position % BLOCK_SIZE;
         if (padding < BLOCK_SIZE) {
-            file.write(position, ZERO_BYTES, 0, padding);
+            access.write(position, ZERO_BYTES, 0, padding);
             position += padding;
         }
 
         return true;
     }
 
+    public void flush() throws IOException {
+        access.flush();
+    }
+
+
     void close() throws IOException {
-        file.flush();
-        file.close();
+        flush();
+        access.close();
     }
 
     private static String readString(ByteBuffer buffer, int fieldSize) {
@@ -199,6 +223,13 @@ class TarFile {
             }
         }
         return number;
+    }
+
+    //------------------------------------------------------------< Object >--
+
+    @Override
+    public String toString() {
+        return file.toString();
     }
 
 }

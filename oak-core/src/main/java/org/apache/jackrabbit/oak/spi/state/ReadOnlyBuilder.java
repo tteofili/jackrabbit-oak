@@ -16,6 +16,8 @@
  */
 package org.apache.jackrabbit.oak.spi.state;
 
+import static com.google.common.base.Preconditions.checkNotNull;
+
 import java.io.IOException;
 import java.io.InputStream;
 
@@ -32,10 +34,11 @@ import org.apache.jackrabbit.oak.api.Type;
  */
 public class ReadOnlyBuilder implements NodeBuilder {
 
+    @Nonnull
     private final NodeState state;
 
-    public ReadOnlyBuilder(NodeState state) {
-        this.state = state;
+    public ReadOnlyBuilder(@Nonnull NodeState state) {
+        this.state = checkNotNull(state);
     }
 
     protected RuntimeException unsupported() {
@@ -53,16 +56,31 @@ public class ReadOnlyBuilder implements NodeBuilder {
     }
 
     @Override
+    public boolean isNew(String name) {
+        return false;
+    }
+
+    @Override
     public boolean isModified() {
         return false;
     }
 
     @Override
+    public boolean isReplaced() {
+        return false;
+    }
+
+    @Override
+    public boolean isReplaced(String name) {
+        return false;
+    }
+
+    @Override @Nonnull
     public NodeState getNodeState() {
         return state;
     }
 
-    @Override
+    @Override @Nonnull
     public NodeState getBaseState() {
         return state;
     }
@@ -98,11 +116,6 @@ public class ReadOnlyBuilder implements NodeBuilder {
     }
 
     @Override
-    public boolean copyTo(NodeBuilder newParent, String newName) {
-        throw unsupported();
-    }
-
-    @Override
     public long getPropertyCount() {
         return state.getPropertyCount();
     }
@@ -125,6 +138,11 @@ public class ReadOnlyBuilder implements NodeBuilder {
     @Override
     public boolean getBoolean(String name) {
         return state.getBoolean(name);
+    }
+
+    @Override @CheckForNull
+    public String getString(@Nonnull String name) {
+        return state.getString(name);
     }
 
     @Override @CheckForNull

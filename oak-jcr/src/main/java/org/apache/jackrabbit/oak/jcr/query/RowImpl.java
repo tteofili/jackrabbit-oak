@@ -25,6 +25,10 @@ import javax.jcr.query.Row;
 
 import org.apache.jackrabbit.oak.api.PropertyValue;
 import org.apache.jackrabbit.oak.api.ResultRow;
+import org.apache.jackrabbit.oak.api.Type;
+import org.apache.jackrabbit.oak.spi.query.PropertyValues;
+
+import com.google.common.base.Joiner;
 
 /**
  * The implementation of the corresponding JCR interface.
@@ -43,18 +47,18 @@ public class RowImpl implements Row {
 
     @Override
     public Node getNode() throws RepositoryException {
-        return result.getNode(getPath());
+        return getNode(null);
     }
 
     @Override
     public Node getNode(String selectorName) throws RepositoryException {
-        return result.getNode(getPath(selectorName));
+        return result.getNode(row.getTree(selectorName));
     }
 
     @Override
     public String getPath() throws RepositoryException {
         try {
-            return result.getLocalPath(row.getPath(pathSelector));
+            return row.getPath(pathSelector);
         } catch (IllegalArgumentException e) {
             throw new RepositoryException(e);
         }
@@ -63,22 +67,27 @@ public class RowImpl implements Row {
     @Override
     public String getPath(String selectorName) throws RepositoryException {
         try {
-            return result.getLocalPath(row.getPath(selectorName));
+            return row.getPath(selectorName);
         } catch (IllegalArgumentException e) {
             throw new RepositoryException(e);
         }
+    }
+    
+    @Override
+    public String toString() {
+        return row.toString();
     }
 
     @Override
     public double getScore() throws RepositoryException {
         // TODO row score
-        return 0;
+        return 0.01;
     }
 
     @Override
     public double getScore(String selectorName) throws RepositoryException {
         // TODO row score
-        return 0;
+        return 0.01;
     }
 
     @Override
@@ -96,9 +105,20 @@ public class RowImpl implements Row {
         int len = values.length;
         Value[] v2 = new Value[values.length];
         for (int i = 0; i < len; i++) {
-            v2[i] = result.createValue(values[i]);
+            if (values[i] != null && values[i].isArray()) {
+                v2[i] = result.createValue(mvpToString(values[i]));
+            } else {
+                v2[i] = result.createValue(values[i]);
+            }
         }
         return v2;
+    }
+
+    private static PropertyValue mvpToString(PropertyValue pv) {
+        String v = Joiner.on(' ')
+                .appendTo(new StringBuilder(), pv.getValue(Type.STRINGS))
+                .toString();
+        return PropertyValues.newString(v);
     }
 
 }

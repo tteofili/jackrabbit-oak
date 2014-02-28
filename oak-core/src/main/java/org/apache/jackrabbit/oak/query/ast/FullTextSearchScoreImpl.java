@@ -63,7 +63,7 @@ public class FullTextSearchScoreImpl extends DynamicOperandImpl {
 
     @Override
     public PropertyValue currentProperty() {
-        PropertyValue p = selector.currentProperty(QueryImpl.JCR_SCORE);
+        PropertyValue p = selector.currentOakProperty(QueryImpl.JCR_SCORE);
         if (p == null) {
             // TODO if score() is not supported by the index, use the value 0.0?
             return PropertyValues.newDouble(0.0);
@@ -77,7 +77,7 @@ public class FullTextSearchScoreImpl extends DynamicOperandImpl {
 
     @Override
     public void restrict(FilterImpl f, Operator operator, PropertyValue v) {
-        if (f.getSelector() == selector) {
+        if (f.getSelector().equals(selector)) {
             if (operator == Operator.NOT_EQUAL && v != null) {
                 // not supported
                 return;
@@ -93,7 +93,7 @@ public class FullTextSearchScoreImpl extends DynamicOperandImpl {
 
     @Override
     public boolean canRestrictSelector(SelectorImpl s) {
-        return s == selector;
+        return s.equals(selector);
     }
     
     @Override

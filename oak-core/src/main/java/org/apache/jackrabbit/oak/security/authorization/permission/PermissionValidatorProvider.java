@@ -16,18 +16,21 @@
  */
 package org.apache.jackrabbit.oak.security.authorization.permission;
 
-import javax.annotation.Nonnull;
-import javax.security.auth.Subject;
+import java.security.Principal;
+import java.util.Set;
 
-import org.apache.jackrabbit.oak.core.ImmutableTree;
-import org.apache.jackrabbit.oak.core.TreeTypeProviderImpl;
-import org.apache.jackrabbit.oak.plugins.nodetype.ReadOnlyNodeTypeManager;
-import org.apache.jackrabbit.oak.spi.security.authorization.AuthorizationConfiguration;
+import javax.annotation.Nonnull;
+
+import org.apache.jackrabbit.oak.core.ImmutableRoot;
+import org.apache.jackrabbit.oak.plugins.tree.ImmutableTree;
+import org.apache.jackrabbit.oak.spi.commit.CommitInfo;
+import org.apache.jackrabbit.oak.spi.commit.MoveTracker;
 import org.apache.jackrabbit.oak.spi.commit.Validator;
 import org.apache.jackrabbit.oak.spi.commit.ValidatorProvider;
 import org.apache.jackrabbit.oak.spi.security.ConfigurationParameters;
 import org.apache.jackrabbit.oak.spi.security.Context;
 import org.apache.jackrabbit.oak.spi.security.SecurityProvider;
+import org.apache.jackrabbit.oak.spi.security.authorization.AuthorizationConfiguration;
 import org.apache.jackrabbit.oak.spi.security.authorization.permission.PermissionConstants;
 import org.apache.jackrabbit.oak.spi.security.authorization.permission.PermissionProvider;
 import org.apache.jackrabbit.oak.spi.security.authorization.permission.Permissions;
@@ -44,14 +47,14 @@ public class PermissionValidatorProvider extends ValidatorProvider {
     private final AuthorizationConfiguration acConfig;
     private final long jr2Permissions;
 
-    private final Subject subject;
+    private final String workspaceName;
+    private final Set<Principal> principals;
+    private final MoveTracker moveTracker;
 
-    private ReadOnlyNodeTypeManager ntMgr;
     private Context acCtx;
     private Context userCtx;
 
-    public PermissionValidatorProvider(
-            SecurityProvider securityProvider, Subject subject) {
+    public PermissionValidatorProvider(SecurityProvider securityProvider, String workspaceName, Set<Principal> principals, MoveTracker moveTracker) {
         this.securityProvider = securityProvider;
         this.acConfig = securityProvider.getConfiguration(AuthorizationConfiguration.class);
 
@@ -59,16 +62,25 @@ public class PermissionValidatorProvider extends ValidatorProvider {
         String compatValue = params.getConfigValue(PermissionConstants.PARAM_PERMISSIONS_JR2, null, String.class);
         jr2Permissions = Permissions.getPermissions(compatValue);
 
-        this.subject = subject;
+        this.workspaceName = workspaceName;
+        this.principals = principals;
+        this.moveTracker = moveTracker;
     }
 
     //--------------------------------------------------< ValidatorProvider >---
-    @Nonnull
-    @Override
-    public Validator getRootValidator(NodeState before, NodeState after) {
-        ntMgr = ReadOnlyNodeTypeManager.getInstance(after);
-        PermissionProvider pp = getPermissionProvider();
-        return new PermissionValidator(createTree(before), createTree(after), pp, this);
+
+    @Override @Nonnull
+    public Validator getRootValidator(
+            NodeState before, NodeState after, CommitInfo info) {
+        PermissionProvider pp = acConfig.getPermissionProvider(new ImmutableRoot(before), workspaceName, principals);
+
+        ImmutableTree rootBefore = new ImmutableTree(before);
+        ImmutableTree rootAfter = new ImmutableTree(after);
+        if (moveTracker.isEmpty()) {
+            return new PermissionValidator(rootBefore, rootAfter, pp, this);
+        } else {
+            return new MoveAwarePermissionValidator(rootBefore, rootAfter, pp, this, moveTracker);
+        }
     }
 
     //--------------------------------------------------------------------------
@@ -88,23 +100,8 @@ public class PermissionValidatorProvider extends ValidatorProvider {
         return userCtx;
     }
 
-    ReadOnlyNodeTypeManager getNodeTypeManager() {
-        return ntMgr;
-    }
-
     boolean requiresJr2Permissions(long permission) {
         return Permissions.includes(jr2Permissions, permission);
     }
 
-    private ImmutableTree createTree(NodeState root) {
-        return new ImmutableTree(root, new TreeTypeProviderImpl(getAccessControlContext()));
-    }
-
-    private PermissionProvider getPermissionProvider() {
-        if (subject == null || subject.getPublicCredentials(PermissionProvider.class).isEmpty()) {
-            throw new IllegalStateException("Unable to validate permissions; no permission provider associated with the commit call.");
-        } else {
-            return subject.getPublicCredentials(PermissionProvider.class).iterator().next();
-        }
-    }
 }

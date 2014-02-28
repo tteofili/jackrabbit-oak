@@ -25,9 +25,9 @@ import java.util.Map;
 
 import org.apache.jackrabbit.mk.api.MicroKernel;
 import org.apache.jackrabbit.mk.api.MicroKernelException;
-import org.apache.jackrabbit.mk.json.JsopBuilder;
+import org.apache.jackrabbit.oak.commons.json.JsopBuilder;
 import org.apache.jackrabbit.mk.util.MicroKernelInputStream;
-import org.apache.jackrabbit.mk.util.IOUtils;
+import org.apache.jackrabbit.oak.commons.IOUtils;
 
 /**
  * Servlet handling requests directed at a {@code MicroKernel} instance.
@@ -85,6 +85,8 @@ class MicroKernelServlet {
         COMMANDS.put("commit", new Commit());
         COMMANDS.put("branch", new Branch());
         COMMANDS.put("merge", new Merge());
+        COMMANDS.put("rebase", new Rebase());
+        COMMANDS.put("reset", new Reset());
         COMMANDS.put("getLength", new GetLength());
         COMMANDS.put("read", new Read());
         COMMANDS.put("write", new Write());
@@ -305,6 +307,36 @@ class MicroKernelServlet {
             String message = request.getParameter("message");
 
             String newRevision = mk.merge(branchRevisionId, message);
+
+            response.setContentType("text/plain");
+            response.write(newRevision);
+        }
+    }
+
+    static class Rebase implements Command {
+
+        @Override
+        public void execute(MicroKernel mk, Request request, Response response)
+                throws IOException, MicroKernelException {
+            String branchRevisionId = request.getParameter("branch_revision_id");
+            String newBaseRevisionId = request.getParameter("new_base_revision_id");
+
+            String newRevision = mk.rebase(branchRevisionId, newBaseRevisionId);
+
+            response.setContentType("text/plain");
+            response.write(newRevision);
+        }
+    }
+
+    static class Reset implements Command {
+
+        @Override
+        public void execute(MicroKernel mk, Request request, Response response)
+                throws IOException, MicroKernelException {
+            String branchRevisionId = request.getParameter("branch_revision_id");
+            String ancestorRevisionId = request.getParameter("ancestor_revision_id");
+
+            String newRevision = mk.reset(branchRevisionId, ancestorRevisionId);
 
             response.setContentType("text/plain");
             response.write(newRevision);

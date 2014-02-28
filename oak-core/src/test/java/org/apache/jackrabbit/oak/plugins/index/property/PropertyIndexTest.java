@@ -36,8 +36,11 @@ import java.util.Set;
 import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.plugins.index.IndexUpdateProvider;
+import org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState;
 import org.apache.jackrabbit.oak.query.ast.SelectorImpl;
 import org.apache.jackrabbit.oak.query.index.FilterImpl;
+import org.apache.jackrabbit.oak.query.index.TraversingIndex;
+import org.apache.jackrabbit.oak.spi.commit.CommitInfo;
 import org.apache.jackrabbit.oak.spi.commit.EditorHook;
 import org.apache.jackrabbit.oak.spi.query.Filter;
 import org.apache.jackrabbit.oak.spi.query.PropertyValues;
@@ -74,7 +77,7 @@ public class PropertyIndexTest {
         }
         NodeState after = builder.getNodeState();
 
-        NodeState indexed = HOOK.processCommit(before, after);
+        NodeState indexed = HOOK.processCommit(before, after, CommitInfo.EMPTY);
 
         FilterImpl f = createFilter(indexed, NT_BASE);
 
@@ -83,22 +86,70 @@ public class PropertyIndexTest {
         double cost;
         
         cost = lookup.getCost(f, "foo", PropertyValues.newString("x1"));
-        assertTrue("cost: " + cost, cost >= 4.5 && cost <= 5.5);
+        assertTrue("cost: " + cost, cost >= 6.5 && cost <= 7.5);
         
         cost = lookup.getCost(f, "foo", PropertyValues.newString(
                 Arrays.asList("x1", "x2")));
-        assertTrue("cost: " + cost, cost >= 9.5 && cost <= 10.5);
+        assertTrue("cost: " + cost, cost >= 11.5 && cost <= 12.5);
         
         cost = lookup.getCost(f, "foo", PropertyValues.newString(
                 Arrays.asList("x1", "x2", "x3", "x4", "x5")));
-        assertTrue("cost: " + cost, cost >= 24.5 && cost <= 25.5);
+        assertTrue("cost: " + cost, cost >= 26.5 && cost <= 27.5);
 
         cost = lookup.getCost(f, "foo", PropertyValues.newString(
                 Arrays.asList("x1", "x2", "x3", "x4", "x5", "x6", "x7", "x8", "x9", "x0")));
-        assertTrue("cost: " + cost, cost >= 49.5 && cost <= 50.5);
+        assertTrue("cost: " + cost, cost >= 51.5 && cost <= 52.5);
 
         cost = lookup.getCost(f, "foo", null);
         assertTrue("cost: " + cost, cost >= MANY);
+    }
+
+    @Test
+    public void costMaxEstimation() throws Exception {
+        NodeState root = EmptyNodeState.EMPTY_NODE;
+
+        // Add index definition
+        NodeBuilder builder = root.builder();
+        createIndexDefinition(builder.child(INDEX_DEFINITIONS_NAME), "foo",
+                true, false, ImmutableSet.of("foo"), null);
+        NodeState before = builder.getNodeState();
+
+        // 100 nodes in the index:
+        // with a single level /content cost is 121
+        // adding a second level /content/data cost is133
+
+        // 101 nodes in the index:
+        // with a single level /content cost is 121
+        // adding a second level /content/data cost is 133
+
+        // 100 nodes, 12 levels deep, cost is 345
+        // 101 nodes, 12 levels deep, cost is 345
+
+        // threshold for estimation (PropertyIndexLookup.MAX_COST) is at 100
+        int nodes = 101;
+        int levels = 12;
+        
+        NodeBuilder data = builder;
+        for (int i = 0; i < levels; i++) {
+            data = data.child("l" + i);
+        }
+        for (int i = 0; i < nodes; i++) {
+            NodeBuilder c = data.child("c_" + i);
+            c.setProperty("foo", "azerty");
+        }
+        NodeState after = builder.getNodeState();
+        NodeState indexed = HOOK.processCommit(before, after, CommitInfo.EMPTY);
+
+        FilterImpl f = createFilter(indexed, NT_BASE);
+
+        PropertyIndexLookup lookup = new PropertyIndexLookup(indexed);
+        double cost = lookup.getCost(f, "foo",
+                PropertyValues.newString("azerty"));
+        double traversal = new TraversingIndex().getCost(f, indexed);
+
+        assertTrue("Estimated cost for " + nodes
+                + " nodes should not be higher than traversal (" + cost + ")",
+                cost < traversal);
     }
 
     @Test
@@ -121,7 +172,7 @@ public class PropertyIndexTest {
         }
         NodeState after = builder.getNodeState();
 
-        NodeState indexed = HOOK.processCommit(before, after);
+        NodeState indexed = HOOK.processCommit(before, after, CommitInfo.EMPTY);
 
         FilterImpl f = createFilter(indexed, NT_BASE);
 
@@ -169,7 +220,7 @@ public class PropertyIndexTest {
         NodeState after = builder.getNodeState();
 
         // Add an index
-        NodeState indexed = HOOK.processCommit(before, after);
+        NodeState indexed = HOOK.processCommit(before, after, CommitInfo.EMPTY);
 
         FilterImpl f = createFilter(indexed, NT_BASE);
 
@@ -217,7 +268,7 @@ public class PropertyIndexTest {
                 .setProperty("foo", Arrays.asList("abc", "def"), Type.STRINGS);
         NodeState after = builder.getNodeState();
 
-        NodeState indexed = HOOK.processCommit(before, after);
+        NodeState indexed = HOOK.processCommit(before, after, CommitInfo.EMPTY);
 
         FilterImpl f = createFilter(indexed, NT_UNSTRUCTURED);
 
@@ -240,7 +291,7 @@ public class PropertyIndexTest {
         NodeState types = system.getChildNode(JCR_NODE_TYPES);
         NodeState type = types.getChildNode(nodeTypeName);
         SelectorImpl selector = new SelectorImpl(type, nodeTypeName);
-        return new FilterImpl(selector, "SELECT * FROM [" + nodeTypeName + "]", null);
+        return new FilterImpl(selector, "SELECT * FROM [" + nodeTypeName + "]");
     }
 
     /**
@@ -273,7 +324,7 @@ public class PropertyIndexTest {
         NodeState after = builder.getNodeState();
 
         // Add an index
-        NodeState indexed = HOOK.processCommit(before, after);
+        NodeState indexed = HOOK.processCommit(before, after, CommitInfo.EMPTY);
 
         FilterImpl f = createFilter(after, NT_UNSTRUCTURED);
 
@@ -306,7 +357,7 @@ public class PropertyIndexTest {
                 Type.STRINGS);
         NodeState after = builder.getNodeState();
 
-        HOOK.processCommit(before, after); // should throw
+        HOOK.processCommit(before, after, CommitInfo.EMPTY); // should throw
     }
 
     @Test
@@ -325,7 +376,7 @@ public class PropertyIndexTest {
                 .setProperty("foo", "abc");
         NodeState after = builder.getNodeState();
 
-        HOOK.processCommit(before, after); // should not throw
+        HOOK.processCommit(before, after, CommitInfo.EMPTY); // should not throw
     }
 
     @Test(expected = CommitFailedException.class)
@@ -344,7 +395,7 @@ public class PropertyIndexTest {
                 .setProperty("foo", "abc");
         NodeState after = builder.getNodeState();
 
-        HOOK.processCommit(before, after); // should throw
+        HOOK.processCommit(before, after, CommitInfo.EMPTY); // should throw
     }
 
     @Test
@@ -364,7 +415,7 @@ public class PropertyIndexTest {
         builder.getChildNode("b").remove();
         NodeState after = builder.getNodeState();
 
-        HOOK.processCommit(before, after); // should not throw
+        HOOK.processCommit(before, after, CommitInfo.EMPTY); // should not throw
     }
 
 }

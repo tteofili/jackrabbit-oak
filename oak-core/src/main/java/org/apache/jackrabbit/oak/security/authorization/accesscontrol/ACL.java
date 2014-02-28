@@ -35,14 +35,12 @@ import com.google.common.base.Predicate;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import org.apache.jackrabbit.api.security.authorization.PrivilegeManager;
-import org.apache.jackrabbit.api.security.principal.PrincipalManager;
 import org.apache.jackrabbit.oak.namepath.NamePathMapper;
 import org.apache.jackrabbit.oak.spi.security.authorization.accesscontrol.ACE;
 import org.apache.jackrabbit.oak.spi.security.authorization.accesscontrol.AbstractAccessControlList;
 import org.apache.jackrabbit.oak.spi.security.authorization.restriction.Restriction;
 import org.apache.jackrabbit.oak.spi.security.authorization.restriction.RestrictionDefinition;
 import org.apache.jackrabbit.oak.spi.security.privilege.PrivilegeBits;
-import org.apache.jackrabbit.oak.spi.security.privilege.PrivilegeBitsProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -52,10 +50,6 @@ abstract class ACL extends AbstractAccessControlList {
 
     private final List<ACE> entries = new ArrayList<ACE>();
 
-    ACL(@Nullable String oakPath, @Nonnull NamePathMapper namePathMapper) {
-        this(oakPath, null, namePathMapper);
-    }
-
     ACL(@Nullable String oakPath, @Nullable List<ACE> entries,
         @Nonnull NamePathMapper namePathMapper) {
         super(oakPath, namePathMapper);
@@ -64,13 +58,10 @@ abstract class ACL extends AbstractAccessControlList {
         }
     }
 
-    abstract PrincipalManager getPrincipalManager();
-
+    abstract ACE createACE(Principal principal, PrivilegeBits privilegeBits, boolean isAllow, Set<Restriction> restrictions) throws RepositoryException;
+    abstract void checkValidPrincipal(Principal principal) throws AccessControlException;
     abstract PrivilegeManager getPrivilegeManager();
-
-    abstract PrivilegeBitsProvider getPrivilegeBitsProvider();
-
-    abstract ACE createACE(Principal principal, PrivilegeBits privilegeBits, boolean isAllow, Set<Restriction> restrictions, NamePathMapper namePathMapper) throws RepositoryException;
+    abstract PrivilegeBits getPrivilegeBits(Privilege[] privileges);
 
     //------------------------------------------< AbstractAccessControlList >---
     @Nonnull
@@ -90,10 +81,10 @@ abstract class ACL extends AbstractAccessControlList {
     }
 
     //----------------------------------------< JackrabbitAccessControlList >---
-
     @Override
     public boolean addEntry(Principal principal, Privilege[] privileges,
-                            boolean isAllow, Map<String, Value> restrictions) throws RepositoryException {
+                            boolean isAllow, Map<String, Value> restrictions,
+                            Map<String, Value[]> mvRestrictions) throws RepositoryException {
         if (privileges == null || privileges.length == 0) {
             throw new AccessControlException("Privileges may not be null nor an empty array");
         }
@@ -104,7 +95,7 @@ abstract class ACL extends AbstractAccessControlList {
             }
         }
 
-        Util.checkValidPrincipal(principal, getPrincipalManager());
+        checkValidPrincipal(principal);
 
         for (RestrictionDefinition def : getRestrictionProvider().getSupportedRestrictions(getOakPath())) {
             String jcrName = getNamePathMapper().getJcrName(def.getName());
@@ -114,17 +105,25 @@ abstract class ACL extends AbstractAccessControlList {
         }
 
         Set<Restriction> rs;
-        if (restrictions == null) {
+        if (restrictions == null && mvRestrictions == null) {
             rs = Collections.emptySet();
         } else {
-            rs = new HashSet<Restriction>(restrictions.size());
-            for (String jcrName : restrictions.keySet()) {
-                String oakName = getNamePathMapper().getOakName(jcrName);
-                rs.add(getRestrictionProvider().createRestriction(getOakPath(), oakName, restrictions.get(oakName)));
+            rs = new HashSet<Restriction>();
+            if (restrictions != null) {
+                for (String jcrName : restrictions.keySet()) {
+                    String oakName = getNamePathMapper().getOakName(jcrName);
+                    rs.add(getRestrictionProvider().createRestriction(getOakPath(), oakName, restrictions.get(oakName)));
+                }
+            }
+            if (mvRestrictions != null) {
+                for (String jcrName : mvRestrictions.keySet()) {
+                    String oakName = getNamePathMapper().getOakName(jcrName);
+                    rs.add(getRestrictionProvider().createRestriction(getOakPath(), oakName, mvRestrictions.get(oakName)));
+                }
             }
         }
 
-        ACE entry = createACE(principal, getPrivilegeBits(privileges), isAllow, rs, getNamePathMapper());
+        ACE entry = createACE(principal, getPrivilegeBits(privileges), isAllow, rs);
         if (entries.contains(entry)) {
             log.debug("Entry is already contained in policy -> no modification.");
             return false;
@@ -189,7 +188,7 @@ abstract class ACL extends AbstractAccessControlList {
         List<ACE> subList = Lists.newArrayList(Iterables.filter(entries, new Predicate<ACE>() {
             @Override
             public boolean apply(@Nullable ACE ace) {
-                return (ace != null) && ace.getPrincipal().equals(principal);
+                return (ace != null) && ace.getPrincipal().getName().equals(principal.getName());
             }
         }));
 
@@ -231,10 +230,6 @@ abstract class ACL extends AbstractAccessControlList {
     }
 
     private ACE createACE(@Nonnull ACE existing, @Nonnull PrivilegeBits newPrivilegeBits) throws RepositoryException {
-        return createACE(existing.getPrincipal(), newPrivilegeBits, existing.isAllow(), existing.getRestrictions(), getNamePathMapper());
-    }
-
-    private PrivilegeBits getPrivilegeBits(Privilege[] privileges) {
-        return getPrivilegeBitsProvider().getBits(privileges, getNamePathMapper());
+        return createACE(existing.getPrincipal(), newPrivilegeBits, existing.isAllow(), existing.getRestrictions());
     }
 }

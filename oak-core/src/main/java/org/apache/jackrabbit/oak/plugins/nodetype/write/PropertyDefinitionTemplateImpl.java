@@ -24,8 +24,10 @@ import static org.apache.jackrabbit.JcrConstants.JCR_VALUECONSTRAINTS;
 import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.JCR_AVAILABLE_QUERY_OPERATORS;
 import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.JCR_IS_FULLTEXT_SEARCHABLE;
 import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.JCR_IS_QUERY_ORDERABLE;
+import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.RESIDUAL_NAME;
 
 import java.util.Arrays;
+import java.util.Locale;
 
 import javax.jcr.PropertyType;
 import javax.jcr.RepositoryException;
@@ -34,6 +36,7 @@ import javax.jcr.nodetype.ConstraintViolationException;
 import javax.jcr.nodetype.PropertyDefinition;
 import javax.jcr.nodetype.PropertyDefinitionTemplate;
 import javax.jcr.query.qom.QueryObjectModelConstants;
+import javax.jcr.version.OnParentVersionAction;
 
 import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.api.Type;
@@ -97,7 +100,7 @@ class PropertyDefinitionTemplateImpl extends ItemDefinitionTemplate
 
         tree.setProperty(
                 JCR_REQUIREDTYPE,
-                PropertyType.nameFromValue(requiredType).toUpperCase());
+                PropertyType.nameFromValue(requiredType).toUpperCase(Locale.ENGLISH));
         tree.setProperty(JCR_MULTIPLE, isMultiple);
         tree.setProperty(JCR_IS_FULLTEXT_SEARCHABLE, fullTextSearchable);
         tree.setProperty(JCR_IS_QUERY_ORDERABLE, queryOrderable);
@@ -109,11 +112,15 @@ class PropertyDefinitionTemplateImpl extends ItemDefinitionTemplate
             tree.setProperty(
                     JCR_VALUECONSTRAINTS,
                     Arrays.asList(valueConstraints), Type.STRINGS);
+        } else {
+            tree.removeProperty(JCR_VALUECONSTRAINTS);
         }
 
         if (defaultValues != null) {
             tree.setProperty(PropertyStates.createProperty(
                     JCR_DEFAULTVALUES, Arrays.asList(defaultValues)));
+        } else {
+            tree.removeProperty(JCR_DEFAULTVALUES);
         }
     }
 
@@ -205,8 +212,33 @@ class PropertyDefinitionTemplateImpl extends ItemDefinitionTemplate
 
     //------------------------------------------------------------< Object >--
 
+    @Override
     public String toString() {
-        return String.format("PropertyDefinitionTemplate(%s)", getOakName());
+        StringBuilder builder = new StringBuilder("- ");
+        if (getOakName() == null) {
+            builder.append(RESIDUAL_NAME);
+        } else {
+            builder.append(getOakName());
+        }
+        if (requiredType != PropertyType.STRING) {
+            builder.append(" (");
+            builder.append(Type.fromTag(requiredType, false).toString());
+            builder.append(")");
+        }
+        if (isAutoCreated()) {
+            builder.append(" a");
+        }
+        if (isProtected()) {
+            builder.append(" p");
+        }
+        if (isMandatory()) {
+            builder.append(" m");
+        }
+        if (getOnParentVersion() != OnParentVersionAction.COPY) {
+            builder.append(" ");
+            builder.append(OnParentVersionAction.nameFromValue(getOnParentVersion()));
+        }
+        return builder.toString();
     }
 
 }

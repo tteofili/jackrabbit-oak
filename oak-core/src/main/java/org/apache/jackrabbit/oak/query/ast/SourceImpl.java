@@ -18,64 +18,24 @@
  */
 package org.apache.jackrabbit.oak.query.ast;
 
-import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
-import org.apache.jackrabbit.oak.query.QueryImpl;
+import org.apache.jackrabbit.oak.query.plan.ExecutionPlan;
+import org.apache.jackrabbit.oak.spi.query.Filter;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 
 /**
  * The base class of a selector and a join.
  */
 public abstract class SourceImpl extends AstElement {
-
-    /**
-     * The WHERE clause of the query.
-     */
-    protected ConstraintImpl queryConstraint;
-
-    /**
-     * The join condition of this selector that can be evaluated at execution
-     * time. For the query "select * from nt:base as a inner join nt:base as b
-     * on a.x = b.x", the join condition "a.x = b.x" is only set for the
-     * selector b, as selector a can't evaluate it if it is executed first
-     * (until b is executed).
-     */
-    protected JoinConditionImpl joinCondition;
-
-    /**
-     * The list of all join conditions this selector is involved. For the query
-     * "select * from nt:base as a inner join nt:base as b on a.x =
-     * b.x", the join condition "a.x = b.x" is set for both selectors a and b,
-     * so both can check if the property x is set.
-     */
-    protected ArrayList<JoinConditionImpl> allJoinConditions =
-            new ArrayList<JoinConditionImpl>();
-
-    /**
-     * Whether this selector is the right hand side of a join.
-     */
-    protected boolean join;
-
-    /**
-     * Whether this selector is the left hand side of a left outer join.
-     * Right outer joins are converted to left outer join.
-     */
-    protected boolean outerJoinLeftHandSide;
-
-    /**
-     * Whether this selector is the right hand side of a left outer join.
-     * Right outer joins are converted to left outer join.
-     */
-    protected boolean outerJoinRightHandSide;
     
     /**
      * Set the complete constraint of the query (the WHERE ... condition).
      *
      * @param queryConstraint the constraint
      */
-    public void setQueryConstraint(ConstraintImpl queryConstraint) {
-        this.queryConstraint = queryConstraint;
-    }
+    public abstract void setQueryConstraint(ConstraintImpl queryConstraint);
 
     /**
      * Add the join condition (the ON ... condition).
@@ -84,12 +44,7 @@ public abstract class SourceImpl extends AstElement {
      * @param forThisSelector if set, the join condition can only be evaluated
      *        when all previous selectors are executed.
      */
-    public void addJoinCondition(JoinConditionImpl joinCondition, boolean forThisSelector) {
-        if (forThisSelector) {
-            this.joinCondition = joinCondition;
-        }
-        allJoinConditions.add(joinCondition);
-    }
+    public abstract void addJoinCondition(JoinConditionImpl joinCondition, boolean forThisSelector);
 
     /**
      * Set whether this source is the left hand side or right hand side of a left outer join.
@@ -97,18 +52,7 @@ public abstract class SourceImpl extends AstElement {
      * @param outerJoinLeftHandSide true if yes
      * @param outerJoinRightHandSide true if yes
      */
-    public void setOuterJoin(boolean outerJoinLeftHandSide, boolean outerJoinRightHandSide) {
-        this.outerJoinLeftHandSide = outerJoinLeftHandSide;
-        this.outerJoinRightHandSide = outerJoinRightHandSide;
-    }
-
-    /**
-     * Initialize the query. This will 'wire' the selectors with the
-     * constraints.
-     *
-     * @param query the query
-     */
-    public abstract void init(QueryImpl query);
+    public abstract void setOuterJoin(boolean outerJoinLeftHandSide, boolean outerJoinRightHandSide);
 
     /**
      * Get the selector with the given name, or null if not found.
@@ -141,11 +85,26 @@ public abstract class SourceImpl extends AstElement {
     public abstract String getPlan(NodeState rootState);
 
     /**
-     * Prepare executing the query (recursively). This method will decide which
-     * index to use.
+     * Prepare executing the query (recursively). This will 'wire' the
+     * selectors with the join constraints, and decide which index to use.
+     * 
+     * @return the execution plan
      */
-    public abstract void prepare();
+    public abstract ExecutionPlan prepare();
+    
+    /**
+     * Undo a prepare.
+     */
+    public abstract void unprepare();
 
+    /**
+     * Re-apply a previously prepared plan. This will also 're-wire' the
+     * selectors with the join constraints
+     * 
+     * @param p the plan to use
+     */
+    public abstract void prepare(ExecutionPlan p);
+    
     /**
      * Execute the query. The current node is set to before the first row.
      *
@@ -160,5 +119,38 @@ public abstract class SourceImpl extends AstElement {
      * @return true if there is a next row
      */
     public abstract boolean next();
+
+    /**
+     * <b>!Test purpose only! <b>
+     * 
+     * this creates a filter for the given query
+     * 
+     * @param preparing whether this this the prepare phase
+     * @return a new filter
+     */
+    public abstract Filter createFilter(boolean preparing);
+
+    /**
+     * Get all sources that are joined via inner join. (These can be swapped.)
+     * 
+     * @return the list of selectors (sorted from left to right)
+     */
+    public abstract List<SourceImpl> getInnerJoinSelectors();
+    
+    /**
+     * Get the list of inner join conditions. (These match the inner join selectors.)
+     * 
+     * @return the list of join conditions
+     */
+    public List<JoinConditionImpl> getInnerJoinConditions() {
+        return Collections.emptyList();
+    }
+    
+    /**
+     * Whether any selector is the outer-join right hand side.
+     * 
+     * @return true if there is any
+     */
+    public abstract boolean isOuterJoinRightHandSide();
 
 }

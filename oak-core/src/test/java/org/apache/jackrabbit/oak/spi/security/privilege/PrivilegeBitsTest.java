@@ -151,34 +151,6 @@ public class PrivilegeBitsTest extends AbstractSecurityTest implements Privilege
     }
 
     @Test
-    public void testIncludesRead() {
-        // empty
-        assertFalse(PrivilegeBits.EMPTY.includesRead(Permissions.READ));
-
-        // other privilege bits
-        PrivilegeBits pb = READ_NODES_PRIVILEGE_BITS;
-        assertTrue(pb.includesRead(Permissions.READ_NODE));
-        assertFalse(pb.includesRead(Permissions.READ_PROPERTY));
-        assertFalse(pb.includesRead(Permissions.READ));
-
-        assertTrue(PrivilegeBits.getInstance(pb).includesRead(Permissions.READ_NODE));
-
-        PrivilegeBits mod = PrivilegeBits.getInstance();
-        for (int i = 0; i < 100; i++) {
-            mod.add(pb);
-            assertTrue(mod.includesRead(Permissions.READ_NODE));
-
-            pb = pb.nextBits();
-            assertFalse(pb.toString(), pb.includesRead(Permissions.READ_NODE));
-            assertFalse(PrivilegeBits.getInstance(pb).includesRead(Permissions.READ_NODE));
-
-            PrivilegeBits modifiable = PrivilegeBits.getInstance(pb);
-            modifiable.add(READ_NODES_PRIVILEGE_BITS);
-            assertTrue(modifiable.includesRead(Permissions.READ_NODE));
-        }
-    }
-
-    @Test
     public void testIncludes() {
         // empty
         assertTrue(PrivilegeBits.EMPTY.includes(PrivilegeBits.EMPTY));
@@ -280,21 +252,18 @@ public class PrivilegeBitsTest extends AbstractSecurityTest implements Privilege
             assertTrue(tmp.includes(pb));
             assertFalse(tmp.includes(nxt));
             if (READ_NODES_PRIVILEGE_BITS.equals(pb)) {
-                assertTrue(tmp.includesRead(Permissions.READ_NODE));
+                assertTrue(tmp.includes(PrivilegeBits.BUILT_IN.get(PrivilegeConstants.REP_READ_NODES)));
             } else {
-                assertFalse(tmp.includesRead(Permissions.READ_NODE));
+                assertFalse(tmp.includes(PrivilegeBits.BUILT_IN.get(PrivilegeConstants.REP_READ_NODES)));
             }
             tmp.add(nxt);
             assertTrue(tmp.includes(pb) && tmp.includes(nxt));
             if (READ_NODES_PRIVILEGE_BITS.equals(pb)) {
-                assertTrue(tmp.includesRead(Permissions.READ_NODE));
                 assertTrue(tmp.includes(READ_NODES_PRIVILEGE_BITS));
             } else {
-                assertFalse(tmp.toString(), tmp.includesRead(Permissions.READ_NODE));
                 assertFalse(tmp.includes(READ_NODES_PRIVILEGE_BITS));
             }
             tmp.add(READ_NODES_PRIVILEGE_BITS);
-            assertTrue(tmp.includesRead(Permissions.READ_NODE));
             assertTrue(tmp.includes(READ_NODES_PRIVILEGE_BITS));
 
             pb = nxt;
@@ -507,6 +476,19 @@ public class PrivilegeBitsTest extends AbstractSecurityTest implements Privilege
     }
 
     @Test
+    public void testGetInstanceFromBase() {
+        PrivilegeBits pb = PrivilegeBits.getInstance(READ_NODES_PRIVILEGE_BITS);
+        pb.add(PrivilegeBits.BUILT_IN.get(PrivilegeConstants.JCR_READ_ACCESS_CONTROL));
+        pb.add(PrivilegeBits.BUILT_IN.get(PrivilegeConstants.JCR_NODE_TYPE_MANAGEMENT));
+
+        PrivilegeBits pb2 = PrivilegeBits.getInstance(READ_NODES_PRIVILEGE_BITS,
+                PrivilegeBits.BUILT_IN.get(PrivilegeConstants.JCR_READ_ACCESS_CONTROL),
+                PrivilegeBits.BUILT_IN.get(PrivilegeConstants.JCR_NODE_TYPE_MANAGEMENT));
+
+        assertEquivalent(pb, pb2);
+    }
+
+    @Test
     public void testGetInstanceFromPropertyState() {
         for (long l : LONGS) {
             PropertyState property = createPropertyState(l);
@@ -578,6 +560,7 @@ public class PrivilegeBitsTest extends AbstractSecurityTest implements Privilege
         simple.put(provider.getBits(REP_ADD_PROPERTIES), Permissions.ADD_PROPERTY);
         simple.put(provider.getBits(REP_ALTER_PROPERTIES), Permissions.MODIFY_PROPERTY);
         simple.put(provider.getBits(REP_REMOVE_PROPERTIES), Permissions.REMOVE_PROPERTY);
+        simple.put(provider.getBits(REP_INDEX_DEFINITION_MANAGEMENT), Permissions.INDEX_DEFINITION_MANAGEMENT);
         for (PrivilegeBits pb : simple.keySet()) {
             long expected = simple.get(pb).longValue();
             assertTrue(expected == PrivilegeBits.calculatePermissions(pb, PrivilegeBits.EMPTY, true));

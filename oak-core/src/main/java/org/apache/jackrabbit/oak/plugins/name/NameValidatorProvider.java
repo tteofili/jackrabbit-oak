@@ -18,11 +18,17 @@ package org.apache.jackrabbit.oak.plugins.name;
 
 import org.apache.felix.scr.annotations.Component;
 import org.apache.felix.scr.annotations.Service;
-import org.apache.jackrabbit.oak.core.ImmutableTree;
+import org.apache.jackrabbit.oak.spi.commit.CommitInfo;
 import org.apache.jackrabbit.oak.spi.commit.EditorProvider;
 import org.apache.jackrabbit.oak.spi.commit.Validator;
 import org.apache.jackrabbit.oak.spi.commit.ValidatorProvider;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
+
+import static com.google.common.collect.Sets.newHashSet;
+import static org.apache.jackrabbit.JcrConstants.JCR_SYSTEM;
+import static org.apache.jackrabbit.oak.plugins.name.NamespaceConstants.REP_NAMESPACES;
+import static org.apache.jackrabbit.oak.plugins.name.NamespaceConstants.REP_NSDATA;
+import static org.apache.jackrabbit.oak.plugins.name.NamespaceConstants.REP_PREFIXES;
 
 /**
  * Validator service that checks that all node and property names as well
@@ -34,9 +40,13 @@ import org.apache.jackrabbit.oak.spi.state.NodeState;
 public class NameValidatorProvider extends ValidatorProvider {
 
     @Override
-    public Validator getRootValidator(NodeState before, NodeState after) {
-        return new NameValidator(
-                Namespaces.getNamespaceMap(new ImmutableTree(after)).keySet());
+    public Validator getRootValidator(
+            NodeState before, NodeState after, CommitInfo info) {
+        return new NameValidator(newHashSet(after
+                .getChildNode(JCR_SYSTEM)
+                .getChildNode(REP_NAMESPACES)
+                .getChildNode(REP_NSDATA)
+                .getStrings(REP_PREFIXES)));
     }
 
 }

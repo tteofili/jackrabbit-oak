@@ -18,42 +18,56 @@ package org.apache.jackrabbit.oak.namepath;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
+import static org.apache.jackrabbit.oak.api.Type.STRING;
 
 import java.util.Map;
 
 import javax.annotation.CheckForNull;
+import javax.annotation.Nonnull;
+
+import org.apache.jackrabbit.oak.api.PropertyState;
+import org.apache.jackrabbit.oak.api.Root;
 
 /**
  * Name mapper with local namespace mappings.
  */
-public abstract class LocalNameMapper extends GlobalNameMapper {
+public class LocalNameMapper extends GlobalNameMapper {
 
-    private static boolean isExpandedName(String name) {
-        if (name.startsWith("{")) {
-            int brace = name.indexOf('}', 1);
-            return brace != -1 && name.substring(1, brace).indexOf(':') != -1;
-        } else {
-            return false;
-        }
+    protected final Map<String, String> local;
+
+    public LocalNameMapper(Root root, Map<String, String> local) {
+        super(root);
+        this.local = local;
+    }
+
+    public LocalNameMapper(
+            Map<String, String> global, Map<String, String> local) {
+        super(global);
+        this.local = local;
+    }
+
+    @Override @Nonnull
+    public synchronized Map<String, String> getSessionLocalMappings() {
+        return local;
     }
 
     @Override @CheckForNull
-    public String getJcrName(String oakName) {
+    public synchronized String getJcrName(String oakName) {
         checkNotNull(oakName);
         checkArgument(!oakName.startsWith(":"), oakName); // hidden name
         checkArgument(!isExpandedName(oakName), oakName); // expanded name
 
-        if (hasSessionLocalMappings()) {
+        if (!local.isEmpty()) {
             int colon = oakName.indexOf(':');
             if (colon > 0) {
                 String oakPrefix = oakName.substring(0, colon);
-                String uri = getNamespaceMap().get(oakPrefix);
-                if (uri == null) {
+                PropertyState mapping = namespaces.getProperty(oakPrefix);
+                if (mapping == null || mapping.getType() != STRING) {
                     throw new IllegalStateException(
                             "No namespace mapping found for " + oakName);
                 }
+                String uri = mapping.getValue(STRING);
 
-                Map<String, String> local = getSessionLocalMappings();
                 for (Map.Entry<String, String> entry : local.entrySet()) {
                     if (uri.equals(entry.getValue())) {
                         String jcrPrefix = entry.getKey();
@@ -82,33 +96,37 @@ public abstract class LocalNameMapper extends GlobalNameMapper {
     }
 
     @Override @CheckForNull
-    public String getOakNameOrNull(String jcrName) {
+    public synchronized String getOakNameOrNull(String jcrName) {
         checkNotNull(jcrName);
 
         if (jcrName.startsWith("{")) {
-            return getOakNameFromExpanded(jcrName);
+            String oakName = getOakNameFromExpanded(jcrName);
+            if (oakName != jcrName) {
+                return oakName;
+            } // else not an expanded name, so fall through to local mapping
         }
 
-        if (hasSessionLocalMappings()) {
+        if (!local.isEmpty()) {
             int colon = jcrName.indexOf(':');
             if (colon > 0) {
-                Map<String, String> local = getSessionLocalMappings();
                 String jcrPrefix = jcrName.substring(0, colon);
                 String uri = local.get(jcrPrefix);
                 if (uri != null) {
                     String oakPrefix = getOakPrefixOrNull(uri);
-                    if (jcrPrefix.equals(oakPrefix)) {
-                        return jcrName;
-                    } else if (oakPrefix != null) {
-                        return oakPrefix + jcrName.substring(colon);
-                    } else {
+                    if (oakPrefix == null) {
                         return null;
+                    } else if (jcrPrefix.equals(oakPrefix)) {
+                        return jcrName;
+                    } else {
+                        return oakPrefix + jcrName.substring(colon);
                     }
                 }
 
                 // Check that a global mapping is present and not remapped
-                uri = getNamespaceMap().get(jcrPrefix);
-                if (uri == null || local.values().contains(uri)) {
+                PropertyState mapping = namespaces.getProperty(jcrPrefix);
+                if (mapping != null
+                        && mapping.getType() == STRING
+                        && local.values().contains(mapping.getValue(STRING))) {
                     return null;
                 }
             }
@@ -117,10 +135,4 @@ public abstract class LocalNameMapper extends GlobalNameMapper {
         return jcrName;
     }
 
-    @Override
-    public boolean hasSessionLocalMappings() {
-        return !getSessionLocalMappings().isEmpty();
-    }
-
-    protected abstract Map<String, String> getSessionLocalMappings();
 }

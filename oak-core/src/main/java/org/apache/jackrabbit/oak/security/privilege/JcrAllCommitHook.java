@@ -21,14 +21,14 @@ import javax.annotation.Nonnull;
 import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Type;
+import org.apache.jackrabbit.oak.spi.commit.CommitInfo;
 import org.apache.jackrabbit.oak.spi.commit.PostValidationHook;
 import org.apache.jackrabbit.oak.spi.security.privilege.PrivilegeBits;
 import org.apache.jackrabbit.oak.spi.security.privilege.PrivilegeConstants;
 import org.apache.jackrabbit.oak.spi.state.DefaultNodeStateDiff;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
-import org.apache.jackrabbit.oak.spi.state.PropertyBuilder;
-import org.apache.jackrabbit.oak.util.PropertyUtil;
+import org.apache.jackrabbit.oak.plugins.memory.PropertyBuilder;
 import org.apache.jackrabbit.util.Text;
 
 /**
@@ -39,7 +39,9 @@ class JcrAllCommitHook implements PostValidationHook, PrivilegeConstants {
 
     @Nonnull
     @Override
-    public NodeState processCommit(NodeState before, NodeState after) throws CommitFailedException {
+    public NodeState processCommit(
+            NodeState before, NodeState after, CommitInfo info)
+            throws CommitFailedException {
         NodeBuilder builder = after.builder();
         after.compareAgainstBaseState(before, new PrivilegeDiff(null, null, builder));
         return builder.getNodeState();
@@ -66,9 +68,9 @@ class JcrAllCommitHook implements PostValidationHook, PrivilegeConstants {
 
                 PropertyBuilder<String> propertyBuilder;
                 if (aggregates == null) {
-                    propertyBuilder = PropertyUtil.getPropertyBuilder(Type.NAME, REP_AGGREGATES, true);
+                    propertyBuilder = PropertyBuilder.array(Type.NAME, REP_AGGREGATES);
                 } else {
-                    propertyBuilder = PropertyUtil.getPropertyBuilder(Type.NAME, aggregates);
+                    propertyBuilder = PropertyBuilder.copy(Type.NAME, aggregates);
                 }
                 if (!propertyBuilder.hasValue(name)) {
                     propertyBuilder.addValue(name);

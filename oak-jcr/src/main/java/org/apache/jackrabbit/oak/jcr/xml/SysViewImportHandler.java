@@ -16,23 +16,21 @@
  */
 package org.apache.jackrabbit.oak.jcr.xml;
 
-
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Stack;
+
 import javax.jcr.InvalidSerializedDataException;
 import javax.jcr.NamespaceRegistry;
 import javax.jcr.PropertyType;
 import javax.jcr.RepositoryException;
-import javax.jcr.ValueFactory;
 
-import org.apache.jackrabbit.commons.NamespaceHelper;
+import org.apache.jackrabbit.oak.jcr.session.SessionContext;
 import org.apache.jackrabbit.oak.plugins.name.NamespaceConstants;
 import org.apache.jackrabbit.oak.spi.xml.Importer;
 import org.apache.jackrabbit.oak.spi.xml.NodeInfo;
 import org.apache.jackrabbit.oak.spi.xml.PropInfo;
-import org.apache.jackrabbit.oak.spi.xml.TextValue;
 import org.xml.sax.Attributes;
 import org.xml.sax.SAXException;
 
@@ -63,11 +61,10 @@ class SysViewImportHandler extends TargetImportHandler {
      * Constructs a new {@code SysViewImportHandler}.
      *
      * @param importer     the underlying importer
-     * @param valueFactory the value factory
-     * @param helper the namespace helper
+     * @param sessionContext the session context
      */
-    SysViewImportHandler(Importer importer, ValueFactory valueFactory, NamespaceHelper helper) {
-        super(importer, valueFactory, helper);
+    SysViewImportHandler(Importer importer, SessionContext sessionContext) {
+        super(importer, sessionContext);
     }
 
     private void processNode(ImportState state, boolean start, boolean end)
@@ -168,9 +165,12 @@ class SysViewImportHandler extends TargetImportHandler {
             }
         } else if (namespaceURI.equals(NamespaceConstants.NAMESPACE_SV) && "value".equals(localName)) {
             // sv:value element
-            currentPropValue = new BufferedStringValue(valueFactory, currentNamePathMapper());
-            String xsiType = atts.getValue("xsi:type");
-            currentPropValue.setBase64("xs:base64Binary".equals(xsiType));
+            boolean base64 =
+                    currentPropType == PropertyType.BINARY
+                    || "xs:base64Binary".equals(atts.getValue("xsi:type"));
+            currentPropValue = new BufferedStringValue(
+                    sessionContext.getValueFactory(), currentNamePathMapper(),
+                    base64);
         } else {
             throw new SAXException(new InvalidSerializedDataException(
                     "Unexpected element in system view xml document: {" + namespaceURI + '}' + localName));
@@ -277,8 +277,7 @@ class SysViewImportHandler extends TargetImportHandler {
                 PropInfo prop = new PropInfo(
                         currentPropName == null ? null : currentPropName.getRepoQualifiedName(),
                         currentPropType,
-                        currentPropValues.toArray(new TextValue[currentPropValues.size()]),
-                        currentPropMultipleStatus);
+                        currentPropValues);
                 state.props.add(prop);
             }
             // reset temp fields

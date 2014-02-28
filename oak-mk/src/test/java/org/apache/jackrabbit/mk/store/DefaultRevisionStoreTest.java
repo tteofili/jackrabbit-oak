@@ -27,7 +27,6 @@ import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
-import org.apache.jackrabbit.mk.blobs.MemoryBlobStore;
 import org.apache.jackrabbit.mk.core.MicroKernelImpl;
 import org.apache.jackrabbit.mk.core.Repository;
 import org.apache.jackrabbit.mk.model.Id;
@@ -36,6 +35,7 @@ import org.apache.jackrabbit.mk.persistence.GCPersistence;
 import org.apache.jackrabbit.mk.persistence.InMemPersistence;
 import org.apache.jackrabbit.mk.store.DefaultRevisionStore.PutTokenImpl;
 import org.apache.jackrabbit.mk.store.RevisionStore.PutToken;
+import org.apache.jackrabbit.oak.spi.blob.MemoryBlobStore;
 import org.json.simple.JSONArray;
 import org.json.simple.parser.JSONParser;
 import org.junit.After;
@@ -134,8 +134,8 @@ public class DefaultRevisionStoreTest {
      * 
      * @throws Exception if an error occurs
      */
-    @Ignore
     @Test
+    @Ignore
     public void testConcurrentGC() throws Exception {
         ScheduledExecutorService gcExecutor = Executors.newScheduledThreadPool(1);
         gcExecutor.scheduleWithFixedDelay(new Runnable() {
@@ -143,17 +143,17 @@ public class DefaultRevisionStoreTest {
             public void run() {
                 rs.gc();
             }
-        }, 100, 20, TimeUnit.MILLISECONDS);
+        }, 10, 2, TimeUnit.MILLISECONDS);
 
         mk.commit("/", "+\"a\" : { \"b\" : { \"c\" : { \"d\" : {} } } }",
                 mk.getHeadRevision(), null);
 
         try {
-            for (int i = 0; i < 20; i++) {
+            for (int i = 0; i < 2000; i++) {
                 mk.commit("/a/b/c/d", "+\"e\" : {}", mk.getHeadRevision(), null);
-                Thread.sleep(10);
+                Thread.sleep(1);
                 mk.commit("/a/b/c/d/e", "+\"f\" : {}", mk.getHeadRevision(), null);
-                Thread.sleep(30);
+                Thread.sleep(3);
                 mk.commit("/a/b/c/d", "-\"e\"", mk.getHeadRevision(), null);
             }
         } finally {

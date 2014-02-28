@@ -21,12 +21,16 @@ package org.apache.jackrabbit.oak;
 import java.io.Closeable;
 import java.io.IOException;
 
+import org.apache.jackrabbit.mk.api.MicroKernel;
 import org.apache.jackrabbit.mk.core.MicroKernelImpl;
-import org.apache.jackrabbit.oak.plugins.mongomk.MongoMK;
 import org.apache.jackrabbit.oak.kernel.KernelNodeStore;
+import org.apache.jackrabbit.oak.plugins.document.DocumentMK;
+import org.apache.jackrabbit.oak.plugins.document.DocumentNodeStore;
 import org.apache.jackrabbit.oak.plugins.segment.SegmentNodeStore;
 import org.apache.jackrabbit.oak.plugins.segment.memory.MemoryStore;
 import org.apache.jackrabbit.oak.spi.state.NodeStore;
+
+import static org.apache.jackrabbit.oak.kernel.KernelNodeStore.DEFAULT_CACHE_SIZE;
 
 /**
  * NodeStore fixture for parametrized tests.
@@ -52,12 +56,12 @@ public abstract class NodeStoreFixture {
     public static final NodeStoreFixture MONGO_MK = new NodeStoreFixture() {
         @Override
         public String toString() {
-            return "MongoMK Fixture";
+            return "DocumentMK Fixture";
         }
 
         @Override
         public NodeStore createNodeStore() {
-            return new CloseableNodeStore(new MongoMK.Builder().open());
+            return new CloseableNodeStore(new DocumentMK.Builder().open());
         }
 
         @Override
@@ -72,6 +76,25 @@ public abstract class NodeStoreFixture {
         }
     };
 
+    public static final NodeStoreFixture MONGO_NS = new NodeStoreFixture() {
+        @Override
+        public String toString() {
+            return "MongoNS Fixture";
+        }
+
+        @Override
+        public NodeStore createNodeStore() {
+            return new DocumentMK.Builder().getNodeStore();
+        }
+
+        @Override
+        public void dispose(NodeStore nodeStore) {
+            if (nodeStore instanceof DocumentNodeStore) {
+                ((DocumentNodeStore) nodeStore).dispose();
+            }
+        }
+    };
+
     public static final NodeStoreFixture MK_IMPL = new NodeStoreFixture() {
         @Override
         public String toString() {
@@ -80,13 +103,17 @@ public abstract class NodeStoreFixture {
 
         @Override
         public NodeStore createNodeStore() {
-            return new KernelNodeStore(new MicroKernelImpl());
+            return new KernelNodeStore(createMicroKernel(), DEFAULT_CACHE_SIZE);
         }
 
         @Override
         public void dispose(NodeStore nodeStore) {
         }
     };
+
+    public static final MicroKernel createMicroKernel() {
+        return new MicroKernelImpl();
+    }
 
     public abstract NodeStore createNodeStore();
 
@@ -95,10 +122,10 @@ public abstract class NodeStoreFixture {
     private static class CloseableNodeStore
             extends KernelNodeStore implements Closeable {
 
-        private final MongoMK kernel;
+        private final DocumentMK kernel;
 
-        public CloseableNodeStore(MongoMK kernel) {
-            super(kernel);
+        public CloseableNodeStore(DocumentMK kernel) {
+            super(kernel, DEFAULT_CACHE_SIZE);
             this.kernel = kernel;
         }
 

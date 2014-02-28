@@ -80,22 +80,24 @@ public class PropertyExistenceImpl extends ConstraintImpl {
 
     @Override
     public void restrict(FilterImpl f) {
-        if (f.getSelector() == selector) {
-            f.restrictProperty(propertyName, Operator.NOT_EQUAL, null);
+        if (f.getSelector().equals(selector)) {
+            String pn = normalizePropertyName(propertyName);
+            f.restrictProperty(pn, Operator.NOT_EQUAL, null);
         }
     }
 
     @Override
     public void restrictPushDown(SelectorImpl s) {
-        if (s == selector) {
+        if (s.equals(selector)) {
             s.restrictSelector(this);
         }
     }
     
     @Override
     public int hashCode() {
+        String pn = normalizePropertyName(propertyName);
         return ((selectorName == null) ? 0 : selectorName.hashCode()) * 31 +
-                ((propertyName == null) ? 0 : propertyName.hashCode());
+                ((pn == null) ? 0 : pn.hashCode());
     }
 
     @Override
@@ -106,8 +108,12 @@ public class PropertyExistenceImpl extends ConstraintImpl {
             return false;
         }
         PropertyExistenceImpl other = (PropertyExistenceImpl) obj;
-        return equalsStrings(selectorName, other.selectorName) &&
-                equalsStrings(propertyName, other.propertyName);
+        if (!equalsStrings(selectorName, other.selectorName)) {
+            return false;
+        }
+        String pn = normalizePropertyName(propertyName);
+        String pn2 = normalizePropertyName(other.propertyName);
+        return equalsStrings(pn, pn2);
     }
     
     private static boolean equalsStrings(String a, String b) {

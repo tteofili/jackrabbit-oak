@@ -32,7 +32,7 @@ import org.apache.jackrabbit.oak.plugins.name.NamespaceConstants;
 import org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants;
 import org.apache.jackrabbit.oak.plugins.version.VersionConstants;
 import org.apache.jackrabbit.oak.spi.security.privilege.PrivilegeConstants;
-import org.apache.jackrabbit.oak.util.TreeLocation;
+import org.apache.jackrabbit.oak.plugins.tree.TreeLocation;
 
 /**
  * Provides constants for permissions used in the OAK access evaluation as well
@@ -99,6 +99,10 @@ public final class Permissions {
      * @since OAK 1.0
      */
     public static final long USER_MANAGEMENT = PRIVILEGE_MANAGEMENT << 1;
+    /**
+     * @since OAK 1.0
+     */
+    public static final long INDEX_DEFINITION_MANAGEMENT = USER_MANAGEMENT << 1;
 
     public static final long READ = READ_NODE | READ_PROPERTY;
 
@@ -124,6 +128,7 @@ public final class Permissions {
             | WORKSPACE_MANAGEMENT
             | PRIVILEGE_MANAGEMENT
             | USER_MANAGEMENT
+            | INDEX_DEFINITION_MANAGEMENT
     );
 
     public static final Map<Long, String> PERMISSION_NAMES = new LinkedHashMap<Long, String>();
@@ -152,6 +157,7 @@ public final class Permissions {
         PERMISSION_NAMES.put(WORKSPACE_MANAGEMENT, "WORKSPACE_MANAGEMENT");
         PERMISSION_NAMES.put(PRIVILEGE_MANAGEMENT, "PRIVILEGE_MANAGEMENT");
         PERMISSION_NAMES.put(USER_MANAGEMENT, "USER_MANAGEMENT");
+        PERMISSION_NAMES.put(INDEX_DEFINITION_MANAGEMENT, "INDEX_DEFINITION_MANAGEMENT");
     }
 
     /**
@@ -212,6 +218,11 @@ public final class Permissions {
 
     public static boolean includes(long permissions, long permissionsToTest) {
         return (permissions & permissionsToTest) == permissionsToTest;
+    }
+
+    public static boolean respectParentPermissions(long permissions) {
+        return Permissions.includes(permissions, Permissions.ADD_NODE) ||
+                Permissions.includes(permissions, Permissions.REMOVE_NODE);
     }
 
      /**

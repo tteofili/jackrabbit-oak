@@ -17,6 +17,7 @@
 package org.apache.jackrabbit.oak.benchmark;
 
 import java.io.File;
+import java.io.PrintStream;
 import java.util.List;
 import java.util.Set;
 
@@ -25,6 +26,8 @@ import com.google.common.collect.Sets;
 import joptsimple.OptionParser;
 import joptsimple.OptionSet;
 import joptsimple.OptionSpec;
+
+import org.apache.commons.io.FileUtils;
 import org.apache.jackrabbit.oak.benchmark.wikipedia.WikipediaImport;
 import org.apache.jackrabbit.oak.fixture.JackrabbitRepositoryFixture;
 import org.apache.jackrabbit.oak.fixture.OakRepositoryFixture;
@@ -59,11 +62,16 @@ public class BenchmarkRunner {
                 .withRequiredArg().ofType(Boolean.class).defaultsTo(Boolean.FALSE);
         OptionSpec<Integer> itemsToRead = parser.accepts("itemsToRead", "Number of items to read")
                 .withRequiredArg().ofType(Integer.class).defaultsTo(1000);
-        OptionSpec<Integer> bgReaders = parser.accepts("bgReaders", "Number of background readers")
-                .withRequiredArg().ofType(Integer.class).defaultsTo(20);
+        OptionSpec<Integer> concurrency = parser.accepts("concurrency", "Number of test threads.")
+                .withRequiredArg().ofType(Integer.class).withValuesSeparatedBy(',');
         OptionSpec<Boolean> report = parser.accepts("report", "Whether to output intermediate results")
                 .withOptionalArg().ofType(Boolean.class)
                 .defaultsTo(Boolean.FALSE);
+        OptionSpec<Boolean> randomUser = parser.accepts("randomUser", "Whether to use a random user to read.")
+                        .withOptionalArg().ofType(Boolean.class)
+                        .defaultsTo(Boolean.FALSE);
+        OptionSpec<File> csvFile = parser.accepts("csvFile", "File to write a CSV version of the benchmark data.")
+                .withOptionalArg().ofType(File.class);
 
         OptionSet options = parser.parse(args);
         int cacheSize = cache.value(options);
@@ -77,10 +85,16 @@ public class BenchmarkRunner {
                         host.value(options), port.value(options),
                         dbName.value(options), dropDBAfterTest.value(options),
                         cacheSize * MB),
-                OakRepositoryFixture.getSegment(
-                        host.value(options), port.value(options), cacheSize * MB),
+                OakRepositoryFixture.getMongoNS(
+                        host.value(options), port.value(options),
+                        dbName.value(options), dropDBAfterTest.value(options),
+                        cacheSize * MB),
+                OakRepositoryFixture.getMongoMK(
+                        host.value(options), port.value(options),
+                        dbName.value(options), dropDBAfterTest.value(options),
+                        cacheSize * MB),
                 OakRepositoryFixture.getTar(
-                        base.value(options), 256 * 1024 * 1024, mmap.value(options))
+                        base.value(options), 256, cacheSize, mmap.value(options))
         };
         Benchmark[] allBenchmarks = new Benchmark[] {
             new LoginTest(),
@@ -103,6 +117,7 @@ public class BenchmarkRunner {
             new DescendantSearchTest(),
             new SQL2DescendantSearchTest(),
             new CreateManyChildNodesTest(),
+            new CreateManyNodesTest(),
             new UpdateManyChildNodesTest(),
             new TransientManyChildNodesTest(),
             new WikipediaImport(wikipedia.value(options)),
@@ -115,22 +130,45 @@ public class BenchmarkRunner {
                     runAsAdmin.value(options),
                     itemsToRead.value(options),
                     report.value(options)),
-            new ConcurrentReadAccessControlledTreeTest(
-                    runAsAdmin.value(options),
-                    itemsToRead.value(options),
-                    bgReaders.value(options),
-                    report.value(options)),
             new ConcurrentReadDeepTreeTest(
                     runAsAdmin.value(options),
                     itemsToRead.value(options),
-                    bgReaders.value(options),
                     report.value(options)),
+            new ConcurrentReadSinglePolicyTreeTest(
+                    runAsAdmin.value(options),
+                    itemsToRead.value(options),
+                    report.value(options)),
+            new ConcurrentReadAccessControlledTreeTest(
+                    runAsAdmin.value(options),
+                    itemsToRead.value(options),
+                    report.value(options)),
+            new ConcurrentReadAccessControlledTreeTest2(
+                    runAsAdmin.value(options),
+                    itemsToRead.value(options),
+                    report.value(options)),
+            new ConcurrentReadRandomNodeAndItsPropertiesTest(
+                    runAsAdmin.value(options),
+                    itemsToRead.value(options),
+                    report.value(options)),
+            new ManyUserReadTest(
+                    runAsAdmin.value(options),
+                    itemsToRead.value(options),
+                    report.value(options),
+                    randomUser.value(options)),
+            new ConcurrentTraversalTest(
+                    runAsAdmin.value(options),
+                    itemsToRead.value(options),
+                    report.value(options),
+                    randomUser.value(options)),
             ReadManyTest.linear("LinearReadEmpty", 1, ReadManyTest.EMPTY),
             ReadManyTest.linear("LinearReadFiles", 1, ReadManyTest.FILES),
             ReadManyTest.linear("LinearReadNodes", 1, ReadManyTest.NODES),
             ReadManyTest.uniform("UniformReadEmpty", 1, ReadManyTest.EMPTY),
             ReadManyTest.uniform("UniformReadFiles", 1, ReadManyTest.FILES),
             ReadManyTest.uniform("UniformReadNodes", 1, ReadManyTest.NODES),
+            new ConcurrentCreateNodesTest(),
+            new SequentialCreateNodesTest(),
+            new GetPoliciesTest(),
         };
 
         Set<String> argset = Sets.newHashSet(options.nonOptionArguments());
@@ -149,8 +187,18 @@ public class BenchmarkRunner {
         }
 
         if (argset.isEmpty()) {
+            PrintStream out = null;
+            if (options.has(csvFile)) {
+                out = new PrintStream(FileUtils.openOutputStream(csvFile.value(options), true));
+            }
             for (Benchmark benchmark : benchmarks) {
-                benchmark.run(fixtures);
+                if (benchmark instanceof CSVResultGenerator) {
+                    ((CSVResultGenerator) benchmark).setPrintStream(out);
+                }
+                benchmark.run(fixtures, options.valuesOf(concurrency));
+            }
+            if (out != null) {
+                out.close();
             }
         } else {
             System.err.println("Unknown arguments: " + argset);

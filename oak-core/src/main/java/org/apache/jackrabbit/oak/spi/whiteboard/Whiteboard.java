@@ -31,4 +31,12 @@ public interface Whiteboard {
      */
     <T> Registration register(Class<T> type, T service, Map<?, ?> properties);
 
+    /**
+     * Starts tracking services of the given type.
+     *
+     * @param type type of the services to track
+     * @return service tracker
+     */
+    <T> Tracker<T> track(Class<T> type);
+
 }

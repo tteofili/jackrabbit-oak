@@ -22,6 +22,7 @@ import static org.apache.jackrabbit.oak.api.Type.LONG;
 import static org.apache.jackrabbit.oak.api.Type.NAME;
 import static org.apache.jackrabbit.oak.api.Type.NAMES;
 import static org.apache.jackrabbit.oak.api.Type.STRING;
+import static org.apache.jackrabbit.oak.api.Type.STRINGS;
 
 import java.util.HashSet;
 import java.util.Iterator;
@@ -30,10 +31,10 @@ import java.util.Set;
 import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
 
+import org.apache.jackrabbit.oak.api.PropertyState;
+
 import com.google.common.base.Function;
 import com.google.common.collect.Iterables;
-
-import org.apache.jackrabbit.oak.api.PropertyState;
 
 /**
  * Abstract base class for {@link NodeState} implementations.
@@ -49,6 +50,17 @@ import org.apache.jackrabbit.oak.api.PropertyState;
  * alternatives.
  */
 public abstract class AbstractNodeState implements NodeState {
+
+    public static boolean isValidName(String name) {
+        return name != null && !name.isEmpty() && name.indexOf('/') == -1;
+    }
+
+    public static void checkValidName(String name)
+            throws IllegalArgumentException {
+        if (!isValidName(name)) {
+            throw new IllegalArgumentException("Invalid name: " + name);
+        }
+    }
 
     public static boolean getBoolean(NodeState state, String name) {
         PropertyState property = state.getProperty(name);
@@ -72,6 +84,15 @@ public abstract class AbstractNodeState implements NodeState {
             return property.getValue(STRING);
         } else {
             return null;
+        }
+    }
+
+    public static Iterable<String> getStrings(NodeState state, String name) {
+        PropertyState property = state.getProperty(name);
+        if (property != null && property.getType() == STRINGS) {
+            return property.getValue(STRINGS);
+        } else {
+            return emptyList();
         }
     }
 
@@ -215,6 +236,11 @@ public abstract class AbstractNodeState implements NodeState {
         return getString(this, name);
     }
 
+    @Override
+    public Iterable<String> getStrings(String name) {
+        return getStrings(this, name);
+    }
+
     @Override @CheckForNull
     public String getName(@Nonnull String name) {
         return getName(this, name);
@@ -238,11 +264,6 @@ public abstract class AbstractNodeState implements NodeState {
     @Override
     public long getPropertyCount() {
         return count(getProperties());
-    }
-
-    @Override
-    public boolean hasChildNode(String name) {
-        return getChildNode(name).exists();
     }
 
     @Override

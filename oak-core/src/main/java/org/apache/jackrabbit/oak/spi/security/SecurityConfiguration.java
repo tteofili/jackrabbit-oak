@@ -16,20 +16,22 @@
  */
 package org.apache.jackrabbit.oak.spi.security;
 
+import java.security.Principal;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 
 import javax.annotation.Nonnull;
-import javax.security.auth.Subject;
 
 import org.apache.jackrabbit.oak.spi.commit.CommitHook;
+import org.apache.jackrabbit.oak.spi.commit.MoveTracker;
 import org.apache.jackrabbit.oak.spi.commit.ValidatorProvider;
 import org.apache.jackrabbit.oak.spi.lifecycle.RepositoryInitializer;
 import org.apache.jackrabbit.oak.spi.lifecycle.WorkspaceInitializer;
 import org.apache.jackrabbit.oak.spi.xml.ProtectedItemImporter;
 
 /**
- * SecurityConfiguration... TODO
+ * Base interface for all security related configurations.
  */
 public interface SecurityConfiguration {
 
@@ -71,16 +73,40 @@ public interface SecurityConfiguration {
     @Nonnull
     RepositoryInitializer getRepositoryInitializer();
 
+    /**
+     * Returns the list of commit hooks that need to be executed for the
+     * specified workspace name.
+     *
+     * @param workspaceName The name of the workspace.
+     * @return A list of commit hooks.
+     */
     @Nonnull
-    List<? extends CommitHook> getCommitHooks(String workspaceName);
+    List<? extends CommitHook> getCommitHooks(@Nonnull String workspaceName);
 
+    /**
+     * Returns the list of validators that need to be executed for the specified
+     * workspace name.
+     *
+     * @param workspaceName The name of the workspace.
+     * @param principals The set of principals associated with the subject
+     * that is committing modifications.
+     * @param moveTracker The move tracker associated with the commit.
+     * @return A list of validators.
+     */
     @Nonnull
-    List<? extends ValidatorProvider> getValidators(
-            String workspaceName, Subject subject);
+    List<? extends ValidatorProvider> getValidators(@Nonnull String workspaceName,
+                                                    @Nonnull Set<Principal> principals,
+                                                    @Nonnull MoveTracker moveTracker);
 
+    /**
+     * @return The list of protected item importers defined by this configuration.
+     */
     @Nonnull
     List<ProtectedItemImporter> getProtectedItemImporters();
 
+    /**
+     * @return The context defined by this configuration.
+     */
     @Nonnull
     Context getContext();
 
@@ -123,7 +149,7 @@ public interface SecurityConfiguration {
         @Nonnull
         @Override
         public List<? extends ValidatorProvider> getValidators(
-                String workspaceName, Subject subject) {
+                String workspaceName, Set<Principal> principals, MoveTracker moveTracker) {
             return Collections.emptyList();
         }
 

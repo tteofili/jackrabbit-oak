@@ -22,15 +22,14 @@ import java.io.Reader;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Stack;
+
 import javax.jcr.NamespaceRegistry;
 import javax.jcr.Node;
 import javax.jcr.PropertyType;
 import javax.jcr.RepositoryException;
-import javax.jcr.ValueFactory;
 import javax.jcr.nodetype.ConstraintViolationException;
 
-import com.google.common.collect.Lists;
-import org.apache.jackrabbit.commons.NamespaceHelper;
+import org.apache.jackrabbit.oak.jcr.session.SessionContext;
 import org.apache.jackrabbit.oak.namepath.JcrNameParser;
 import org.apache.jackrabbit.oak.plugins.name.NamespaceConstants;
 import org.apache.jackrabbit.oak.spi.xml.Importer;
@@ -42,6 +41,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.xml.sax.Attributes;
 import org.xml.sax.SAXException;
+
+import com.google.common.collect.Lists;
 
 /**
  * {@code DocViewImportHandler} processes Document View XML SAX events
@@ -64,11 +65,10 @@ class DocViewImportHandler extends TargetImportHandler {
      * Constructs a new {@code DocViewImportHandler}.
      *
      * @param importer     the importer
-     * @param valueFactory a value factory
-     * @param helper The namespace helper
+     * @param sessionContext the session context
      */
-    DocViewImportHandler(Importer importer, ValueFactory valueFactory, NamespaceHelper helper) {
-        super(importer, valueFactory, helper);
+    DocViewImportHandler(Importer importer, SessionContext sessionContext) {
+        super(importer, sessionContext);
     }
 
     /**
@@ -108,7 +108,9 @@ class DocViewImportHandler extends TargetImportHandler {
     private void appendCharacters(char[] ch, int start, int length)
             throws SAXException {
         if (textHandler == null) {
-            textHandler = new BufferedStringValue(valueFactory, currentNamePathMapper());
+            textHandler = new BufferedStringValue(
+                    sessionContext.getValueFactory(), currentNamePathMapper(),
+                    false);
         }
         try {
             textHandler.append(ch, start, length);
@@ -157,13 +159,10 @@ class DocViewImportHandler extends TargetImportHandler {
                     reader.close();
                 }
 
-                NodeInfo node =
-                        new NodeInfo(helper.getJcrName(NamespaceRegistry.NAMESPACE_JCR, "xmltext"), null, null, null);
-                TextValue[] values =
-                        new TextValue[]{textHandler};
+                NodeInfo node = new NodeInfo(getJcrName(NamespaceRegistry.NAMESPACE_JCR, "xmltext"), null, null, null);
                 ArrayList<PropInfo> props = new ArrayList<PropInfo>();
-                props.add(new PropInfo(helper.getJcrName(NamespaceRegistry.NAMESPACE_JCR, "xmlcharacters"),
-                        PropertyType.STRING, values));
+                props.add(new PropInfo(getJcrName(NamespaceRegistry.NAMESPACE_JCR, "xmlcharacters"),
+                        PropertyType.STRING, textHandler));
                 // call Importer
                 importer.startNode(node, props);
                 importer.endNode(node);
@@ -181,6 +180,11 @@ class DocViewImportHandler extends TargetImportHandler {
         }
     }
 
+    private String getJcrName(String uri, String name)
+            throws RepositoryException {
+        return sessionContext.getSession().getNamespacePrefix(uri) + ':' + name;
+    }
+
     /**
      * Processes the given {@code name}, i.e. decodes it and checks
      * the format of the decoded name.
@@ -188,6 +192,7 @@ class DocViewImportHandler extends TargetImportHandler {
      * @param nameInfo name to process
      * @return the decoded and valid jcr name or the original name if it is
      *         not encoded or if the resulting decoded name would be illegal.
+     * @throws javax.jcr.RepositoryException
      */
     private NameInfo processName(NameInfo nameInfo) throws RepositoryException {
         String decodedLocalName = ISO9075.decode(nameInfo.getLocalName());
@@ -237,21 +242,8 @@ class DocViewImportHandler extends TargetImportHandler {
                     continue;
                 }
 
-                NameInfo propNameInfo = new NameInfo(atts.getQName(i));
-                propNameInfo = processName(propNameInfo);
-
-                // value(s)
+                NameInfo propNameInfo = processName(new NameInfo(atts.getQName(i)));
                 String attrValue = atts.getValue(i);
-                TextValue[] propValues;
-
-                // always assume single-valued property for the time being
-                // until a way of properly serializing/detecting multi-valued
-                // properties on re-import is found (see JCR-325);
-                // see also DocViewSAXEventGenerator#leavingProperties(Node, int)
-                // TODO proper multi-value serialization support
-                propValues = new TextValue[1];
-                propValues[0] = new StringValue(attrValue, valueFactory, currentNamePathMapper());
-
                 if (NamespaceRegistry.NAMESPACE_JCR.equals(propNameInfo.getNamespaceUri())
                         && "primaryType".equals(propNameInfo.getLocalName())) {
                     // jcr:primaryType
@@ -270,12 +262,17 @@ class DocViewImportHandler extends TargetImportHandler {
                         id = attrValue;
                     }
                 } else {
-                    props.add(new PropInfo(propNameInfo.getRepoQualifiedName(), PropertyType.UNDEFINED, propValues));
+                    // always assume single-valued property for the time being
+                    // until a way of properly serializing/detecting multi-valued
+                    // properties on re-import is found (see JCR-325);
+                    // see also DocViewSAXEventGenerator#leavingProperties(Node, int)
+                    // TODO proper multi-value serialization support
+                    TextValue tv = new StringValue(attrValue, sessionContext.getValueFactory(), currentNamePathMapper());
+                    props.add(new PropInfo(propNameInfo.getRepoQualifiedName(), PropertyType.UNDEFINED, tv));
                 }
             }
 
-            NodeInfo node =
-                    new NodeInfo(nameInfo.getRepoQualifiedName(), nodeTypeName, mixinTypes, id);
+            NodeInfo node = new NodeInfo(nameInfo.getRepoQualifiedName(), nodeTypeName, mixinTypes, id);
             // all information has been collected, now delegate to importer
             importer.startNode(node, props);
             // push current node data onto stack

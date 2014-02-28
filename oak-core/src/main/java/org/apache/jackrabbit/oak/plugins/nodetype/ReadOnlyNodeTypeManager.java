@@ -23,7 +23,7 @@ import static org.apache.jackrabbit.JcrConstants.JCR_PRIMARYTYPE;
 import static org.apache.jackrabbit.oak.api.Type.STRING;
 import static org.apache.jackrabbit.oak.commons.PathUtils.dropIndexFromName;
 import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.NODE_TYPES_PATH;
-import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.OAK_SUPERTYPES;
+import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.REP_SUPERTYPES;
 
 import java.util.List;
 
@@ -51,12 +51,9 @@ import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Root;
 import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.api.Type;
-import org.apache.jackrabbit.oak.commons.PathUtils;
-import org.apache.jackrabbit.oak.core.ImmutableTree;
 import org.apache.jackrabbit.oak.namepath.NameMapper;
 import org.apache.jackrabbit.oak.namepath.NamePathMapper;
 import org.apache.jackrabbit.oak.namepath.NamePathMapperImpl;
-import org.apache.jackrabbit.oak.spi.state.NodeState;
 
 /**
  * Base implementation of a {@link NodeTypeManager} with support for reading
@@ -132,29 +129,6 @@ public abstract class ReadOnlyNodeTypeManager implements NodeTypeManager, Effect
             @Override
             protected NamePathMapper getNamePathMapper() {
                 return namePathMapper;
-            }
-        };
-    }
-
-    /**
-     * Returns a read-only node type manager based on the types stored within
-     * the content tree starting at the given root node state.
-     *
-     * @param root root node state
-     * @return read-only node type manager
-     */
-    @Nonnull
-    public static ReadOnlyNodeTypeManager getInstance(NodeState root) {
-        NodeState typesNode = root;
-        for (String name : PathUtils.elements(NODE_TYPES_PATH)) {
-            typesNode = typesNode.getChildNode(name);
-        }
-
-        final Tree typesTree = new ImmutableTree(typesNode);
-        return new ReadOnlyNodeTypeManager() {
-            @Override
-            protected Tree getTypes() {
-                return typesTree;
             }
         };
     }
@@ -314,7 +288,7 @@ public abstract class ReadOnlyNodeTypeManager implements NodeTypeManager, Effect
             return false;
         }
 
-        PropertyState supertypes = type.getProperty(OAK_SUPERTYPES);
+        PropertyState supertypes = type.getProperty(REP_SUPERTYPES);
         return supertypes != null
                 && contains(supertypes.getValue(Type.NAMES), superName);
     }

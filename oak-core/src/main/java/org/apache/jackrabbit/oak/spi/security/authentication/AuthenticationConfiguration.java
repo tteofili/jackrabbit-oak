@@ -19,9 +19,7 @@ package org.apache.jackrabbit.oak.spi.security.authentication;
 import javax.annotation.Nonnull;
 
 import org.apache.jackrabbit.oak.api.ContentRepository;
-import org.apache.jackrabbit.oak.api.Root;
 import org.apache.jackrabbit.oak.spi.security.SecurityConfiguration;
-import org.apache.jackrabbit.oak.spi.security.authentication.token.TokenProvider;
 
 /**
  * Interface for the authentication setup.
@@ -30,13 +28,9 @@ public interface AuthenticationConfiguration extends SecurityConfiguration {
 
     String NAME = "org.apache.jackrabbit.oak.authentication";
 
-    String PARAM_TOKEN_OPTIONS = "org.apache.jackrabbit.oak.authentication.token";
     String PARAM_APP_NAME = "org.apache.jackrabbit.oak.authentication.appName";
     String DEFAULT_APP_NAME = "jackrabbit.oak";
 
     @Nonnull
     LoginContextProvider getLoginContextProvider(ContentRepository contentRepository);
-
-    @Nonnull
-    TokenProvider getTokenProvider(Root root);
 }

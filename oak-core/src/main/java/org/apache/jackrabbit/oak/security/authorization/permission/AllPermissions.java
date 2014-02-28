@@ -18,15 +18,14 @@ package org.apache.jackrabbit.oak.security.authorization.permission;
 
 import java.util.Collections;
 import java.util.Set;
-
 import javax.annotation.Nonnull;
 
 import org.apache.jackrabbit.oak.api.PropertyState;
-import org.apache.jackrabbit.oak.api.Tree;
-import org.apache.jackrabbit.oak.core.ImmutableTree;
-import org.apache.jackrabbit.oak.spi.security.privilege.PrivilegeBitsProvider;
+import org.apache.jackrabbit.oak.core.ImmutableRoot;
+import org.apache.jackrabbit.oak.plugins.tree.ImmutableTree;
+import org.apache.jackrabbit.oak.spi.security.authorization.permission.RepositoryPermission;
+import org.apache.jackrabbit.oak.spi.security.authorization.permission.TreePermission;
 import org.apache.jackrabbit.oak.spi.security.privilege.PrivilegeConstants;
-import org.apache.jackrabbit.oak.spi.security.authorization.permission.ReadStatus;
 
 /**
  * Implementation of the {@code CompiledPermissions} interface that grants full
@@ -44,22 +43,22 @@ public final class AllPermissions implements CompiledPermissions {
     }
 
     @Override
-    public void refresh(@Nonnull ImmutableTree permissionsTree, @Nonnull PrivilegeBitsProvider bitsProvider) {
+    public void refresh(@Nonnull ImmutableRoot root, @Nonnull String workspaceName) {
         // nop
     }
 
     @Override
-    public ReadStatus getReadStatus(Tree tree, PropertyState property) {
-        return ReadStatus.ALLOW_ALL;
+    public RepositoryPermission getRepositoryPermission() {
+        return RepositoryPermission.ALL;
     }
 
     @Override
-    public boolean isGranted(long permissions) {
-        return true;
+    public TreePermission getTreePermission(@Nonnull ImmutableTree tree, @Nonnull TreePermission parentPermission) {
+        return TreePermission.ALL;
     }
 
     @Override
-    public boolean isGranted(Tree parent, PropertyState property, long permissions) {
+    public boolean isGranted(ImmutableTree parent, PropertyState property, long permissions) {
         return true;
     }
 
@@ -69,12 +68,12 @@ public final class AllPermissions implements CompiledPermissions {
     }
 
     @Override
-    public Set<String> getPrivileges(Tree tree) {
+    public Set<String> getPrivileges(ImmutableTree tree) {
         return Collections.singleton(PrivilegeConstants.JCR_ALL);
     }
 
     @Override
-    public boolean hasPrivileges(Tree tree, String... privilegeNames) {
+    public boolean hasPrivileges(ImmutableTree tree, String... privilegeNames) {
         return true;
     }
 }

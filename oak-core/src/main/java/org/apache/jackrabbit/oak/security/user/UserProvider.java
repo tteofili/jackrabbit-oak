@@ -20,6 +20,7 @@ import java.security.Principal;
 import java.text.ParseException;
 import java.util.Collections;
 import java.util.Iterator;
+
 import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
 import javax.jcr.AccessDeniedException;
@@ -28,26 +29,24 @@ import javax.jcr.nodetype.ConstraintViolationException;
 import javax.jcr.query.Query;
 
 import org.apache.jackrabbit.JcrConstants;
-import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Result;
 import org.apache.jackrabbit.oak.api.ResultRow;
 import org.apache.jackrabbit.oak.api.Root;
 import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.commons.PathUtils;
-import org.apache.jackrabbit.oak.namepath.NamePathMapper;
 import org.apache.jackrabbit.oak.spi.query.PropertyValues;
 import org.apache.jackrabbit.oak.spi.security.ConfigurationParameters;
 import org.apache.jackrabbit.oak.spi.security.user.AuthorizableNodeName;
 import org.apache.jackrabbit.oak.spi.security.user.AuthorizableType;
 import org.apache.jackrabbit.oak.spi.security.user.UserConstants;
-import org.apache.jackrabbit.oak.spi.security.user.util.UserUtil;
 import org.apache.jackrabbit.oak.util.NodeUtil;
+import org.apache.jackrabbit.oak.util.TreeUtil;
 import org.apache.jackrabbit.util.Text;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import static com.google.common.base.Preconditions.checkNotNull;
-import static org.apache.jackrabbit.oak.api.Type.STRING;
+import static org.apache.jackrabbit.oak.api.QueryEngine.NO_MAPPINGS;
 
 /**
  * User provider implementation and manager for group memberships with the
@@ -214,7 +213,7 @@ class UserProvider extends AuthorizableBaseProvider {
             Result result = root.getQueryEngine().executeQuery(stmt.toString(),
                     Query.JCR_SQL2, 1, 0,
                     Collections.singletonMap("principalName", PropertyValues.newString(principal.getName())),
-                    new NamePathMapper.Default());
+                    NO_MAPPINGS);
 
             Iterator<? extends ResultRow> rows = result.getRows().iterator();
             if (rows.hasNext()) {
@@ -225,20 +224,6 @@ class UserProvider extends AuthorizableBaseProvider {
             log.error("Failed to retrieve authorizable by principal", ex);
         }
 
-        return null;
-    }
-
-    @CheckForNull
-    static String getAuthorizableId(@Nonnull Tree authorizableTree) {
-        checkNotNull(authorizableTree);
-        if (UserUtil.isType(authorizableTree, AuthorizableType.AUTHORIZABLE)) {
-            PropertyState idProp = authorizableTree.getProperty(UserConstants.REP_AUTHORIZABLE_ID);
-            if (idProp != null) {
-                return idProp.getValue(STRING);
-            } else {
-                return Text.unescapeIllegalJcrChars(authorizableTree.getName());
-            }
-        }
         return null;
     }
 
@@ -295,12 +280,13 @@ class UserProvider extends AuthorizableBaseProvider {
         // test for colliding folder child node.
         while (folder.hasChild(nodeName)) {
             NodeUtil colliding = folder.getChild(nodeName);
-            if (colliding.hasPrimaryNodeTypeName(NT_REP_AUTHORIZABLE_FOLDER)) {
+            String primaryType = TreeUtil.getPrimaryTypeName(colliding.getTree());
+            if (NT_REP_AUTHORIZABLE_FOLDER.equals(primaryType)) {
                 log.debug("Existing folder node collides with user/group to be created. Expanding path by: " + colliding.getName());
                 folder = colliding;
             } else {
                 String msg = "Failed to create authorizable with id '" + authorizableId + "' : " +
-                        "Detected conflicting node of unexpected node type '" + colliding.getPrimaryNodeTypeName() + "'.";
+                        "Detected conflicting node of unexpected node type '" + primaryType + "'.";
                 log.error(msg);
                 throw new ConstraintViolationException(msg);
             }

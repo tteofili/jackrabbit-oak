@@ -16,14 +16,7 @@
  */
 package org.apache.jackrabbit.oak.plugins.index.solr.query;
 
-import static java.util.Arrays.asList;
-import static junit.framework.Assert.assertEquals;
-import static org.apache.jackrabbit.oak.api.Type.STRINGS;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
-
 import java.util.Iterator;
-
 import org.apache.jackrabbit.oak.Oak;
 import org.apache.jackrabbit.oak.api.ContentRepository;
 import org.apache.jackrabbit.oak.api.Tree;
@@ -37,9 +30,14 @@ import org.junit.After;
 import org.junit.Ignore;
 import org.junit.Test;
 
+import static java.util.Arrays.asList;
+import static junit.framework.Assert.assertEquals;
+import static org.apache.jackrabbit.oak.api.Type.STRINGS;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+
 /**
- * General query extensive testcase for {@link SolrQueryIndex} and {@link
- * org.apache.jackrabbit.oak.plugins.index.solr.index.SolrIndexDiff}
+ * General query extensive testcase for {@link SolrQueryIndex}
  */
 public class SolrIndexQueryTest extends AbstractQueryTest {
 
@@ -87,8 +85,8 @@ public class SolrIndexQueryTest extends AbstractQueryTest {
     @Test
     public void descendantTest() throws Exception {
         Tree test = root.getTree("/").addChild("test");
-        test.addChild("a");
-        test.addChild("b");
+        test.addChild("a").addChild("c");
+        test.addChild("b").addChild("d");
         root.commit();
 
         Iterator<String> result = executeQuery(
@@ -96,14 +94,19 @@ public class SolrIndexQueryTest extends AbstractQueryTest {
                 "JCR-SQL2").iterator();
         assertTrue(result.hasNext());
         assertEquals("/test/a", result.next());
+        assertTrue(result.hasNext());
+        assertEquals("/test/a/c", result.next());
+        assertTrue(result.hasNext());
         assertEquals("/test/b", result.next());
+        assertTrue(result.hasNext());
+        assertEquals("/test/b/d", result.next());
         assertFalse(result.hasNext());
     }
 
     @Test
     public void descendantTest2() throws Exception {
         Tree test = root.getTree("/").addChild("test");
-        test.addChild("a").setProperty("name", asList("Hello", "World"), STRINGS);
+        test.addChild("a").addChild("c").setProperty("name", asList("Hello", "World"), STRINGS);
         test.addChild("b").setProperty("name", "Hello");
         root.commit();
 
@@ -111,7 +114,7 @@ public class SolrIndexQueryTest extends AbstractQueryTest {
                 "select [jcr:path] from [nt:base] where isdescendantnode('/test') and name='World'",
                 "JCR-SQL2").iterator();
         assertTrue(result.hasNext());
-        assertEquals("/test/a", result.next());
+        assertEquals("/test/a/c", result.next());
         assertFalse(result.hasNext());
     }
 
@@ -134,9 +137,91 @@ public class SolrIndexQueryTest extends AbstractQueryTest {
                 "JCR-SQL2").iterator();
         assertTrue(result.hasNext());
         assertEquals("/, /children", result.next());
+        assertTrue(result.hasNext());
         assertEquals("/, /jcr:system", result.next());
+        assertTrue(result.hasNext());
         assertEquals("/, /oak:index", result.next());
+        assertTrue(result.hasNext());
         assertEquals("/, /parents", result.next());
         assertFalse(result.hasNext());
+
+    }
+
+    @Test
+    public void ischildnodeTest2() throws Exception {
+        Tree tree = root.getTree("/");
+        Tree test = tree.addChild("test");
+        test.addChild("jcr:resource").addChild("x");
+        test.addChild("resource");
+        root.commit();
+
+        Iterator<String> strings = executeQuery("select [jcr:path] from [nt:base] as b where ischildnode(b, '/test')", "JCR-SQL2").iterator();
+        assertTrue(strings.hasNext());
+        assertEquals("/test/jcr:resource", strings.next());
+        assertTrue(strings.hasNext());
+        assertEquals("/test/resource", strings.next());
+        assertFalse(strings.hasNext());
+    }
+
+    @Test
+    public void testNativeSolrQuery() throws Exception {
+        String nativeQueryString = "select [jcr:path] from [nt:base] where native('solr', 'name:(Hello OR World)')";
+
+        Tree tree = root.getTree("/");
+        Tree test = tree.addChild("test");
+        test.addChild("a").setProperty("name", "Hello");
+        test.addChild("b").setProperty("name", "World");
+        tree.addChild("c");
+        root.commit();
+
+        Iterator<String> strings = executeQuery(nativeQueryString, "JCR-SQL2").iterator();
+        assertTrue(strings.hasNext());
+        assertEquals("/test/a", strings.next());
+        assertTrue(strings.hasNext());
+        assertEquals("/test/b", strings.next());
+        assertFalse(strings.hasNext());
+    }
+
+    @Test
+    public void testNativeSolrFunctionQuery() throws Exception {
+        String nativeQueryString = "select [jcr:path] from [nt:base] where native('solr', 'path_child:\\/test  _val_:\"recip(rord(name),1,2,3)\"')";
+
+        Tree tree = root.getTree("/");
+        Tree test = tree.addChild("test");
+        test.addChild("a").setProperty("name", "Hello");
+        test.addChild("b").setProperty("name", "World");
+        tree.addChild("c");
+        root.commit();
+
+        Iterator<String> strings = executeQuery(nativeQueryString, "JCR-SQL2").iterator();
+        assertTrue(strings.hasNext());
+        assertEquals("/test/a", strings.next());
+        assertTrue(strings.hasNext());
+        assertEquals("/test/b", strings.next());
+        assertFalse(strings.hasNext());
+    }
+
+    @Test
+     public void testNativeSolrNestedQuery() throws Exception {
+        String nativeQueryString = "select [jcr:path] from [nt:base] where native('solr', '_query_:\"{!dismax qf=catch_all q.op=OR}hello world\"')";
+
+        Tree tree = root.getTree("/");
+        Tree test = tree.addChild("test");
+        test.addChild("a").setProperty("name", "Hello");
+        test.addChild("b").setProperty("name", "World");
+        tree.addChild("c");
+        root.commit();
+
+        Iterator<String> strings = executeQuery(nativeQueryString, "JCR-SQL2").iterator();
+        assertTrue(strings.hasNext());
+        assertEquals("/test/a", strings.next());
+        assertTrue(strings.hasNext());
+        assertEquals("/test/b", strings.next());
+        assertFalse(strings.hasNext());
+    }
+
+    @Test
+    public void nativeSolr() throws Exception {
+        test("native_solr.txt");
     }
 }

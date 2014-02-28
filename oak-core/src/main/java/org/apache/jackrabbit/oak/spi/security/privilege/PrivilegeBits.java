@@ -57,6 +57,7 @@ public final class PrivilegeBits implements PrivilegeConstants {
     private static final long NAMESPACE_MNGMT = NODE_TYPE_DEF_MNGMT << 1;
     private static final long PRIVILEGE_MNGMT = NAMESPACE_MNGMT << 1;
     private static final long USER_MNGMT = PRIVILEGE_MNGMT << 1;
+    private static final long INDEX_DEFINITION_MNGMT = USER_MNGMT << 1;
 
     private static final long READ = READ_NODES | READ_PROPERTIES;
     private static final long MODIFY_PROPERTIES = ADD_PROPERTIES | ALTER_PROPERTIES | REMOVE_PROPERTIES;
@@ -87,12 +88,16 @@ public final class PrivilegeBits implements PrivilegeConstants {
         BUILT_IN.put(JCR_NAMESPACE_MANAGEMENT, getInstance(NAMESPACE_MNGMT));
         BUILT_IN.put(REP_PRIVILEGE_MANAGEMENT, getInstance(PRIVILEGE_MNGMT));
         BUILT_IN.put(REP_USER_MANAGEMENT, getInstance(USER_MNGMT));
+        BUILT_IN.put(REP_INDEX_DEFINITION_MANAGEMENT, getInstance(INDEX_DEFINITION_MNGMT));
 
         BUILT_IN.put(JCR_READ, PrivilegeBits.getInstance(READ));
         BUILT_IN.put(JCR_MODIFY_PROPERTIES, PrivilegeBits.getInstance(MODIFY_PROPERTIES));
         BUILT_IN.put(JCR_WRITE, PrivilegeBits.getInstance(WRITE));
         BUILT_IN.put(REP_WRITE, PrivilegeBits.getInstance(WRITE2));
     }
+
+    public static PrivilegeBits NEXT_AFTER_BUILT_INS =
+            getInstance(INDEX_DEFINITION_MNGMT).nextBits();
 
     private final Data d;
 
@@ -121,8 +126,12 @@ public final class PrivilegeBits implements PrivilegeConstants {
      * @return a new instance of privilege bits.
      */
     @Nonnull
-    public static PrivilegeBits getInstance(@Nonnull PrivilegeBits base) {
-        return new PrivilegeBits(new ModifiableData(base.d));
+    public static PrivilegeBits getInstance(@Nonnull PrivilegeBits... base) {
+        PrivilegeBits bts = getInstance();
+        for (PrivilegeBits baseBits : base) {
+            bts.add(baseBits);
+        }
+        return bts;
     }
 
     /**
@@ -265,10 +274,9 @@ public final class PrivilegeBits implements PrivilegeConstants {
             }
         }
 
-        // modify_child_node_collection permission is granted through
-        // privileges on the parent
-        if ((parentPrivs & ADD_CHILD_NODES) == ADD_CHILD_NODES &&
-                (parentPrivs & REMOVE_CHILD_NODES) == REMOVE_CHILD_NODES) {
+        // modify_child_node_collection permission
+        if ((privs & ADD_CHILD_NODES) == ADD_CHILD_NODES &&
+                (privs & REMOVE_CHILD_NODES) == REMOVE_CHILD_NODES) {
             perm |= Permissions.MODIFY_CHILD_NODE_COLLECTION;
         }
 
@@ -308,6 +316,9 @@ public final class PrivilegeBits implements PrivilegeConstants {
         }
         if ((privs & USER_MNGMT) == USER_MNGMT) {
             perm |= Permissions.USER_MANAGEMENT;
+        }
+        if ((privs & INDEX_DEFINITION_MNGMT) == INDEX_DEFINITION_MNGMT) {
+            perm |= Permissions.INDEX_DEFINITION_MANAGEMENT;
         }
         return perm;
     }
@@ -356,22 +367,6 @@ public final class PrivilegeBits implements PrivilegeConstants {
      */
     public boolean includes(@Nonnull PrivilegeBits otherBits) {
         return d.includes(otherBits.d);
-    }
-
-    /**
-     * Returns {@code true} if this instance includes the jcr:read
-     * privilege. Shortcut for calling {@link PrivilegeBits#includes(PrivilegeBits)}
-     * where the other bits represented the jcr:read privilege.
-     *
-     * @return {@code true} if this instance includes the jcr:read
-     *         privilege; {@code false} otherwise.
-     */
-    public boolean includesRead(long readPermission) {
-        if (this == EMPTY) {
-            return false;
-        } else {
-            return d.includes(readPermission);
-        }
     }
 
     /**
@@ -507,8 +502,6 @@ public final class PrivilegeBits implements PrivilegeConstants {
 
         abstract boolean includes(Data other);
 
-        abstract boolean includes(long permissions);
-
         /**
          * Checks if all {@code otherBits} is already included in {@code bits}.
          * <p>
@@ -520,10 +513,9 @@ public final class PrivilegeBits implements PrivilegeConstants {
          * </pre>
          * @param bits the super set of bits
          * @param otherBits the bits to check against
-         * @return <code>true</code> if all other bits are included in bits.
+         * @return {@code true} if all other bits are included in bits.
          */
         static boolean includes(long bits, long otherBits) {
-            // todo:  different check as 'and' check below. which one is faster?
             return (bits | ~otherBits) == -1;
         }
 
@@ -538,7 +530,7 @@ public final class PrivilegeBits implements PrivilegeConstants {
          * </pre>
          * @param bits the super set of bits
          * @param otherBits the bits to check against
-         * @return <code>true</code> if all other bits are included in bits.
+         * @return {@code true} if all other bits are included in bits.
          */
         static boolean includes(long[] bits, long[] otherBits) {
             if (otherBits.length <= bits.length) {
@@ -635,11 +627,6 @@ public final class PrivilegeBits implements PrivilegeConstants {
             }
         }
 
-        @Override
-        boolean includes(long permissions) {
-            return (isSimple) ? (bits & permissions) == permissions : (bitsArr[0] & permissions) == permissions;
-        }
-
         //---------------------------------------------------------< Object >---
         @Override
         public int hashCode() {
@@ -677,24 +664,6 @@ public final class PrivilegeBits implements PrivilegeConstants {
             bits = new long[]{NO_PRIVILEGE};
         }
 
-        private ModifiableData(Data base) {
-            long[] b = base.longValues();
-            switch (b.length) {
-                case 0:
-                    // empty
-                    bits = new long[]{NO_PRIVILEGE};
-                    break;
-                case 1:
-                    // single long
-                    bits = new long[]{b[0]};
-                    break;
-                default:
-                    // copy
-                    bits = new long[b.length];
-                    System.arraycopy(b, 0, bits, 0, b.length);
-            }
-        }
-
         @Override
         boolean isEmpty() {
             return bits.length == 1 && bits[0] == NO_PRIVILEGE;
@@ -727,11 +696,6 @@ public final class PrivilegeBits implements PrivilegeConstants {
             } else {
                 return includes(bits, other.longValues());
             }
-        }
-
-        @Override
-        boolean includes(long permissions) {
-            return (bits[0] & permissions) == permissions;
         }
 
         /**

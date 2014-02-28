@@ -18,6 +18,8 @@
  */
 package org.apache.jackrabbit.oak.query.ast;
 
+import java.util.Set;
+
 import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.query.index.FilterImpl;
 import org.apache.jackrabbit.oak.spi.query.Filter;
@@ -64,26 +66,24 @@ public class DescendantNodeJoinConditionImpl extends JoinConditionImpl {
 
     @Override
     public void restrict(FilterImpl f) {
-        if (f.getSelector() == ancestorSelector) {
+        if (f.getSelector().equals(ancestorSelector)) {
             String d = descendantSelector.currentPath();
-            if (d == null && f.isPreparing() && descendantSelector.isPrepared()) {
+            if (d == null && f.isPreparing() && f.isPrepared(descendantSelector)) {
                 // during the prepare phase, if the selector is already
                 // prepared, then we would know the value
-                d = KNOWN_PATH;
-            }
-            if (d != null) {
+                f.restrictPath(KNOWN_PARENT_PATH, Filter.PathRestriction.PARENT);
+            } else if (d != null) {
                 f.restrictPath(PathUtils.getParentPath(d), Filter.PathRestriction.PARENT);
             }
         }
-        if (f.getSelector() == descendantSelector) {
+        if (f.getSelector().equals(descendantSelector)) {
             String a = ancestorSelector.currentPath();
-            if (a == null && f.isPreparing() && ancestorSelector.isPrepared()) {
+            if (a == null && f.isPreparing() && f.isPrepared(ancestorSelector)) {
                 // during the prepare phase, if the selector is already
                 // prepared, then we would know the value
-                a = KNOWN_PATH;
-            }
-            if (a != null) {
-                f.restrictPath(a, Filter.PathRestriction.DIRECT_CHILDREN);
+                f.restrictPath(KNOWN_PATH, Filter.PathRestriction.ALL_CHILDREN);
+            } else if (a != null) {
+                f.restrictPath(a, Filter.PathRestriction.ALL_CHILDREN);
             }
         }
     }
@@ -91,6 +91,16 @@ public class DescendantNodeJoinConditionImpl extends JoinConditionImpl {
     @Override
     public void restrictPushDown(SelectorImpl s) {
         // nothing to do
+    }
+
+    @Override
+    public boolean isParent(SourceImpl source) {
+        return source.equals(ancestorSelector);
+    }
+    
+    @Override
+    public boolean canEvaluate(Set<SourceImpl> available) {
+        return available.contains(descendantSelector) && available.contains(ancestorSelector);
     }
 
 }

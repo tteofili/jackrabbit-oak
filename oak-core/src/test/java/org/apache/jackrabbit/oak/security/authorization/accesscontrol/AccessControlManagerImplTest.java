@@ -26,6 +26,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import javax.jcr.AccessDeniedException;
@@ -46,20 +47,22 @@ import javax.jcr.security.Privilege;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
+
 import org.apache.jackrabbit.JcrConstants;
 import org.apache.jackrabbit.api.security.JackrabbitAccessControlList;
 import org.apache.jackrabbit.api.security.JackrabbitAccessControlManager;
 import org.apache.jackrabbit.api.security.JackrabbitAccessControlPolicy;
 import org.apache.jackrabbit.api.security.authorization.PrivilegeManager;
 import org.apache.jackrabbit.api.security.principal.PrincipalManager;
-import org.apache.jackrabbit.oak.TestNameMapper;
 import org.apache.jackrabbit.oak.api.ContentSession;
 import org.apache.jackrabbit.oak.api.Root;
 import org.apache.jackrabbit.oak.api.Tree;
+import org.apache.jackrabbit.oak.api.Type;
+import org.apache.jackrabbit.oak.namepath.GlobalNameMapper;
+import org.apache.jackrabbit.oak.namepath.LocalNameMapper;
 import org.apache.jackrabbit.oak.namepath.NameMapper;
 import org.apache.jackrabbit.oak.namepath.NamePathMapper;
 import org.apache.jackrabbit.oak.namepath.NamePathMapperImpl;
-import org.apache.jackrabbit.oak.plugins.name.Namespaces;
 import org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants;
 import org.apache.jackrabbit.oak.plugins.value.ValueFactoryImpl;
 import org.apache.jackrabbit.oak.spi.security.authorization.accesscontrol.ACE;
@@ -71,7 +74,6 @@ import org.apache.jackrabbit.oak.spi.security.authorization.restriction.Restrict
 import org.apache.jackrabbit.oak.spi.security.principal.EveryonePrincipal;
 import org.apache.jackrabbit.oak.spi.security.principal.PrincipalImpl;
 import org.apache.jackrabbit.oak.spi.security.privilege.PrivilegeBits;
-import org.apache.jackrabbit.oak.spi.security.privilege.PrivilegeBitsProvider;
 import org.apache.jackrabbit.oak.spi.security.privilege.PrivilegeConstants;
 import org.apache.jackrabbit.oak.util.NodeUtil;
 import org.apache.jackrabbit.oak.util.TreeUtil;
@@ -79,6 +81,7 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
+import static java.util.Collections.singletonMap;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -92,14 +95,18 @@ import static org.junit.Assert.fail;
  */
 public class AccessControlManagerImplTest extends AbstractAccessControlTest implements AccessControlConstants {
 
-    private final String testName = TestNameMapper.TEST_PREFIX + ":testRoot";
+    public static final String TEST_LOCAL_PREFIX = "test";
+    public static final String TEST_PREFIX = "jr";
+    public static final String TEST_URI = "http://jackrabbit.apache.org";
+
+    private final String testName = TEST_PREFIX + ":testRoot";
     private final String testPath = '/' + testName;
 
     private Principal testPrincipal;
     private Privilege[] testPrivileges;
     private Root testRoot;
 
-    private TestNameMapper nameMapper;
+    private NameMapper nameMapper;
     private NamePathMapper npMapper;
 
     private AccessControlManagerImpl acMgr;
@@ -110,12 +117,12 @@ public class AccessControlManagerImplTest extends AbstractAccessControlTest impl
     public void before() throws Exception {
         super.before();
 
-        registerNamespace(TestNameMapper.TEST_PREFIX, TestNameMapper.TEST_URI);
-        nameMapper = new TestNameMapper(Namespaces.getNamespaceMap(root.getTree("/")));
+        registerNamespace(TEST_PREFIX, TEST_URI);
+        nameMapper = new GlobalNameMapper(root);
         npMapper = new NamePathMapperImpl(nameMapper);
 
         acMgr = getAccessControlManager(npMapper);
-        valueFactory = new ValueFactoryImpl(root.getBlobFactory(), npMapper);
+        valueFactory = new ValueFactoryImpl(root, npMapper);
 
         NodeUtil rootNode = new NodeUtil(root.getTree("/"), npMapper);
         rootNode.addChild(testName, JcrConstants.NT_UNSTRUCTURED);
@@ -161,11 +168,6 @@ public class AccessControlManagerImplTest extends AbstractAccessControlTest impl
         return new AccessControlManagerImpl(getTestRoot(), getNamePathMapper(), getSecurityProvider());
     }
 
-    private NamePathMapper getLocalNamePathMapper() {
-        NameMapper remapped = new TestNameMapper(nameMapper, TestNameMapper.LOCAL_MAPPING);
-        return new NamePathMapperImpl(remapped);
-    }
-
     private ACL getApplicablePolicy(@Nullable String path) throws RepositoryException {
         AccessControlPolicyIterator itr = acMgr.getApplicablePolicies(path);
         if (itr.hasNext()) {
@@ -177,26 +179,28 @@ public class AccessControlManagerImplTest extends AbstractAccessControlTest impl
 
     private ACL createPolicy(@Nullable String path) {
         final PrincipalManager pm = getPrincipalManager(root);
+        final PrivilegeManager pvMgr = getPrivilegeManager(root);
         final RestrictionProvider rp = getRestrictionProvider();
-        return new ACL(path, getNamePathMapper()) {
+        return new ACL(path, null, getNamePathMapper()) {
+
             @Override
-            PrincipalManager getPrincipalManager() {
-                return pm;
+            ACE createACE(Principal principal, PrivilegeBits privilegeBits, boolean isAllow, Set<Restriction> restrictions) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            void checkValidPrincipal(Principal principal) throws AccessControlException {
+                Util.checkValidPrincipal(principal, pm, true);
             }
 
             @Override
             PrivilegeManager getPrivilegeManager() {
-                return AccessControlManagerImplTest.this.getPrivilegeManager(root);
+                return pvMgr;
             }
 
             @Override
-            PrivilegeBitsProvider getPrivilegeBitsProvider() {
-                return new PrivilegeBitsProvider(root);
-            }
-
-            @Override
-            ACE createACE(Principal principal, PrivilegeBits privilegeBits, boolean isAllow, Set<Restriction> restrictions, NamePathMapper namePathMapper) throws RepositoryException {
-                throw new UnsupportedOperationException();
+            PrivilegeBits getPrivilegeBits(Privilege[] privileges) {
+                return getBitsProvider().getBits(privileges, getNamePathMapper());
             }
 
             @Nonnull
@@ -319,10 +323,14 @@ public class AccessControlManagerImplTest extends AbstractAccessControlTest impl
         List<Privilege> allPrivileges = Arrays.asList(getPrivilegeManager(root).getRegisteredPrivileges());
 
         List<String> testPaths = new ArrayList<String>();
-        testPaths.add('/' + TestNameMapper.TEST_LOCAL_PREFIX + ":testRoot");
-        testPaths.add("/{" + TestNameMapper.TEST_URI + "}testRoot");
+        testPaths.add('/' + TEST_LOCAL_PREFIX + ":testRoot");
+        testPaths.add("/{" + TEST_URI + "}testRoot");
 
-        AccessControlManager acMgr = getAccessControlManager(getLocalNamePathMapper());
+        NameMapper remapped = new LocalNameMapper(
+                root, singletonMap(TEST_LOCAL_PREFIX, TEST_URI));
+
+        AccessControlManager acMgr =
+                getAccessControlManager(new NamePathMapperImpl(remapped));
         for (String path : testPaths) {
             Privilege[] supported = acMgr.getSupportedPrivileges(path);
 
@@ -1237,13 +1245,14 @@ public class AccessControlManagerImplTest extends AbstractAccessControlTest impl
         assertArrayEquals(testPrivileges, privilegesFromNames(TreeUtil.getStrings(ace, REP_PRIVILEGES)));
         assertFalse(ace.hasChild(REP_RESTRICTIONS));
 
-        NodeUtil ace2 = new NodeUtil(children.next());
-        assertEquals(NT_REP_DENY_ACE, ace2.getPrimaryNodeTypeName());
-        assertEquals(EveryonePrincipal.NAME, ace2.getString(REP_PRINCIPAL_NAME, null));
-        assertArrayEquals(testPrivileges, privilegesFromNames(ace2.getNames(REP_PRIVILEGES)));
+        Tree ace2 = children.next();
+        assertEquals(NT_REP_DENY_ACE, TreeUtil.getPrimaryTypeName(ace2));
+        assertEquals(EveryonePrincipal.NAME, ace2.getProperty(REP_PRINCIPAL_NAME).getValue(Type.STRING));
+        Privilege[] privs = privilegesFromNames(TreeUtil.getNames(ace2, REP_PRIVILEGES));
+        assertArrayEquals(testPrivileges, privs);
         assertTrue(ace2.hasChild(REP_RESTRICTIONS));
-        NodeUtil restr = ace2.getChild(REP_RESTRICTIONS);
-        assertEquals("*/something", restr.getString(REP_GLOB, null));
+        Tree restr = ace2.getChild(REP_RESTRICTIONS);
+        assertEquals("*/something", restr.getProperty(REP_GLOB).getValue(Type.STRING));
     }
 
     @Test

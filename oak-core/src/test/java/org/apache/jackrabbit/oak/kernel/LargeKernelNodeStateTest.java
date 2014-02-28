@@ -18,14 +18,9 @@
  */
 package org.apache.jackrabbit.oak.kernel;
 
-import static junit.framework.Assert.assertEquals;
-import static junit.framework.Assert.assertFalse;
-import static junit.framework.Assert.assertTrue;
-
-import org.apache.jackrabbit.mk.core.MicroKernelImpl;
 import org.apache.jackrabbit.oak.api.CommitFailedException;
+import org.apache.jackrabbit.oak.spi.commit.CommitInfo;
 import org.apache.jackrabbit.oak.spi.commit.EmptyHook;
-import org.apache.jackrabbit.oak.spi.commit.PostCommitHook;
 import org.apache.jackrabbit.oak.spi.state.ChildNodeEntry;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
@@ -34,15 +29,19 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
-public class LargeKernelNodeStateTest {
+import static junit.framework.Assert.assertEquals;
+import static junit.framework.Assert.assertFalse;
+import static junit.framework.Assert.assertTrue;
 
-    private static final int N = KernelNodeState.MAX_CHILD_NODE_NAMES;
+public class LargeKernelNodeStateTest extends AbstractKernelTest {
+
+    private static final int N = KernelNodeState.MAX_CHILD_NAMES;
 
     private NodeState state;
 
     @Before
     public void setUp() throws CommitFailedException {
-        NodeStore store = new KernelNodeStore(new MicroKernelImpl());
+        NodeStore store = createNodeStore();
 
         NodeBuilder builder = store.getRoot().builder();
         builder.setProperty("a", 1);
@@ -50,7 +49,7 @@ public class LargeKernelNodeStateTest {
             builder.child("x" + i);
         }
 
-        state = store.merge(builder, EmptyHook.INSTANCE, PostCommitHook.EMPTY);
+        state = store.merge(builder, EmptyHook.INSTANCE, CommitInfo.EMPTY);
     }
 
     @After

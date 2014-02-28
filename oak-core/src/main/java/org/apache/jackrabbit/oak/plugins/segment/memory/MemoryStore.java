@@ -19,10 +19,11 @@ package org.apache.jackrabbit.oak.plugins.segment.memory;
 import static org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState.EMPTY_NODE;
 
 import java.nio.ByteBuffer;
-import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentMap;
+
+import javax.annotation.Nonnull;
 
 import org.apache.jackrabbit.oak.plugins.segment.AbstractStore;
 import org.apache.jackrabbit.oak.plugins.segment.Journal;
@@ -30,7 +31,6 @@ import org.apache.jackrabbit.oak.plugins.segment.Segment;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 
-import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 
 public class MemoryStore extends AbstractStore {
@@ -41,7 +41,7 @@ public class MemoryStore extends AbstractStore {
             Maps.newConcurrentMap();
 
     public MemoryStore(NodeState root) {
-        super(1024 * 1024);
+        super(0);
         NodeBuilder builder = EMPTY_NODE.builder();
         builder.setChildNode("root", root);
         journals.put("root", new MemoryJournal(this, builder.getNodeState()));
@@ -65,7 +65,7 @@ public class MemoryStore extends AbstractStore {
         return journal;
     }
 
-    @Override
+    @Override @Nonnull
     protected Segment loadSegment(UUID id) {
         Segment segment = segments.get(id);
         if (segment != null) {
@@ -77,13 +77,11 @@ public class MemoryStore extends AbstractStore {
 
     @Override
     public void writeSegment(
-            UUID segmentId, byte[] data, int offset, int length,
-            List<UUID> referencedSegmentIds) {
-        byte[] buffer = new byte[length];
-        System.arraycopy(data, offset, buffer, 0, length);
-        Segment segment = new Segment(
-                this, segmentId, ByteBuffer.wrap(buffer),
-                Lists.newArrayList(referencedSegmentIds));
+            UUID segmentId, byte[] data, int offset, int length) {
+        ByteBuffer buffer = ByteBuffer.allocate(length);
+        buffer.put(data, offset, length);
+        buffer.rewind();
+        Segment segment = createSegment(segmentId, buffer);
         if (segments.putIfAbsent(segment.getSegmentId(), segment) != null) {
             throw new IllegalStateException(
                     "Segment override: " + segment.getSegmentId());

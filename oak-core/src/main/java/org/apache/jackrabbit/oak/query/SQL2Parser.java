@@ -27,10 +27,12 @@ import java.util.HashMap;
 import java.util.Map;
 
 import javax.jcr.PropertyType;
+import javax.jcr.RepositoryException;
 
 import org.apache.jackrabbit.oak.api.PropertyValue;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.commons.PathUtils;
+import org.apache.jackrabbit.oak.namepath.NamePathMapper;
 import org.apache.jackrabbit.oak.query.ast.AstElementFactory;
 import org.apache.jackrabbit.oak.query.ast.BindVariableValueImpl;
 import org.apache.jackrabbit.oak.query.ast.ColumnImpl;
@@ -93,17 +95,22 @@ public class SQL2Parser {
     // SQL injection protection: if disabled, literals are not allowed
     private boolean allowTextLiterals = true;
     private boolean allowNumberLiterals = true;
+    private boolean includeSelectorNameInWildcardColumns = true;
 
     private final AstElementFactory factory = new AstElementFactory();
 
     private boolean supportSQL1;
 
+    private NamePathMapper namePathMapper;
+
     /**
      * Create a new parser. A parser can be re-used, but it is not thread safe.
      * 
+     * @param namePathMapper the name-path mapper to use
      * @param types the node with the node type information
      */
-    public SQL2Parser(NodeState types) {
+    public SQL2Parser(NamePathMapper namePathMapper, NodeState types) {
+        this.namePathMapper = namePathMapper;
         this.types = checkNotNull(types);
     }
 
@@ -175,7 +182,8 @@ public class SQL2Parser {
         if (readIf("WHERE")) {
             constraint = parseConstraint();
         }
-        QueryImpl q = new QueryImpl(statement, source, constraint, columnArray);
+        QueryImpl q = new QueryImpl(
+                statement, source, constraint, columnArray, namePathMapper);
         q.setDistinct(distinct);
         return q;
     }
@@ -206,6 +214,15 @@ public class SQL2Parser {
 
     private SelectorImpl parseSelector() throws ParseException {
         String nodeTypeName = readName();
+        if (namePathMapper != null) {
+            try {
+                nodeTypeName = namePathMapper.getOakName(nodeTypeName);
+            } catch (RepositoryException e) {
+                ParseException e2 = getSyntaxError("could not convert node type name " + nodeTypeName);
+                e2.initCause(e);
+                throw e2;
+            }
+        }
         NodeState type = types.getChildNode(nodeTypeName);
         if (!type.exists()) {
             throw getSyntaxError("unknown node type");
@@ -496,6 +513,17 @@ public class SQL2Parser {
             } else {
                 c = factory.descendantNode(getOnlySelectorName(), name);
             }
+        } else if ("NATIVE".equalsIgnoreCase(functionName)) {
+            String selectorName;
+            if (currentTokenType == IDENTIFIER) {
+                selectorName = readName();
+                read(",");
+            } else {
+                selectorName = getOnlySelectorName();
+            }
+            String language = readString().getValue(Type.STRING);
+            read(",");
+            c = factory.nativeFunction(selectorName, language, parseStaticOperand());
         } else {
             return null;
         }
@@ -778,6 +806,10 @@ public class SQL2Parser {
                             column.propertyName = readName();
                             if (readIf("AS")) {
                                 column.columnName = readName();
+                            } else {
+                                column.columnName =
+                                        column.selectorName
+                                        + "." + column.propertyName;
                             }
                         }
                     } else {
@@ -822,12 +854,12 @@ public class SQL2Parser {
             throws ParseException {
         if (selectorName == null) {
             for (SelectorImpl selector : selectors.values()) {
-                addWildcardColumns(columns, selector, selectors.size() > 1);
+                addWildcardColumns(columns, selector);
             }
         } else {
             SelectorImpl selector = selectors.get(selectorName);
             if (selector != null) {
-                addWildcardColumns(columns, selector, true);
+                addWildcardColumns(columns, selector);
             } else {
                 throw getSyntaxError("Unknown selector: " + selectorName);
             }
@@ -835,15 +867,25 @@ public class SQL2Parser {
     }
 
     private void addWildcardColumns(
-            Collection<ColumnImpl> columns, SelectorImpl selector,
-            boolean includeSelectorName) {
+            Collection<ColumnImpl> columns, SelectorImpl selector) {
         String selectorName = selector.getSelectorName();
-        for (String property : selector.getWildcardColumns()) {
-            String columnName = property;
-            if (includeSelectorName) {
-                columnName = selectorName + "." + property;
+        for (String propertyName : selector.getWildcardColumns()) {
+            if (namePathMapper != null) {
+                propertyName = namePathMapper.getJcrName(propertyName);
             }
-            columns.add(factory.column(selectorName, property, columnName));
+            String columnName;
+            if (includeSelectorNameInWildcardColumns) {
+                columnName = selectorName + "." + propertyName;
+            } else {
+                columnName = propertyName;
+            }
+            columns.add(factory.column(selectorName, propertyName, columnName));
+        }
+
+        if (columns.isEmpty()) {
+            // OAK-1354, inject the selector name
+            columns.add(factory
+                    .column(selectorName, selectorName, selectorName));
         }
     }
 
@@ -1271,6 +1313,10 @@ public class SQL2Parser {
 
     public void setAllowNumberLiterals(boolean allowNumberLiterals) {
         this.allowNumberLiterals = allowNumberLiterals;
+    }
+
+    public void setIncludeSelectorNameInWildcardColumns(boolean value) {
+        this.includeSelectorNameInWildcardColumns = value;
     }
 
 }

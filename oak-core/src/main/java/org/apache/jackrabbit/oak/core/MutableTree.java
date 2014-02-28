@@ -23,10 +23,7 @@ import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.collect.Iterables.filter;
 import static com.google.common.collect.Iterables.indexOf;
-import static org.apache.jackrabbit.oak.api.Tree.Status.EXISTING;
-import static org.apache.jackrabbit.oak.api.Tree.Status.MODIFIED;
-import static org.apache.jackrabbit.oak.api.Tree.Status.NEW;
-import static org.apache.jackrabbit.oak.api.Type.STRING;
+import static org.apache.jackrabbit.oak.api.Type.NAME;
 import static org.apache.jackrabbit.oak.commons.PathUtils.elements;
 import static org.apache.jackrabbit.oak.commons.PathUtils.isAbsolute;
 import static org.apache.jackrabbit.oak.spi.state.NodeStateUtils.isHidden;
@@ -40,18 +37,17 @@ import javax.annotation.Nonnull;
 import com.google.common.base.Predicate;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
-
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.core.AbstractRoot.Move;
-import org.apache.jackrabbit.oak.plugins.memory.MemoryPropertyBuilder;
-import org.apache.jackrabbit.oak.plugins.memory.MultiStringPropertyState;
+import org.apache.jackrabbit.oak.plugins.memory.MultiGenericPropertyState;
+import org.apache.jackrabbit.oak.plugins.memory.PropertyBuilder;
+import org.apache.jackrabbit.oak.plugins.tree.AbstractTree;
+import org.apache.jackrabbit.oak.plugins.tree.TreeConstants;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
-import org.apache.jackrabbit.oak.spi.state.NodeState;
-import org.apache.jackrabbit.oak.spi.state.PropertyBuilder;
 
-public class MutableTree extends AbstractTree {
+class MutableTree extends AbstractTree {
 
     /**
      * Underlying {@code Root} of this {@code Tree} instance
@@ -82,52 +78,8 @@ public class MutableTree extends AbstractTree {
     //-----------------------------------------------------< AbstractTree >---
 
     @Override
-    protected MutableTree createChild(String name) {
+    protected MutableTree createChild(String name) throws IllegalArgumentException {
         return new MutableTree(root, this, name, pendingMoves);
-    }
-
-    @Override
-    protected boolean isNew() {
-        return !getBase().exists();
-    }
-
-    @Override
-    protected boolean isModified() {
-        NodeState base = getBase();
-
-        // child node removed?
-        for (String name : base.getChildNodeNames()) {
-            if (!nodeBuilder.hasChildNode(name)) {
-                return true;
-            }
-        }
-
-        // child node added?
-        for (String name : nodeBuilder.getChildNodeNames()) {
-            if (!base.hasChildNode(name)) {
-                return true;
-            }
-        }
-
-        // property removed?
-        for (PropertyState p : base.getProperties()) {
-            if (!nodeBuilder.hasProperty(p.getName())) {
-                return true;
-            }
-        }
-
-        // property added or modified?
-        for (PropertyState p : nodeBuilder.getProperties()) {
-            PropertyState q = base.getProperty(p.getName());
-            if (q == null) {
-                return true;
-            }
-            if (!p.equals(q)) {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     //------------------------------------------------------------< Tree >---
@@ -153,7 +105,7 @@ public class MutableTree extends AbstractTree {
     @Override
     public boolean exists() {
         beforeRead();
-        return isVisible();
+        return super.exists();
     }
 
     @Override
@@ -184,30 +136,7 @@ public class MutableTree extends AbstractTree {
     @Override
     public Status getPropertyStatus(String name) {
         beforeRead();
-
-        // make sure we don't expose information about a non-accessible property
-        if (!hasProperty(name)) {
-            return null;
-        }
-
-        // get status of this tree without checking for it's existence
-        Status nodeStatus = super.getStatus();
-        if (nodeStatus == NEW) {
-            return (super.hasProperty(name)) ? NEW : null;
-        }
-        PropertyState head = super.getProperty(name);
-        if (head == null) {
-            return null;
-        }
-
-        PropertyState base = getSecureBase().getProperty(name);
-        if (base == null) {
-            return NEW;
-        } else if (head.equals(base)) {
-            return EXISTING;
-        } else {
-            return MODIFIED;
-        }
+        return super.getPropertyStatus(name);
     }
 
     @Override
@@ -219,7 +148,11 @@ public class MutableTree extends AbstractTree {
     @Override
     public Tree getChild(String name) {
         beforeRead();
-        return createChild(name);
+        if (super.hasChild(name)) {
+            return createChild(name);
+        } else {
+            return new HiddenTree(this, name);
+        }
     }
 
     @Override
@@ -246,9 +179,8 @@ public class MutableTree extends AbstractTree {
         if (parent != null && parent.hasChild(name)) {
             nodeBuilder.remove();
             if (parent.hasOrderableChildren()) {
-                // FIXME (OAK-842) child order not updated when parent is not accessible
                 parent.nodeBuilder.setProperty(
-                        MemoryPropertyBuilder.copy(STRING, parent.nodeBuilder.getProperty(OAK_CHILD_ORDER))
+                        PropertyBuilder.copy(NAME, parent.nodeBuilder.getProperty(TreeConstants.OAK_CHILD_ORDER))
                                 .removeValue(name)
                                 .getPropertyState()
                 );
@@ -262,12 +194,13 @@ public class MutableTree extends AbstractTree {
 
     @Override
     public Tree addChild(String name) {
+        checkArgument(!isHidden(name));
         beforeWrite();
         if (!super.hasChild(name)) {
             nodeBuilder.setChildNode(name);
             if (hasOrderableChildren()) {
                 nodeBuilder.setProperty(
-                        MemoryPropertyBuilder.copy(STRING, nodeBuilder.getProperty(OAK_CHILD_ORDER))
+                        PropertyBuilder.copy(NAME, nodeBuilder.getProperty(TreeConstants.OAK_CHILD_ORDER))
                                 .addValue(name)
                                 .getPropertyState());
             }
@@ -282,7 +215,7 @@ public class MutableTree extends AbstractTree {
         if (enable) {
             ensureChildOrderProperty();
         } else {
-            nodeBuilder.removeProperty(OAK_CHILD_ORDER);
+            nodeBuilder.removeProperty(TreeConstants.OAK_CHILD_ORDER);
         }
     }
 
@@ -328,8 +261,8 @@ public class MutableTree extends AbstractTree {
         }
         // concatenate head, this name and tail
         parent.nodeBuilder.setProperty(
-                MultiStringPropertyState.stringProperty(
-                        OAK_CHILD_ORDER, Iterables.concat(head, Collections.singleton(getName()), tail))
+                MultiGenericPropertyState.nameProperty(
+                        TreeConstants.OAK_CHILD_ORDER, Iterables.concat(head, Collections.singleton(getName()), tail))
         );
         root.updated();
         return true;
@@ -337,6 +270,7 @@ public class MutableTree extends AbstractTree {
 
     @Override
     public void setProperty(PropertyState property) {
+        checkArgument(!isHidden(property.getName()));
         beforeWrite();
         nodeBuilder.setProperty(property);
         root.updated();
@@ -344,6 +278,7 @@ public class MutableTree extends AbstractTree {
 
     @Override
     public <T> void setProperty(String name, T value) {
+        checkArgument(!isHidden(name));
         beforeWrite();
         nodeBuilder.setProperty(name, value);
         root.updated();
@@ -351,6 +286,7 @@ public class MutableTree extends AbstractTree {
 
     @Override
     public <T> void setProperty(String name, T value, Type<T> type) {
+        checkArgument(!isHidden(name));
         beforeWrite();
         nodeBuilder.setProperty(name, value, type);
         root.updated();
@@ -363,23 +299,7 @@ public class MutableTree extends AbstractTree {
         root.updated();
     }
 
-    //-----------------------------------------------------------< Object >---
-
-    @Override
-    public String toString() {
-        return getPathInternal() + ": " + getNodeState();
-    }
-
     //---------------------------------------------------------< internal >---
-
-    private NodeState getBase() {
-        if (parent == null) {
-            return root.getBaseState();
-        } else {
-            return parent.getBase().getChildNode(name);
-        }
-    }
-
     /**
      * Set the parent and name of this tree.
      * @param parent  parent of this tree
@@ -403,16 +323,6 @@ public class MutableTree extends AbstractTree {
     }
 
     /**
-     * Copy this tree to the parent at {@code destParent} with the new name
-     * {@code newName}.
-     * @param newParent new parent for this tree
-     * @param newName   new name for this tree
-     */
-    boolean copyTo(MutableTree newParent, String newName) {
-        return nodeBuilder.copyTo(newParent.nodeBuilder, newName);
-    }
-
-    /**
      * Get a possibly non existing tree.
      * @param path the path to the tree
      * @return a {@link Tree} instance for the child at {@code path}.
@@ -430,7 +340,7 @@ public class MutableTree extends AbstractTree {
 
     /**
      * Update the child order with children that have been removed or added.
-     * Added children are appended to the end of the {@link #OAK_CHILD_ORDER}
+     * Added children are appended to the end of the {@link org.apache.jackrabbit.oak.plugins.tree.TreeConstants#OAK_CHILD_ORDER}
      * property.
      */
     void updateChildOrder() {
@@ -446,8 +356,7 @@ public class MutableTree extends AbstractTree {
         for (String name : nodeBuilder.getChildNodeNames()) {
             names.add(name);
         }
-        PropertyBuilder<String> builder = MemoryPropertyBuilder.array(
-                STRING, OAK_CHILD_ORDER);
+        PropertyBuilder<String> builder = PropertyBuilder.array(NAME, TreeConstants.OAK_CHILD_ORDER);
         builder.setValues(names);
         nodeBuilder.setProperty(builder.getPropertyState());
     }
@@ -462,7 +371,8 @@ public class MutableTree extends AbstractTree {
         }
     }
 
-    private void buildPath(StringBuilder sb) {
+    @Override
+    protected void buildPath(StringBuilder sb) {
         if (parent != null) {
             parent.buildPath(sb);
             sb.append('/').append(name);
@@ -507,31 +417,8 @@ public class MutableTree extends AbstractTree {
      */
     private void beforeWrite() throws IllegalStateException {
         beforeRead();
-        if (!isVisible()) {
+        if (!super.exists()) {
             throw new IllegalStateException("This tree does not exist");
-        }
-    }
-
-    /**
-     * Internal method for checking whether this node exists and is visible
-     * (i.e. not hidden).
-     *
-     * @return {@true} if the node is visible, {@code false} if not
-     */
-    private boolean isVisible() {
-        return !isHidden(name) && nodeBuilder.exists();
-    }
-
-    /**
-     * The (possibly non-existent) node state this tree is based on.
-     * @return the base node state of this tree
-     */
-    @Nonnull
-    private NodeState getSecureBase() {
-        if (parent == null) {
-            return root.getSecureBase();
-        } else {
-            return parent.getSecureBase().getChildNode(name);
         }
     }
 
@@ -549,14 +436,14 @@ public class MutableTree extends AbstractTree {
     }
 
     /**
-     * Ensures that the {@link #OAK_CHILD_ORDER} exists. This method will create
+     * Ensures that the {@link org.apache.jackrabbit.oak.plugins.tree.TreeConstants#OAK_CHILD_ORDER} exists. This method will create
      * the property if it doesn't exist and initialize the value with the names
      * of the children as returned by {@link NodeBuilder#getChildNodeNames()}.
      */
     private void ensureChildOrderProperty() {
-        if (!nodeBuilder.hasProperty(OAK_CHILD_ORDER)) {
+        if (!nodeBuilder.hasProperty(TreeConstants.OAK_CHILD_ORDER)) {
             nodeBuilder.setProperty(
-                    MultiStringPropertyState.stringProperty(OAK_CHILD_ORDER, nodeBuilder.getChildNodeNames()));
+                    MultiGenericPropertyState.nameProperty(TreeConstants.OAK_CHILD_ORDER, nodeBuilder.getChildNodeNames()));
         }
     }
 

@@ -16,72 +16,58 @@
  */
 package org.apache.jackrabbit.oak.plugins.segment;
 
+import static com.google.common.base.Preconditions.checkState;
+
+import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
 import java.util.Dictionary;
 
-import javax.annotation.CheckForNull;
-import javax.annotation.Nonnull;
-
-import com.mongodb.Mongo;
 import org.apache.felix.scr.annotations.Activate;
 import org.apache.felix.scr.annotations.Component;
 import org.apache.felix.scr.annotations.ConfigurationPolicy;
 import org.apache.felix.scr.annotations.Deactivate;
 import org.apache.felix.scr.annotations.Property;
 import org.apache.felix.scr.annotations.Service;
-import org.apache.jackrabbit.oak.api.Blob;
-import org.apache.jackrabbit.oak.api.CommitFailedException;
+import org.apache.jackrabbit.oak.osgi.ObserverTracker;
 import org.apache.jackrabbit.oak.plugins.segment.file.FileStore;
-import org.apache.jackrabbit.oak.plugins.segment.mongo.MongoStore;
-import org.apache.jackrabbit.oak.spi.commit.CommitHook;
-import org.apache.jackrabbit.oak.spi.commit.PostCommitHook;
-import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
-import org.apache.jackrabbit.oak.spi.state.NodeState;
+import org.apache.jackrabbit.oak.spi.commit.Observable;
+import org.apache.jackrabbit.oak.spi.commit.Observer;
 import org.apache.jackrabbit.oak.spi.state.NodeStore;
+import org.apache.jackrabbit.oak.spi.state.ProxyNodeStore;
 import org.osgi.service.component.ComponentContext;
 
 @Component(policy = ConfigurationPolicy.REQUIRE)
 @Service(NodeStore.class)
-public class SegmentNodeStoreService implements NodeStore {
+public class SegmentNodeStoreService extends ProxyNodeStore
+        implements Observable {
 
     @Property(description="The unique name of this instance")
     public static final String NAME = "name";
 
-    @Property(description="TarMK directory (if unset, use MongoDB)")
+    @Property(description="TarMK directory")
     public static final String DIRECTORY = "repository.home";
 
     @Property(description="TarMK mode (64 for memory mapping, 32 for normal file access)")
     public static final String MODE = "tarmk.mode";
 
-    @Property(description="TarMK maximum file size")
+    @Property(description="TarMK maximum file size (MB)", intValue=256)
     public static final String SIZE = "tarmk.size";
 
-    @Property(description="MongoDB host")
-    public static final String HOST = "host";
-
-    @Property(description="MongoDB host", intValue=27017)
-    public static final String PORT = "port";
-
-    @Property(description="MongoDB database", value="Oak")
-    public static final String DB = "db";
-
-    @Property(description="Cache size (MB)", intValue=200)
+    @Property(description="Cache size (MB)", intValue=256)
     public static final String CACHE = "cache";
-
-    private static final int MB = 1024 * 1024;
 
     private String name;
 
-    private Mongo mongo;
-
     private SegmentStore store;
 
-    private NodeStore delegate;
+    private SegmentNodeStore delegate;
 
-    private synchronized NodeStore getDelegate() {
-        assert delegate != null : "service must be activated when used";
+    private ObserverTracker observerTracker;
+
+    @Override
+    protected synchronized SegmentNodeStore getNodeStore() {
+        checkState(delegate != null, "service must be activated when used");
         return delegate;
     }
 
@@ -91,38 +77,29 @@ public class SegmentNodeStoreService implements NodeStore {
         Dictionary<?, ?> properties = context.getProperties();
         name = "" + properties.get(NAME);
 
-        String host = lookup(context, HOST);
-        if (host == null) {
-            String directory = lookup(context, DIRECTORY);
-            if (directory == null) {
-                directory = "tarmk";
-            }
-
-            String mode = lookup(context, MODE);
-            if (mode == null) {
-                mode = System.getProperty(MODE,
-                        System.getProperty("sun.arch.data.model", "32"));
-            }
-
-            String size = lookup(context, SIZE);
-            if (size == null) {
-                size = System.getProperty(SIZE, "268435456"); // 256MB
-            }
-
-            mongo = null;
-            store = new FileStore(
-                    new File(directory),
-                    Integer.parseInt(size), "64".equals(mode));
-        } else {
-            int port = Integer.parseInt(String.valueOf(properties.get(PORT)));
-            String db = String.valueOf(properties.get(DB));
-            int cache = Integer.parseInt(String.valueOf(properties.get(CACHE)));
-
-            mongo = new Mongo(host, port);
-            store = new MongoStore(mongo.getDB(db), cache * MB);
+        String directory = lookup(context, DIRECTORY);
+        if (directory == null) {
+            directory = "tarmk";
         }
 
+        String mode = lookup(context, MODE);
+        if (mode == null) {
+            mode = System.getProperty(MODE,
+                    System.getProperty("sun.arch.data.model", "32"));
+        }
+
+        String size = lookup(context, SIZE);
+        if (size == null) {
+            size = System.getProperty(SIZE, "256");
+        }
+
+        store = new FileStore(
+                new File(directory),
+                Integer.parseInt(size), "64".equals(mode));
+
         delegate = new SegmentNodeStore(store);
+        observerTracker = new ObserverTracker(delegate);
+        observerTracker.start(context.getBundleContext());
     }
 
     private static String lookup(ComponentContext context, String property) {
@@ -137,58 +114,25 @@ public class SegmentNodeStoreService implements NodeStore {
 
     @Deactivate
     public synchronized void deactivate() {
+        observerTracker.stop();
         delegate = null;
 
         store.close();
-        if (mongo != null) {
-            mongo.close();
-        }
+        store = null;
     }
 
-    //---------------------------------------------------------< NodeStore >--
-
-    @Override @Nonnull
-    public NodeState getRoot() {
-        return getDelegate().getRoot();
-    }
-
-    @Nonnull
-    @Override
-    public NodeState merge(@Nonnull NodeBuilder builder, @Nonnull CommitHook commitHook,
-            PostCommitHook committed) throws CommitFailedException {
-        return getDelegate().merge(builder, commitHook, committed);
-    }
+    //------------------------------------------------------------< Observable >---
 
     @Override
-    public NodeState rebase(@Nonnull NodeBuilder builder) {
-        return getDelegate().rebase(builder);
-    }
-
-    @Override
-    public NodeState reset(@Nonnull NodeBuilder builder) {
-        return getDelegate().reset(builder);
-    }
-
-    @Override
-    public Blob createBlob(InputStream stream) throws IOException {
-        return getDelegate().createBlob(stream);
-    }
-
-    @Override @Nonnull
-    public String checkpoint(long lifetime) {
-        return getDelegate().checkpoint(lifetime);
-    }
-
-    @Override @CheckForNull
-    public NodeState retrieve(@Nonnull String checkpoint) {
-        return getDelegate().retrieve(checkpoint);
+    public Closeable addObserver(Observer observer) {
+        return getNodeStore().addObserver(observer);
     }
 
     //------------------------------------------------------------< Object >--
 
     @Override
-    public synchronized String toString() {
-        return name + ": " + super.toString();
+    public String toString() {
+        return name + ": " + delegate;
     }
 
 }

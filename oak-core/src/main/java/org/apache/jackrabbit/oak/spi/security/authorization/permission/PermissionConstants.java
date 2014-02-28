@@ -37,13 +37,14 @@ public interface PermissionConstants {
     String PERMISSIONS_STORE_PATH = '/' + JcrConstants.JCR_SYSTEM + '/' + REP_PERMISSION_STORE;
 
     String REP_ACCESS_CONTROLLED_PATH = "rep:accessControlledPath";
+    String REP_NUM_PERMISSIONS = "rep:numPermissions";
+    String REP_MOD_COUNT = "rep:modCount";
 	String REP_IS_ALLOW = "rep:isAllow";
     String REP_PRIVILEGE_BITS = "rep:privileges";
-    String REP_INDEX = "rep:index";
 
     Set<String> PERMISSION_NODETYPE_NAMES = ImmutableSet.of(NT_REP_PERMISSIONS, NT_REP_PERMISSION_STORE);
     Set<String> PERMISSION_NODE_NAMES = ImmutableSet.of(REP_PERMISSION_STORE);
-    Set<String> PERMISSION_PROPERTY_NAMES = ImmutableSet.of(REP_ACCESS_CONTROLLED_PATH, REP_PRIVILEGE_BITS, REP_INDEX);
+    Set<String> PERMISSION_PROPERTY_NAMES = ImmutableSet.of(REP_ACCESS_CONTROLLED_PATH, REP_PRIVILEGE_BITS);
 
     /**
      * Configuration parameter to enforce backwards compatible permission
@@ -107,9 +108,9 @@ public interface PermissionConstants {
      *
      * @since OAK 1.0
      */
-    String[] DEFAULT_READ_PATHS = new String[] {
+    Set<String> DEFAULT_READ_PATHS = ImmutableSet.of(
             NamespaceConstants.NAMESPACES_PATH,
             NodeTypeConstants.NODE_TYPES_PATH,
             PrivilegeConstants.PRIVILEGES_PATH
-    };
+    );
 }

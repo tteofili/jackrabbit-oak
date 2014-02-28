@@ -21,17 +21,20 @@ package org.apache.jackrabbit.oak.core;
 import static com.google.common.base.Preconditions.checkArgument;
 import static org.apache.jackrabbit.oak.commons.PathUtils.elements;
 
+import java.io.InputStream;
+import java.util.Map;
+
 import javax.annotation.Nonnull;
 
-import org.apache.jackrabbit.oak.api.BlobFactory;
+import org.apache.jackrabbit.oak.api.Blob;
 import org.apache.jackrabbit.oak.api.ContentSession;
 import org.apache.jackrabbit.oak.api.QueryEngine;
 import org.apache.jackrabbit.oak.api.Root;
-import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.plugins.index.property.PropertyIndexProvider;
+import org.apache.jackrabbit.oak.plugins.tree.ImmutableTree;
+import org.apache.jackrabbit.oak.query.ExecutionContext;
 import org.apache.jackrabbit.oak.query.QueryEngineImpl;
-import org.apache.jackrabbit.oak.spi.commit.CommitHook;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 
 /**
@@ -48,8 +51,14 @@ public final class ImmutableRoot implements Root {
         this(new ImmutableTree(rootState));
     }
 
-    public ImmutableRoot(@Nonnull Root root, @Nonnull TreeTypeProvider typeProvider) {
-        this(ImmutableTree.createFromRoot(root, typeProvider));
+    public ImmutableRoot(@Nonnull Root root) {
+        if (root instanceof AbstractRoot) {
+            rootTree = new ImmutableTree(((AbstractRoot) root).getBaseState());
+        } else if (root instanceof ImmutableRoot) {
+            rootTree = ((ImmutableRoot) root).getTree("/");
+        } else {
+            throw new IllegalArgumentException("Unsupported Root implementation: " + root.getClass());
+        }
     }
 
     public ImmutableRoot(@Nonnull ImmutableTree rootTree) {
@@ -58,7 +67,6 @@ public final class ImmutableRoot implements Root {
     }
 
     //---------------------------------------------------------------< Root >---
-
 
     @Nonnull
     @Override
@@ -77,11 +85,6 @@ public final class ImmutableRoot implements Root {
     }
 
     @Override
-    public boolean copy(String sourcePath, String destPath) {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
     public void rebase() {
         throw new UnsupportedOperationException();
     }
@@ -92,7 +95,17 @@ public final class ImmutableRoot implements Root {
     }
 
     @Override
-    public void commit(CommitHook... hooks) {
+    public void commit(Map<String, Object> info) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void commit(String path) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void commit() {
         throw new UnsupportedOperationException();
     }
 
@@ -104,23 +117,24 @@ public final class ImmutableRoot implements Root {
     @Nonnull
     @Override
     public QueryEngine getQueryEngine() {
-        return new QueryEngineImpl(new PropertyIndexProvider()) {
+        return new QueryEngineImpl() {
             @Override
-            protected NodeState getRootState() {
-                return rootTree.state;
-            }
-
-            @Override
-            protected Tree getRootTree() {
-                return rootTree;
+            protected ExecutionContext getExecutionContext() {
+                return new ExecutionContext(
+                        rootTree.getNodeState(), ImmutableRoot.this,
+                        new PropertyIndexProvider());
             }
         };
     }
 
-    @Nonnull
-    @Override
-    public BlobFactory getBlobFactory() {
+    @Override @Nonnull
+    public Blob createBlob(@Nonnull InputStream stream) {
         throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public Blob getBlob(@Nonnull String reference) {
+        return null;
     }
 
     @Nonnull

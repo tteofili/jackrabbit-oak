@@ -21,43 +21,31 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import org.apache.jackrabbit.oak.api.PropertyState;
-import org.apache.jackrabbit.oak.api.Tree;
-import org.apache.jackrabbit.oak.core.ImmutableTree;
-import org.apache.jackrabbit.oak.spi.security.authorization.permission.ReadStatus;
-import org.apache.jackrabbit.oak.spi.security.privilege.PrivilegeBitsProvider;
+import org.apache.jackrabbit.oak.core.ImmutableRoot;
+import org.apache.jackrabbit.oak.plugins.tree.ImmutableTree;
+import org.apache.jackrabbit.oak.spi.security.authorization.permission.RepositoryPermission;
+import org.apache.jackrabbit.oak.spi.security.authorization.permission.TreePermission;
 
 /**
  * CompiledPermissions... TODO
  */
 public interface CompiledPermissions {
 
-    void refresh(@Nonnull ImmutableTree permissionsTree,
-                 @Nonnull PrivilegeBitsProvider bitsProvider);
+    void refresh(@Nonnull ImmutableRoot root, @Nonnull String workspaceName);
+
+    RepositoryPermission getRepositoryPermission();
+
+    TreePermission getTreePermission(@Nonnull ImmutableTree tree, @Nonnull TreePermission parentPermission);
 
     /**
      *
-     * @param tree
-     * @param property
-     * @return
-     */
-    @Nonnull
-    ReadStatus getReadStatus(@Nonnull Tree tree, @Nullable PropertyState property);
-
-    /**
-     *
-     * @param permissions
-     * @return
-     */
-    boolean isGranted(long permissions);
-
-    /**
      *
      * @param parent
      * @param property
      * @param permissions
      * @return
      */
-    boolean isGranted(@Nonnull Tree parent, @Nullable PropertyState property, long permissions);
+    boolean isGranted(@Nonnull ImmutableTree parent, @Nullable PropertyState property, long permissions);
 
     /**
      *
@@ -69,17 +57,19 @@ public interface CompiledPermissions {
 
     /**
      *
+     *
      * @param tree
      * @return
      */
     @Nonnull
-    Set<String> getPrivileges(@Nullable Tree tree);
+    Set<String> getPrivileges(@Nullable ImmutableTree tree);
 
     /**
+     *
      *
      * @param tree
      * @param privilegeNames
      * @return
      */
-    boolean hasPrivileges(@Nullable Tree tree, String... privilegeNames);
+    boolean hasPrivileges(@Nullable ImmutableTree tree, @Nonnull String... privilegeNames);
 }

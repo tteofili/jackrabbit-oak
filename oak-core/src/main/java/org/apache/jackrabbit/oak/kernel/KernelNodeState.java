@@ -42,16 +42,19 @@ import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
+
 import org.apache.jackrabbit.mk.api.MicroKernel;
 import org.apache.jackrabbit.mk.api.MicroKernelException;
-import org.apache.jackrabbit.mk.json.JsopReader;
-import org.apache.jackrabbit.mk.json.JsopTokenizer;
+import org.apache.jackrabbit.oak.commons.json.JsopReader;
+import org.apache.jackrabbit.oak.commons.json.JsopTokenizer;
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.plugins.memory.BinaryPropertyState;
 import org.apache.jackrabbit.oak.plugins.memory.BooleanPropertyState;
+import org.apache.jackrabbit.oak.plugins.memory.DoublePropertyState;
 import org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState;
+import org.apache.jackrabbit.oak.plugins.memory.LongPropertyState;
 import org.apache.jackrabbit.oak.plugins.memory.MemoryNodeBuilder;
 import org.apache.jackrabbit.oak.plugins.memory.PropertyStates;
 import org.apache.jackrabbit.oak.plugins.memory.StringPropertyState;
@@ -72,7 +75,7 @@ public final class KernelNodeState extends AbstractNodeState {
     /**
      * Maximum number of child nodes kept in memory.
      */
-    static final int MAX_CHILD_NODE_NAMES = 100;
+    public static final int MAX_CHILD_NAMES = 100;
 
     /**
      * Number of child nodes beyond which {@link MicroKernel#diff(String, String, String, int)}
@@ -163,9 +166,10 @@ public final class KernelNodeState extends AbstractNodeState {
         synchronized (this) {
             if (properties == null) {
                 String json = kernel.getNodes(
-                        path, revision, 0, 0, MAX_CHILD_NODE_NAMES,
+                        path, revision, 0, 0, MAX_CHILD_NAMES,
                         "{\"properties\":[\"*\",\":hash\",\":id\"]}");
 
+                checkNotNull(json,"No node found at path [%s] for revision [%s]",path,revision);
                 JsopReader reader = new JsopTokenizer(json);
                 reader.read('{');
                 properties = new LinkedHashMap<String, PropertyState>();
@@ -300,38 +304,41 @@ public final class KernelNodeState extends AbstractNodeState {
 
     @Override
     public boolean hasChildNode(String name) {
-        checkNotNull(name);
         init();
-        return childNames.contains(name)
-                || (getChildNodeCount(MAX_CHILD_NODE_NAMES) > MAX_CHILD_NODE_NAMES
-                        && getChildNode(name).exists());
+        if (childNames.contains(name)) {
+            return true; // the named child node exits for sure
+        } else if (getChildNodeCount(MAX_CHILD_NAMES) <= MAX_CHILD_NAMES) {
+            return false; // all child node names are cached, and none match
+        } else {
+            return isValidName(name) && getChildNode(name).exists();
+        }
     }
 
     @Override
     public NodeState getChildNode(String name) {
-        // checkArgument(!checkNotNull(name).isEmpty()); // TODO: check in higher level
         init();
         String childPath = null;
         if (childNames.contains(name)) {
-            childPath = getChildPath(name);
-        }
-        if (childPath == null && getChildNodeCount(MAX_CHILD_NODE_NAMES) > MAX_CHILD_NODE_NAMES) {
-            String path = getChildPath(name);
+            childPath = PathUtils.concat(path, name);
+        } else if (!isValidName(name)) {
+            throw new IllegalArgumentException("Invalid name: " + name);
+        } else if (getChildNodeCount(MAX_CHILD_NAMES) <= MAX_CHILD_NAMES) {
+            return MISSING_NODE;
+        } else {
+            childPath = PathUtils.concat(path, name);
             // OAK-506: Avoid the nodeExists() call when already cached
-            NodeState state = cache.getIfPresent(revision + path);
-            if (state != null) {
-                return state == NULL ? MISSING_NODE : state;                
+            NodeState state = cache.getIfPresent(revision + childPath);
+            if (state == NULL) {
+                return MISSING_NODE;
+            } else if (state != null) {
+                return state;
             }
             // not able to tell from cache if node exists
             // need to ask MicroKernel
-            if (kernel.nodeExists(path, revision)) {
-                childPath = path;
-            } else {
-                cache.put(revision + path, NULL);
+            if (!kernel.nodeExists(childPath, revision)) {
+                cache.put(revision + childPath, NULL);
+                return MISSING_NODE;
             }
-        }
-        if (childPath == null) {
-            return MISSING_NODE;
         }
         try {
             return cache.get(revision + childPath);
@@ -343,7 +350,7 @@ public final class KernelNodeState extends AbstractNodeState {
     @Override
     public Iterable<? extends ChildNodeEntry> getChildNodeEntries() {
         init();
-        if (childNodeCount <= MAX_CHILD_NODE_NAMES && childNodeCount <= childNames.size()) {
+        if (childNodeCount <= MAX_CHILD_NAMES && childNodeCount <= childNames.size()) {
             return iterable(childNames);
         }
         List<Iterable<ChildNodeEntry>> iterables = Lists.newArrayList();
@@ -366,9 +373,9 @@ public final class KernelNodeState extends AbstractNodeState {
 
                     private void fetchEntries() {
                         List<ChildNodeEntry> entries = Lists
-                                .newArrayListWithCapacity(MAX_CHILD_NODE_NAMES);
+                                .newArrayListWithCapacity(MAX_CHILD_NAMES);
                         String json = kernel.getNodes(path, revision, 0,
-                                currentOffset, MAX_CHILD_NODE_NAMES, null);
+                                currentOffset, MAX_CHILD_NAMES, null);
                         JsopReader reader = new JsopTokenizer(json);
                         reader.read('{');
                         do {
@@ -693,14 +700,6 @@ public final class KernelNodeState extends AbstractNodeState {
         return continueComparison;
     }
 
-    private String getChildPath(String name) {
-        if ("/".equals(path)) {
-            return '/' + name;
-        } else {
-            return path + '/' + name;
-        }
-    }
-
     private Iterable<ChildNodeEntry> iterable(
             Iterable<String> names) {
         return Iterables.transform(
@@ -734,7 +733,7 @@ public final class KernelNodeState extends AbstractNodeState {
         @Override
         public NodeState getNodeState() {
             try {
-                return cache.get(revision + getChildPath(name));
+                return cache.get(revision + PathUtils.concat(path, name));
             } catch (ExecutionException e) {
                 throw new MicroKernelException(e);
             }
@@ -751,7 +750,11 @@ public final class KernelNodeState extends AbstractNodeState {
     private PropertyState readProperty(String name, JsopReader reader) {
         if (reader.matches(JsopReader.NUMBER)) {
             String number = reader.getToken();
-            return createProperty(name, number, PropertyType.LONG);
+            try {
+                return new LongPropertyState(name, Long.parseLong(number));
+            } catch (NumberFormatException e) {
+                return new DoublePropertyState(name, Double.parseDouble(number));
+            }
         } else if (reader.matches(JsopReader.TRUE)) {
             return BooleanPropertyState.booleanProperty(name, true);
         } else if (reader.matches(JsopReader.FALSE)) {
@@ -795,8 +798,13 @@ public final class KernelNodeState extends AbstractNodeState {
         while (!reader.matches(']')) {
             if (reader.matches(JsopReader.NUMBER)) {
                 String number = reader.getToken();
-                type = PropertyType.LONG;
-                values.add(Conversions.convert(number).toLong());
+                try {
+                    type = PropertyType.LONG;
+                    values.add(Long.parseLong(number));
+                } catch (NumberFormatException e) {
+                    type = PropertyType.DOUBLE;
+                    values.add(Double.parseDouble(number));
+                }
             } else if (reader.matches(JsopReader.TRUE)) {
                 type = PropertyType.BOOLEAN;
                 values.add(true);
@@ -815,8 +823,6 @@ public final class KernelNodeState extends AbstractNodeState {
                         values.add(Conversions.convert(value).toDouble());
                     } else if (type == PropertyType.DECIMAL) {
                         values.add(Conversions.convert(value).toDecimal());
-                    } else if (type == PropertyType.DATE) {
-                        values.add(Conversions.convert(value).toCalendar().getTimeInMillis());
                     } else {
                         values.add(StringCache.get(value));
                     }

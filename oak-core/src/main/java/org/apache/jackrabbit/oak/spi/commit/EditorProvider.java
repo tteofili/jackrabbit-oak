@@ -28,6 +28,8 @@ import javax.annotation.CheckForNull;
  * a single content diff.
  *
  * @since Oak 0.7
+ * @see <a href="http://jackrabbit.apache.org/oak/docs/nodestate.html#Commit_editors"
+ *         >Commit editors</a>
  */
 public interface EditorProvider {
 
@@ -44,11 +46,13 @@ public interface EditorProvider {
      * @param before  original root state
      * @param after   modified root state
      * @param builder node builder based on the after state
+     * @param info    metadata associated with this commit
      * @return editor for processing the changes, or {@code null}
      * @throws CommitFailedException if processing failed
      */
     @CheckForNull
-    Editor getRootEditor(NodeState before, NodeState after, NodeBuilder builder)
+    Editor getRootEditor(
+        NodeState before, NodeState after, NodeBuilder builder, CommitInfo info)
         throws CommitFailedException;
 
 }

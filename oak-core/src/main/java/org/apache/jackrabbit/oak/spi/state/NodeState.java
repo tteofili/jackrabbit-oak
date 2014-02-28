@@ -27,9 +27,14 @@ import com.google.common.base.Predicate;
 /**
  * A node in a content tree consists of child nodes and properties, each
  * of which evolves through different states during its lifecycle. This
- * interface represents a specific, immutable state of a node. The state
- * consists of an unordered set of name -&gt; item mappings, where
- * each item is either a property or a child node.
+ * interface represents a specific, immutable state of a node.
+ * <p>
+ * The state of a node consists of named properties and child nodes. Names
+ * are non-empty strings that never contain the forward slash character, "/".
+ * Implementations may place additional restrictions on possible name strings.
+ * The properties and child nodes are unordered, and no two properties or
+ * two child nodes may have the same name. An implementation may additionally
+ * restrict a property and a child node from having the same name.
  * <p>
  * Depending on context, a NodeState instance can be interpreted as
  * representing the state of just that node, of the subtree starting at
@@ -142,13 +147,7 @@ public interface NodeState {
     boolean hasProperty(@Nonnull String name);
 
     /**
-     * Returns the named property. The name is an opaque string and
-     * is not parsed or otherwise interpreted by this method.
-     * <p>
-     * The namespace of properties and child nodes is shared, so if
-     * this method returns a non-{@code null} value for a given
-     * name, then {@link #getChildNode(String)} is guaranteed to return
-     * a <em>non-existing</em> {@link NodeState} for the same name.
+     * Returns the named property, or {@code null} if no such property exists.
      *
      * @param name name of the property to return
      * @return named property, or {@code null} if not found
@@ -207,6 +206,24 @@ public interface NodeState {
     String getString(String name);
 
     /**
+     * Returns the string values of the named property. The implementation
+     * is equivalent to the following code, but may be optimized.
+     * <pre>
+     * PropertyState property = state.getProperty(name);
+     * if (property != null && property.getType() == Type.STRINGS) {
+     *     return property.getValue(Type.STRINGS);
+     * } else {
+     *     return Collections.emptyList();
+     * }
+     * </pre>
+     *
+     * @param name property name
+     * @return string values of the named property, or an empty collection
+     */
+    @Nonnull
+    Iterable<String> getStrings(@Nonnull String name);
+
+    /**
      * Returns the name value of the named property. The implementation
      * is equivalent to the following code, but may be optimized.
      * <pre>
@@ -262,7 +279,9 @@ public interface NodeState {
 
     /**
      * Checks whether the named child node exists. The implementation
-     * is equivalent to {@code getChildNode(name).exists()}.
+     * is equivalent to {@code getChildNode(name).exists()}, except that
+     * passing an invalid name as argument will result in a {@code false}
+     * return value instead of an {@link IllegalArgumentException}.
      *
      * @param name name of the child node
      * @return {@code true} if the named child node exists,
@@ -271,21 +290,17 @@ public interface NodeState {
     boolean hasChildNode(@Nonnull String name);
 
     /**
-     * Returns the named, possibly non-existent, child node. The name is an
-     * opaque string and is not parsed or otherwise interpreted by this method.
-     * Use the {@link #exists()} method on the returned child node to
-     * determine whether the node exists or not.
-     * <p>
-     * The namespace of properties and child nodes is shared, so if
-     * this method returns an <em>existing</em> {@link NodeState} for
-     * a given name, then {@link #getProperty(String)} is guaranteed
-     * to return {@code null} for the same name.
+     * Returns the named, possibly non-existent, child node. Use the
+     * {@link #exists()} method on the returned child node to determine
+     * whether the node exists or not.
      *
      * @param name name of the child node to return
      * @return named child node
+     * @throws IllegalArgumentException if the given name string is is empty
+     *                                  or contains a forward slash character
      */
     @Nonnull
-    NodeState getChildNode(@Nonnull String name);
+    NodeState getChildNode(@Nonnull String name) throws IllegalArgumentException;
 
     /**
      * Returns the number of <em>iterable</em> child nodes of this node.
@@ -347,6 +362,9 @@ public interface NodeState {
      *
      * @param base base state
      * @param diff handler of node state differences
+     * @return {@code true} if the full diff was performed, or
+     *         {@code false} if it was aborted as requested by the handler
+     *         (see the {@link NodeStateDiff} contract for more details)
      * @since 0ak 0.4, return value added in 0.7
      */
     boolean compareAgainstBaseState(NodeState base, NodeStateDiff diff);

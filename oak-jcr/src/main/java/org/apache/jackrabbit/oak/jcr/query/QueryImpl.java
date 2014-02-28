@@ -34,9 +34,10 @@ import javax.jcr.version.VersionException;
 
 import org.apache.jackrabbit.JcrConstants;
 import org.apache.jackrabbit.oak.commons.PathUtils;
+import org.apache.jackrabbit.oak.jcr.delegate.NodeDelegate;
 import org.apache.jackrabbit.oak.jcr.session.NodeImpl;
 import org.apache.jackrabbit.oak.jcr.session.SessionContext;
-import org.apache.jackrabbit.oak.jcr.delegate.NodeDelegate;
+import org.apache.jackrabbit.oak.jcr.session.operation.SessionOperation;
 
 /**
  * The implementation of the corresponding JCR interface.
@@ -73,11 +74,18 @@ public class QueryImpl implements Query {
         bindVariableMap.put(varName, value);
     }
 
-    private void parse() throws InvalidQueryException {
+    private void parse() throws InvalidQueryException, RepositoryException {
         if (parsed) {
             return;
         }
-        List<String> names = manager.parse(statement, language);
+        List<String> names = sessionContext.getSessionDelegate().perform(
+                new SessionOperation<List<String>>() {
+                    @Override
+                    public List<String> perform() throws RepositoryException {
+                        return manager.parse(statement, language);
+                    }
+                });
+        
         for (String n : names) {
             bindVariableMap.put(n, null);
         }
@@ -86,7 +94,14 @@ public class QueryImpl implements Query {
 
     @Override
     public QueryResult execute() throws RepositoryException {
-        return manager.executeQuery(statement, language, limit, offset, bindVariableMap);
+        return sessionContext.getSessionDelegate().perform(
+                new SessionOperation<QueryResult>() {
+                    @Override
+                    public QueryResult perform() throws RepositoryException {
+                        return manager.executeQuery(statement, language, limit,
+                                offset, bindVariableMap);
+                    }
+                });
     }
 
     @Override

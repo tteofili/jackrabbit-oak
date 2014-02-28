@@ -21,10 +21,12 @@ import static org.junit.Assert.assertEquals;
 import javax.jcr.NamespaceRegistry;
 
 import org.apache.jackrabbit.oak.NodeStoreFixture;
+import org.apache.jackrabbit.oak.Oak;
 import org.apache.jackrabbit.oak.OakBaseTest;
 import org.apache.jackrabbit.oak.api.ContentSession;
 import org.apache.jackrabbit.oak.api.Root;
-import org.apache.jackrabbit.oak.api.Tree;
+import org.apache.jackrabbit.oak.plugins.nodetype.write.InitialContent;
+import org.apache.jackrabbit.oak.spi.security.OpenSecurityProvider;
 import org.junit.Test;
 
 public class ReadWriteNamespaceRegistryTest extends OakBaseTest {
@@ -33,17 +35,25 @@ public class ReadWriteNamespaceRegistryTest extends OakBaseTest {
         super(fixture);
     }
 
+    @Override
+    protected ContentSession createContentSession() {
+        return new Oak(store).with(new OpenSecurityProvider())
+                .with(new InitialContent())
+                .with(new NamespaceEditorProvider()).createContentSession();
+    }
+
     @Test
     public void testMappings() throws Exception {
         final ContentSession session = createContentSession();
-        NamespaceRegistry r = new ReadWriteNamespaceRegistry() {
-            @Override
-            protected Tree getReadTree() {
-                return session.getLatestRoot().getTree("/");
-            }
+        final Root root = session.getLatestRoot();
+        NamespaceRegistry r = new ReadWriteNamespaceRegistry(root) {
             @Override
             protected Root getWriteRoot() {
                 return session.getLatestRoot();
+            }
+            @Override
+            protected void refresh() {
+                root.refresh();
             }
         };
 

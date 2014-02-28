@@ -31,8 +31,8 @@ import javax.annotation.Nullable;
 import javax.jcr.PropertyType;
 
 import org.apache.jackrabbit.oak.api.PropertyValue;
-import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.commons.PathUtils;
+import org.apache.jackrabbit.oak.query.ast.JoinConditionImpl;
 import org.apache.jackrabbit.oak.query.ast.Operator;
 import org.apache.jackrabbit.oak.query.ast.SelectorImpl;
 import org.apache.jackrabbit.oak.query.fulltext.FullTextExpression;
@@ -65,8 +65,14 @@ public class FilterImpl implements Filter {
      *  The path, or "/" (the root node, meaning no filter) if not set.
      */
     private String path = "/";
-
+    
     private PathRestriction pathRestriction = PathRestriction.NO_RESTRICTION;
+
+    /**
+     * Additional path restrictions whose values are known only at runtime,
+     * for example paths set by other (join-) selectors.
+     */
+    private String pathPlan;
 
     /**
      * The fulltext search conditions, if any.
@@ -87,23 +93,22 @@ public class FilterImpl implements Filter {
      * Set during the prepare phase of a query.
      */
     private boolean preparing;
-    
-    private Tree rootTree;
 
     // TODO support "order by"
     
     public FilterImpl() {
-        this(null, null, null);
+        this(null, null);
     }
 
+    /**
+     * Create a filter.
+     * 
+     * @param selector the selector for the given filter
+     * @param queryStatement the query statement
+     */
     public FilterImpl(SelectorImpl selector, String queryStatement) {
-        this(selector, queryStatement, null);
-    }
-
-    public FilterImpl(SelectorImpl selector, String queryStatement, Tree rootTree) {
         this.selector = selector;
         this.queryStatement = queryStatement;
-        this.rootTree = rootTree;
         this.matchesAllTypes = selector != null ? selector.matchesAllTypes()
                 : false;
     }
@@ -118,7 +123,6 @@ public class FilterImpl implements Filter {
         this.pathRestriction = impl.pathRestriction;
         this.propertyRestrictions.putAll(impl.propertyRestrictions);
         this.queryStatement = impl.queryStatement;
-        this.rootTree = impl.rootTree;
         this.selector = impl.selector;
         this.matchesAllTypes = selector != null ? selector.matchesAllTypes()
                 : false;
@@ -130,6 +134,18 @@ public class FilterImpl implements Filter {
     
     public boolean isPreparing() {
         return preparing;
+    }
+    
+    /**
+     * Whether the given selector is already prepared during the prepare phase
+     * of a join. That means, check whether the passed selector can already
+     * provide data.
+     * 
+     * @param selector the selector to test
+     * @return true if it is already prepared
+     */
+    public boolean isPrepared(SelectorImpl selector) {
+        return selector.isPrepared();
     }
 
     /**
@@ -146,6 +162,20 @@ public class FilterImpl implements Filter {
     public PathRestriction getPathRestriction() {
         return pathRestriction;
     }
+    
+    @Override
+    public String getPathPlan() {
+        StringBuilder buff = new StringBuilder();
+        String p = path;
+        if (PathUtils.denotesRoot(path)) {
+            p = "";
+        }
+        buff.append(p).append(pathRestriction);
+        if (pathPlan != null) {
+            buff.append(" && ").append(pathPlan);
+        }
+        return buff.toString();
+    }
 
     public void setPath(String path) {
         this.path = path;
@@ -157,11 +187,6 @@ public class FilterImpl implements Filter {
 
     public void setDistinct(boolean distinct) {
         this.distinct = distinct;
-    }
-    
-    @Override
-    public Tree getRootTree() {
-        return rootTree;
     }
 
     public void setAlwaysFalse() {
@@ -265,10 +290,18 @@ public class FilterImpl implements Filter {
         PropertyValue oldLast = x.last;
         switch (op) {
         case EQUAL:
-            x.first = maxValue(oldFirst, v);
-            x.firstIncluding = x.first == oldFirst ? x.firstIncluding : true;
-            x.last = minValue(oldLast, v);
-            x.lastIncluding = x.last == oldLast ? x.lastIncluding : true;
+            if (x.first != null && x.last == x.first && x.firstIncluding && x.lastIncluding) {
+                // we keep the old equality condition if there is one;
+                // we can not use setAlwaysFalse, as this would not be correct
+                // for multi-valued properties:
+                // unlike in databases, "x = 1 and x = 2" can match a node
+                // if x is a multi-valued property with value {1, 2}
+            } else {
+                // all other conditions (range conditions) are replaced with this one
+                // (we can not use setAlwaysFalse for the same reason as above)
+                x.first = x.last = v;
+                x.firstIncluding = x.lastIncluding = true;
+            }
             break;
         case NOT_EQUAL:
             if (v != null) {
@@ -276,25 +309,40 @@ public class FilterImpl implements Filter {
             }
             break;
         case GREATER_THAN:
-            x.first = maxValue(oldFirst, v);
-            x.firstIncluding = false;
+            // we don't narrow the range because of multi-valued properties
+            if (x.first == null) {
+                x.first = maxValue(oldFirst, v);
+                x.firstIncluding = false;
+            }
             break;
         case GREATER_OR_EQUAL:
-            x.first = maxValue(oldFirst, v);
-            x.firstIncluding = x.first == oldFirst ? x.firstIncluding : true;
+            // we don't narrow the range because of multi-valued properties
+            if (x.first == null) {
+                x.first = maxValue(oldFirst, v);
+                x.firstIncluding = x.first == oldFirst ? x.firstIncluding : true;
+            }
             break;
         case LESS_THAN:
-            x.last = minValue(oldLast, v);
-            x.lastIncluding = false;
+            // we don't narrow the range because of multi-valued properties
+            if (x.last == null) {
+                x.last = minValue(oldLast, v);
+                x.lastIncluding = false;
+            }
             break;
         case LESS_OR_EQUAL:
-            x.last = minValue(oldLast, v);
-            x.lastIncluding = x.last == oldLast ? x.lastIncluding : true;
+            // we don't narrow the range because of multi-valued properties
+            if (x.last == null) {
+                x.last = minValue(oldLast, v);
+                x.lastIncluding = x.last == oldLast ? x.lastIncluding : true;
+            }
             break;
         case LIKE:
-            // LIKE is handled in the fulltext index
-            x.isLike = true;
-            x.first = v;
+            // we don't narrow the range because of multi-valued properties
+            if (x.first == null) {
+                // LIKE is handled in the fulltext index
+                x.isLike = true;
+                x.first = v;
+            }
             break;
         case IN:
             
@@ -345,7 +393,7 @@ public class FilterImpl implements Filter {
         if (fullTextConstraint != null) {
             buff.append("fullText=").append(fullTextConstraint);
         }
-        buff.append(", path=").append(path).append(pathRestriction);
+        buff.append(", path=").append(getPathPlan());
         if (!propertyRestrictions.isEmpty()) {
             buff.append(", property=[");
             Iterator<Entry<String, PropertyRestriction>> iterator = propertyRestrictions
@@ -368,6 +416,18 @@ public class FilterImpl implements Filter {
             // currently unknown (prepare time)
             addedPath = "/";
         }
+        if (addedPath.startsWith(JoinConditionImpl.SPECIAL_PATH_PREFIX)) {
+            // not a real path, that means we only adapt the plan 
+            // and that's it
+            if (pathPlan == null) {
+                pathPlan = "";
+            } else {
+                pathPlan += " && ";
+            }
+            pathPlan += addedPath + addedPathRestriction;
+            return;
+        }
+        
         // calculating the intersection of path restrictions
         // this is ugly code, but I don't currently see a radically simpler method
         switch (addedPathRestriction) {

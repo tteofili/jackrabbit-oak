@@ -1,4 +1,4 @@
-Release Notes -- Apache Jackrabbit Oak -- Version 0.10
+Release Notes -- Apache Jackrabbit Oak -- Version 0.17.1
 
 Introduction
 ------------
@@ -10,65 +10,74 @@ world-class web sites and  other demanding content applications.
 The Oak effort is a part of the Apache Jackrabbit project.
 Apache Jackrabbit is a project of the Apache Software Foundation.
 
-Jackrabbit Oak 0.10 is to alpha-level software. Use at your own risk.
+Jackrabbit Oak 0.17.1 is to alpha-level software. Use at your own risk.
 
-Changes in Oak 0.10
--------------------
+Changes in Oak 0.17.1
+---------------------
 
-New features
+New Features
 
-  [OAK-1001] SegmentMK: 32bit support for the file backend
+  [OAK-907] Query timeout
+  [OAK-1157] DS implementation for S3-based DSs
+  [OAK-1337] Implement RepositoryStatistics from Jackrabbit API
+  [OAK-1338] Implement QueryStat from Jackrabbit API
+  [OAK-1387] Pass CommitInfo to commit hooks, editors and validators
+  [OAK-1395] Automatically cancel long running queries
+  [OAK-1413] Add scalability tests for large operations
 
 Improvements
 
-  [OAK-444] Authorization for the jcr version store
-  [OAK-658] Unexpected illegal path handling on oak-jcr wrt backwards compatibility
-  [OAK-659] Move purge logic for transient changes below the NodeBuilder interface
-  [OAK-1023] Optimize many child nodes access
-  [OAK-1025] Keep value histories in sorted map
-  [OAK-1027] Avoid turning multivalued properties to String arrays
-  [OAK-1028] Pass Subject directly to the permission validator
-  [OAK-1042] Segment node store caching
-  [OAK-1044] Reduce traffic between MongoMK and MongoDB
-  [OAK-1049] Blobs shouldn't be Comparable
-  [OAK-1050] Remove Blob.sha256()
-  [OAK-1051] SelectorImpl should skip reading node type info if the #matchesAllTypes flag is set
-  [OAK-1057] Configurable DocumentStore logging wrapper
-  [OAK-1059] Property index: faster unique indexes using new storage strategy
-  [OAK-1061] Add option for database name
-  [OAK-1063] MutableTree.enter() simplification
-  [OAK-1071] UnsupportedRepositoryOperationException for UserManager#autoSave
-  [OAK-1072] Remove unnecessary cache invalidation
+  [OAK-668] Make cache size / limits configurable
+  [OAK-917] Container: Issues with Workspace#copy and Root#copy
+  [OAK-918] Copying nodes does not create independant version histories
+  [OAK-919] Proper handling of locks present on copied nodes
+  [OAK-920] Proper permission handling upon Workspace#copy
+  [OAK-931] Importer: review usage of write-root and objects obtained from the sessioncontext
+  [OAK-1331] MicroKernel API: clarify semantics of `read` method
+  [OAK-1347] Remove 'members' property index
+  [OAK-1370] Guard against concurrent read access through the same session
+  [OAK-1372] XPath queries with both path and property restrictions are slow
+  [OAK-1392] SegmentBlob.equals() optimization
+  [OAK-1393] Upgrade Jackrabbit dependency to include JCR-3720 and JCR-3723
+  [OAK-1398] Restore and OPV INITIALIZE/CALCULATE
+  [OAK-1400] Move PropertyBuilder from o.a.j.o.util to o.a.j.o.plugins.memory
+  [OAK-1401] Move AbstractLazyIterator to o.a.j.commons.iterator (jackrabbit/jcr-commons)
+  [OAK-1407] Remove oak-sling module
+  [OAK-1412] Make Whiteboard available to LoginModules via Callback
+  [OAK-1419] Improve concurrent merge handling
+  [OAK-1421] Add support for primary type filter to Solr index
+  [OAK-1428] Change Oak-Mongo fixture to DocumentNodeStore
+  [OAK-1430] Let oak-solr-remote have an optional dependency on solr-core
+  [OAK-1431] Handling of empty or invalid names
+  [OAK-1435] Expose commit policy options in RemoteSolrConfigurationProvider
+  [OAK-1436] RemoteSolrServerProvider servers initialization has to be bound to related properties
+  [OAK-1437] Use default references options for Oak Solr Index(Editor)Providers
+  [OAK-1438] Generalise Root.commit(String) to Root.commit(Map)
+  [OAK-1442] Let oak-lucene export its embedded Lucene dependencies
 
-Bug fixes
+Bugs
 
-  [OAK-680] AbstractRepositoryTest: missing proper permission setup
-  [OAK-926] MongoMK: split documents when they are too large
-  [OAK-950] Remove org.apache.jackrabbit.oak.core from package-export
-  [OAK-1019] OffsetCache doesn't cache anything
-  [OAK-1020] Property value converion ignores reisdual property definition
-  [OAK-1021] Wrong value for Segment#MEDIUM_LIMIT
-  [OAK-1022] Add a custom Oak Lucene analizer
-  [OAK-1024] Full-text search on the traversing index fails if the condition contains a slash
-  [OAK-1026] AccessControlEntry.getPrivileges() behaves diffent than in Oak
-  [OAK-1029] ConflictAnnotatingRebaseDiff reports spurious changeDeletedNode conflicts
-  [OAK-1030] Simplify SessionDelegate#getItem
-  [OAK-1034] OOME running Oak benchmark suite
-  [OAK-1035] Property Index: cost calculation is wrong (zero) when searching for many values
-  [OAK-1038] Inaccurate size estimate for KernelNodeState
-  [OAK-1039] Session#nodExists() true for a transiently moved Node at move Source
-  [OAK-1040] after a non-committed session.move, the session.nodeExists() and getNode() are not symmetric
-  [OAK-1041] Inaccurate size estimate in EmpiricalWeigher
-  [OAK-1043] DocumentStore.find() includes fromKey
-  [OAK-1047] TimingDocumentStoreWrapper throws NPE when result is null
-  [OAK-1053] Deadlock between ChangeProcessor and Session logout
-  [OAK-1054] Folder containing an admin user should not be removed
-  [OAK-1073] PrivilegeManager#getPrivilege throws RepositoryException rather than AccessControlException
-  [OAK-1074] Benchmarks: use different test root nodes each time
-
+  [OAK-842] Incorrect interaction of orderable child nodes with permission evaluation
+  [OAK-1175] Security Concerns wrt Index Definitions
+  [OAK-1335] version history related test failures
+  [OAK-1353] Test org.apache.jackrabbit.mk.ConcurrentWriteIT execute in single thread.
+  [OAK-1389] Query: an index is used even where traversing is faster
+  [OAK-1394] Event generation too slow with DocumentNodeStore
+  [OAK-1405] OR of different constraints broken
+  [OAK-1408] Descriptors: wrong value for OPTION_WORKSPACE_MANAGEMENT_SUPPORTED
+  [OAK-1409] After crash, segment persistence is broken with failures in java.nio classes
+  [OAK-1417] Processing pending observation events does not scale linearly with the number of events
+  [OAK-1420] ConcurrentAddIT fails on buildbot
+  [OAK-1422] Large number of queued EventGenerator.Continuation on big transactions
+  [OAK-1424] Oak API allows to create hidden tree and properties
+  [OAK-1432] Query: use "union" for complex XPath queries that use multiple "or"
+  [OAK-1433] Typo in org.apache.jackrabbit.oak.plugins.value.ValueImpl#getLong
+  [OAK-1440] o.a.j.o.api.Tree.toString hits hidden nodes
+  [OAK-1441] o.a.j.o.api.Tree/Root allows access to hidden nodes
+  [OAK-1445] NodeTypeIndex is missing osgi annotations
 
 In addition to the above-mentioned changes, this release contains
-all the changes included up to the Apache Jackrabbit Oak 0.9 release.
+all the changes included up to the Apache Jackrabbit Oak 0.16 release.
 
 For more detailed information about all the changes in this and other
 Oak releases, please see the Oak issue tracker at

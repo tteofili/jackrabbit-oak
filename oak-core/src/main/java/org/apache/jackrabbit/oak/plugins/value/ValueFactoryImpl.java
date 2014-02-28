@@ -16,6 +16,8 @@
  */
 package org.apache.jackrabbit.oak.plugins.value;
 
+import static com.google.common.base.Preconditions.checkNotNull;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
@@ -23,6 +25,8 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.Calendar;
 import java.util.List;
+
+import javax.annotation.Nonnull;
 import javax.jcr.Binary;
 import javax.jcr.Node;
 import javax.jcr.PropertyType;
@@ -33,10 +37,11 @@ import javax.jcr.ValueFormatException;
 import javax.jcr.nodetype.NodeType;
 
 import com.google.common.collect.Lists;
+import org.apache.jackrabbit.api.ReferenceBinary;
 import org.apache.jackrabbit.oak.api.Blob;
-import org.apache.jackrabbit.oak.api.BlobFactory;
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.PropertyValue;
+import org.apache.jackrabbit.oak.api.Root;
 import org.apache.jackrabbit.oak.namepath.JcrNameParser;
 import org.apache.jackrabbit.oak.namepath.JcrPathParser;
 import org.apache.jackrabbit.oak.namepath.NamePathMapper;
@@ -47,6 +52,7 @@ import org.apache.jackrabbit.oak.plugins.memory.DecimalPropertyState;
 import org.apache.jackrabbit.oak.plugins.memory.DoublePropertyState;
 import org.apache.jackrabbit.oak.plugins.memory.GenericPropertyState;
 import org.apache.jackrabbit.oak.plugins.memory.LongPropertyState;
+import org.apache.jackrabbit.oak.plugins.memory.PropertyStates;
 import org.apache.jackrabbit.oak.plugins.memory.StringPropertyState;
 import org.apache.jackrabbit.oak.spi.query.PropertyValues;
 import org.apache.jackrabbit.util.ISO8601;
@@ -56,19 +62,20 @@ import org.apache.jackrabbit.util.ISO8601;
  */
 public class ValueFactoryImpl implements ValueFactory {
 
-    private final BlobFactory blobFactory;
+    private final Root root;
     private final NamePathMapper namePathMapper;
 
     /**
      * Creates a new instance of {@code ValueFactory}.
      *
-     * @param blobFactory The factory for creation of binary values
+     * @param root the root instance for creating binary values
      * @param namePathMapper The name/path mapping used for converting JCR names/paths to
      * the internal representation.
      */
-    public ValueFactoryImpl(BlobFactory blobFactory, NamePathMapper namePathMapper) {
-        this.blobFactory = blobFactory;
-        this.namePathMapper = namePathMapper;
+    public ValueFactoryImpl(
+            @Nonnull Root root, @Nonnull NamePathMapper namePathMapper) {
+        this.root = checkNotNull(root);
+        this.namePathMapper = checkNotNull(namePathMapper);
     }
 
     /**
@@ -145,9 +152,14 @@ public class ValueFactoryImpl implements ValueFactory {
             if (value instanceof BinaryImpl) {
                 // No need to create the value again if we have it already underlying the binary
                 return ((BinaryImpl) value).getBinaryValue();
-            } else {
-                return createBinaryValue(value.getStream());
+            } else if (value instanceof ReferenceBinary) {
+                String reference = ((ReferenceBinary) value).getReference();
+                Blob blob = root.getBlob(reference);
+                if (blob != null) {
+                    return createBinaryValue(blob);
+                }
             }
+            return createBinaryValue(value.getStream());
         } catch (RepositoryException e) {
             return new ErrorValue(e, PropertyType.BINARY);
         } catch (IOException e) {
@@ -167,7 +179,7 @@ public class ValueFactoryImpl implements ValueFactory {
 
     @Override
     public Value createValue(Calendar value) {
-        return new ValueImpl(LongPropertyState.createDateProperty("", value), namePathMapper);
+        return new ValueImpl(PropertyStates.createProperty("", value), namePathMapper);
     }
 
     @Override
@@ -216,7 +228,7 @@ public class ValueFactoryImpl implements ValueFactory {
                     if (ISO8601.parse(value) == null) {
                         throw new ValueFormatException("Invalid date " + value);
                     }
-                    return new ValueImpl(LongPropertyState.createDateProperty("", value), namePathMapper);
+                    return new ValueImpl(GenericPropertyState.dateProperty("", value), namePathMapper);
                 case PropertyType.BOOLEAN:
                     return createValue(Conversions.convert(value).toBoolean());
                 case PropertyType.NAME:
@@ -271,7 +283,10 @@ public class ValueFactoryImpl implements ValueFactory {
     }
 
     private ValueImpl createBinaryValue(InputStream value) throws IOException {
-        Blob blob = blobFactory.createBlob(value);
+        return createBinaryValue(root.createBlob(value));
+    }
+
+    private ValueImpl createBinaryValue(Blob blob) {
         return new ValueImpl(BinaryPropertyState.binaryProperty("", blob), namePathMapper);
     }
 
