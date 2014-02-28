@@ -21,6 +21,7 @@ import org.apache.felix.scr.annotations.Component;
 import org.apache.felix.scr.annotations.Deactivate;
 import org.apache.felix.scr.annotations.Property;
 import org.apache.felix.scr.annotations.Service;
+import org.apache.jackrabbit.oak.plugins.index.solr.configuration.RemoteSolrServerConfiguration;
 import org.apache.jackrabbit.oak.plugins.index.solr.configuration.SolrServerConfiguration;
 import org.apache.jackrabbit.oak.plugins.index.solr.configuration.SolrServerConfigurationProvider;
 import org.apache.jackrabbit.oak.plugins.index.solr.server.RemoteSolrServerProvider;
@@ -70,6 +71,7 @@ public class RemoteSolrServerConfigurationProvider implements SolrServerConfigur
     private int solrShardsNo;
     private int solrReplicationFactor;
     private String solrConfDir;
+    private RemoteSolrServerConfiguration remoteSolrServerConfiguration;
 
     @Activate
     protected void activate(ComponentContext componentContext) throws Exception {
@@ -79,6 +81,7 @@ public class RemoteSolrServerConfigurationProvider implements SolrServerConfigur
         solrShardsNo = Integer.valueOf(componentContext.getProperties().get(SOLR_SHARDS_NO).toString());
         solrReplicationFactor = Integer.valueOf(componentContext.getProperties().get(SOLR_REPLICATION_FACTOR).toString());
         solrConfDir = String.valueOf(componentContext.getProperties().get(SOLR_CONF_DIR));
+        remoteSolrServerConfiguration = new RemoteSolrServerConfiguration(solrZkHost, solrCollection, solrShardsNo, solrReplicationFactor, solrConfDir, solrHttpUrl);
     }
 
     @Deactivate
@@ -98,6 +101,6 @@ public class RemoteSolrServerConfigurationProvider implements SolrServerConfigur
 
     @Override
     public SolrServerConfiguration<RemoteSolrServerProvider> getSolrServerConfiguration() {
-        return null;
+        return remoteSolrServerConfiguration;
     }
 }

@@ -14,7 +14,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.jackrabbit.oak.plugins.index.solr.osgi.old;
+package org.apache.jackrabbit.oak.plugins.index.solr.osgi;
 
 import java.io.File;
 import org.apache.felix.scr.annotations.Activate;
@@ -27,7 +27,6 @@ import org.apache.jackrabbit.oak.plugins.index.solr.configuration.SolrServerConf
 import org.apache.jackrabbit.oak.plugins.index.solr.configuration.SolrServerConfigurationDefaults;
 import org.apache.jackrabbit.oak.plugins.index.solr.configuration.SolrServerConfigurationProvider;
 import org.apache.jackrabbit.oak.plugins.index.solr.server.EmbeddedSolrServerProvider;
-import org.apache.solr.client.solrj.SolrServer;
 import org.osgi.service.component.ComponentContext;
 
 /**
@@ -52,8 +51,6 @@ public class EmbeddedSolrServerConfigurationProvider implements SolrServerConfig
 
     @Property(value = SolrServerConfigurationDefaults.CONTEXT)
     private static final String SOLR_CONTEXT = "solr.context";
-
-    private static SolrServer solrServer;
 
     private String solrHome;
     private String solrConfigFile;
@@ -89,10 +86,6 @@ public class EmbeddedSolrServerConfigurationProvider implements SolrServerConfig
         solrConfigFile = null;
         solrCoreName = null;
         solrContext = null;
-        if (solrServer != null) {
-            solrServer.shutdown();
-            solrServer = null;
-        }
     }
 
     @Override
