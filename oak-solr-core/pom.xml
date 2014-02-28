@@ -32,6 +32,9 @@
   <description>Oak support for Apache Solr indexing and search</description>
   <packaging>bundle</packaging>
 
+  <properties>
+    <jetty.version>8.1.2.v20120308</jetty.version>
+  </properties>
   <build>
     <plugins>
       <plugin>
@@ -46,16 +49,12 @@
               org.apache.jackrabbit.oak.plugins.index.solr.server,
               org.apache.jackrabbit.oak.plugins.index.solr.util
             </Export-Package>
-              <_exportcontents>
-                  org.apache.solr.*;version=${solr.version},
-              </_exportcontents>
               <Import-Package>
                   org.slf4j.impl;resolution:=optional,
                   com.ibm.icu.*;resolution:=optional,
                   org.apache.log4j.jmx;resolution:=optional,
                   org.apache.log4j.spi;resolution:=optional,
                   org.jboss.netty.*;resolution:=optional,
-                  jline.*;resolution:=optional,
                   org.eclipse.jetty.*;resolution:=optional,
                   javax.servlet.*; version="[2.5.0,4.0.0)",
                   org.tartarus.snowball;resolution:=optional,
@@ -68,19 +67,12 @@
                   org.apache.log4j.*;resolution:=optional,
                   org.apache.zookeeper.server.quorum.flexible.*;resolution:=optional,
                   org.joda.time.*;resolution:=optional,
-                  org.apache.lucene.queries.*;resolution:=optional,
-                  org.apache.lucene.queryparser.*;resolution:=optional,
-                  org.apache.lucene.search.grouping.*;resolution:=optional,
-                  org.apache.lucene.search.highlight.*;resolution:=optional,
-                  org.apache.lucene.search.postingshighlight.*;resolution:=optional,
-                  org.apache.lucene.search.spell.*;resolution:=optional,
-                  org.apache.lucene.search.suggest.*;resolution:=optional,
-                  org.apache.lucene.search.vectorhighlight.*;resolution:=optional,
-                  org.apache.lucene.spatial.*;resolution:=optional,
+                  org.apache.lucene.*;resolution:=optional,
                   *
               </Import-Package>
               <DynamicImport-Package>*</DynamicImport-Package>
-              <Embed-Dependency>solr-solrj,solr-core,org.noggit</Embed-Dependency>
+              <Embed-Dependency>solr-solrj,solr-core,noggit,commons-lang</Embed-Dependency>
+              <Fragment-Host>org.apache.jackrabbit.oak-lucene</Fragment-Host>
           </instructions>
         </configuration>
       </plugin>
@@ -136,8 +128,7 @@
       <dependency>
           <groupId>org.apache.solr</groupId>
           <artifactId>solr-core</artifactId>
-          <version>${solr.version}</version>
-          <scope>runtime</scope>
+          <version>${lucene.version}</version>
           <exclusions>
               <exclusion>
                   <groupId>org.slf4j</groupId>
@@ -148,7 +139,7 @@
       <dependency>
           <groupId>org.apache.solr</groupId>
           <artifactId>solr-solrj</artifactId>
-          <version>${solr.version}</version>
+          <version>${lucene.version}</version>
       </dependency>
       <dependency>
           <groupId>org.noggit</groupId>
@@ -156,65 +147,6 @@
           <version>0.5</version>
           <scope>runtime</scope>
       </dependency>
-
-    <!-- sorlj dependencies needed for OSGi deployments -->
-    <dependency>
-      <groupId>org.apache.zookeeper</groupId>
-      <artifactId>zookeeper</artifactId>
-      <exclusions>
-        <exclusion>
-          <groupId>javax.jms</groupId>
-          <artifactId>jms</artifactId>
-        </exclusion>
-        <exclusion>
-          <groupId>com.sun.jmx</groupId>
-          <artifactId>jmxri</artifactId>
-        </exclusion>
-        <exclusion>
-          <groupId>com.sun.jdmk</groupId>
-          <artifactId>jmxtools</artifactId>
-        </exclusion>
-        <exclusion>
-          <groupId>log4j</groupId>
-          <artifactId>log4j</artifactId>
-        </exclusion>
-      </exclusions>
-      <version>3.3.6</version>
-      <scope>runtime</scope>
-    </dependency>
-    <dependency>
-      <groupId>jline</groupId>
-      <artifactId>jline</artifactId>
-      <version>0.9.1</version>
-      <scope>runtime</scope>
-      <optional>true</optional>
-    </dependency>
-    <dependency>
-      <groupId>org.apache.httpcomponents</groupId>
-      <artifactId>httpclient</artifactId>
-      <version>4.2.6</version>
-      <scope>runtime</scope>
-      <optional>true</optional>
-      <exclusions>
-        <exclusion>
-          <groupId>commons-logging</groupId>
-          <artifactId>commons-logging</artifactId>
-        </exclusion>
-      </exclusions>
-    </dependency>
-    <dependency>
-      <groupId>org.apache.httpcomponents</groupId>
-      <artifactId>httpmime</artifactId>
-      <version>4.2.6</version>
-      <scope>runtime</scope>
-      <optional>true</optional>
-      <exclusions>
-        <exclusion>
-          <groupId>commons-logging</groupId>
-          <artifactId>commons-logging</artifactId>
-        </exclusion>
-      </exclusions>
-    </dependency>
 
     <dependency>
       <groupId>org.apache.felix</groupId>
@@ -225,6 +157,52 @@
           <groupId>biz.aQute.bnd</groupId>
           <artifactId>bndlib</artifactId>
           <scope>provided</scope>
+      </dependency>
+
+      <!-- JETTY -->
+      <!-- OSGi deployment related dependencies -->
+      <!-- internal Jetty -->
+      <dependency>
+          <groupId>org.eclipse.jetty</groupId>
+          <artifactId>jetty-servlet</artifactId>
+          <version>${jetty.version}</version>
+          <scope>runtime</scope>
+      </dependency>
+      <dependency>
+          <groupId>org.eclipse.jetty</groupId>
+          <artifactId>jetty-io</artifactId>
+          <version>${jetty.version}</version>
+          <scope>runtime</scope>
+      </dependency>
+      <dependency>
+          <groupId>org.eclipse.jetty</groupId>
+          <artifactId>jetty-security</artifactId>
+          <version>${jetty.version}</version>
+          <scope>runtime</scope>
+      </dependency>
+      <dependency>
+          <groupId>org.eclipse.jetty</groupId>
+          <artifactId>jetty-http</artifactId>
+          <version>${jetty.version}</version>
+          <scope>runtime</scope>
+      </dependency>
+      <dependency>
+          <groupId>org.eclipse.jetty</groupId>
+          <artifactId>jetty-util</artifactId>
+          <version>${jetty.version}</version>
+          <scope>runtime</scope>
+      </dependency>
+      <dependency>
+          <groupId>org.eclipse.jetty</groupId>
+          <artifactId>jetty-continuation</artifactId>
+          <version>${jetty.version}</version>
+          <scope>runtime</scope>
+      </dependency>
+      <dependency>
+          <groupId>org.eclipse.jetty</groupId>
+          <artifactId>jetty-server</artifactId>
+          <version>${jetty.version}</version>
+          <scope>runtime</scope>
       </dependency>
 
     <dependency>
@@ -276,13 +254,13 @@
     <dependency>
       <groupId>org.apache.lucene</groupId>
       <artifactId>lucene-test-framework</artifactId>
-      <version>${solr.version}</version>
+      <version>${lucene.version}</version>
       <scope>test</scope>
     </dependency>
     <dependency>
       <groupId>org.apache.lucene</groupId>
       <artifactId>lucene-core</artifactId>
-      <version>${solr.version}</version>
+      <version>${lucene.version}</version>
       <scope>test</scope>
     </dependency>
 

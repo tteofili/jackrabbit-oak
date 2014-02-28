@@ -70,9 +70,9 @@ public class DefaultAnalyzersConfigurationTest extends BaseTokenStreamTestCase {
             @Override
             protected TokenStreamComponents createComponents(String fieldName, Reader reader) {
                 Tokenizer source = new KeywordTokenizer(reader);
-                TokenStream filter = new ReverseStringFilter(Version.LUCENE_41, source);
+                TokenStream filter = new ReverseStringFilter(Version.LUCENE_47, source);
                 filter = new PatternReplaceFilter(filter, Pattern.compile("[^\\/]+\\/"), "", false);
-                filter = new ReverseStringFilter(Version.LUCENE_41, filter);
+                filter = new ReverseStringFilter(Version.LUCENE_47, filter);
                 return new TokenStreamComponents(source, filter);
             }
         };
@@ -81,11 +81,11 @@ public class DefaultAnalyzersConfigurationTest extends BaseTokenStreamTestCase {
             @Override
             protected TokenStreamComponents createComponents(String fieldName, Reader reader) {
                 Tokenizer source = new KeywordTokenizer(reader);
-                TokenStream filter = new ReverseStringFilter(Version.LUCENE_41, source);
-                filter = new LengthFilter(false, filter, 2, Integer.MAX_VALUE);
+                TokenStream filter = new ReverseStringFilter(Version.LUCENE_47, source);
+                filter = new LengthFilter(Version.LUCENE_47, filter, 2, Integer.MAX_VALUE);
                 filter = new PatternReplaceFilter(filter, Pattern.compile("([^\\/]+)(\\/)"), "$2", false);
                 filter = new PatternReplaceFilter(filter, Pattern.compile("(\\/)(.+)"), "$2", false);
-                filter = new ReverseStringFilter(Version.LUCENE_41, filter);
+                filter = new ReverseStringFilter(Version.LUCENE_47, filter);
                 return new TokenStreamComponents(source, filter);
             }
         };

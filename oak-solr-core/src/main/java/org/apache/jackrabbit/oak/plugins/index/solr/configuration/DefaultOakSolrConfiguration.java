@@ -22,7 +22,7 @@ import org.apache.jackrabbit.oak.spi.query.Filter;
 /**
  * An {@link org.apache.jackrabbit.oak.plugins.index.solr.configuration.OakSolrConfiguration} for the embedded Solr server
  */
-public class DefaultSolrConfiguration implements OakSolrConfiguration {
+public class DefaultOakSolrConfiguration implements OakSolrConfiguration {
 
     @Override
     public String getFieldNameFor(Type<?> propertyType) {

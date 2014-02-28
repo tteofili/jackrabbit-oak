@@ -25,7 +25,7 @@ public class DefaultSolrConfigurationProvider implements OakSolrConfigurationPro
     private final OakSolrConfiguration defaultConfiguration;
 
     public DefaultSolrConfigurationProvider() {
-        defaultConfiguration = new DefaultSolrConfiguration();
+        defaultConfiguration = new DefaultOakSolrConfiguration();
     }
 
     public DefaultSolrConfigurationProvider(OakSolrConfiguration configuration) {
