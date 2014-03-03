@@ -27,6 +27,8 @@ import org.apache.jackrabbit.oak.plugins.index.solr.server.SolrServerProvider;
 import org.osgi.framework.BundleContext;
 import org.osgi.framework.ServiceReference;
 import org.osgi.service.component.ComponentContext;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * OSGi service for {@link org.apache.jackrabbit.oak.plugins.index.solr.server.SolrServerProvider}
@@ -35,14 +37,16 @@ import org.osgi.service.component.ComponentContext;
 @Service(SolrServerProviderFactory.class)
 public class SolrServerProviderFactoryService implements SolrServerProviderFactory {
 
+    private final Logger log = LoggerFactory.getLogger(getClass());
+
     @Property(options = {
-            @PropertyOption(name = "EMBEDDED",
+            @PropertyOption(name = "embedded",
                     value = "Embedded Solr"
             ),
-            @PropertyOption(name = "REMOTE",
+            @PropertyOption(name = "remote",
                     value = "Remote Solr"
             )},
-            value = "REMOTE"
+            value = "remote"
     )
     private static final String SERVER_TYPE = "server.type";
 
@@ -60,15 +64,28 @@ public class SolrServerProviderFactoryService implements SolrServerProviderFacto
     @Override
     public SolrServerProvider getSolrServerProvider() {
         if (solrServerProvider == null) {
+            log.info("getting server provider");
             try {
-                ServiceReference[] serviceReferences = bundleContext.getServiceReferences(SolrServerConfigurationProvider.class.getName(), "(name = " + serverType + ")");
-                if (serviceReferences != null && serviceReferences.length == 1) {
-                    SolrServerConfigurationProvider solrServerConfigurationProvider = (SolrServerConfigurationProvider) bundleContext.getService(serviceReferences[0]);
-                    SolrServerConfiguration solrServerConfiguration = solrServerConfigurationProvider.getSolrServerConfiguration();
-                    solrServerProvider = solrServerConfiguration.newInstance();
+                ServiceReference[] serviceReferences = bundleContext.getServiceReferences(SolrServerConfigurationProvider.class.getName(), null);
+                log.info("found references {}", serviceReferences != null ? serviceReferences.length : false);
+                if (serviceReferences != null) {
+                    for (ServiceReference serviceReference : serviceReferences) {
+                        Object name = serviceReference.getProperty("name");
+                        log.info("name : "+name);
+                        if (serverType.equals(name)) {
+                            SolrServerConfigurationProvider solrServerConfigurationProvider = (SolrServerConfigurationProvider) bundleContext.getService(serviceReference);
+                            log.info("conf provider {}", solrServerConfigurationProvider);
+                            SolrServerConfiguration solrServerConfiguration = solrServerConfigurationProvider.getSolrServerConfiguration();
+                            log.info("server conf {}", solrServerConfiguration);
+                            solrServerProvider = solrServerConfiguration.newInstance();
+                            log.info("server provider {}", solrServerProvider);
+                            break;
+                        }
+                    }
                 }
             } catch (Exception e) {
                 // do nothing
+                log.error("error while getting solr server {}", e);
             }
         }
         return solrServerProvider;

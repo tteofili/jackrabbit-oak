@@ -32,7 +32,7 @@ import org.osgi.service.component.ComponentContext;
  */
 @Component(metatype = true, immediate = true, label = "Remote Solr Server configuration")
 @Service(SolrServerConfigurationProvider.class)
-@Property(name = "name", value = "REMOTE", propertyPrivate = true)
+@Property(name = "name", value = "remote", propertyPrivate = true)
 public class RemoteSolrServerConfigurationProvider implements SolrServerConfigurationProvider<RemoteSolrServerProvider> {
 
     private static final String DEFAULT_COLLECTION = "oak";

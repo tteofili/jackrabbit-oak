@@ -49,7 +49,15 @@ public abstract class SolrServerConfiguration<S extends SolrServerProvider> {
             Class<?> rawType = type instanceof Class<?>
                     ? (Class<?>) type
                     : (Class<?>) ((ParameterizedType) type).getRawType();
-            constructor = rawType.getConstructor();
+            Constructor<?>[] constructors = rawType.getConstructors();
+            for (Constructor<?> c: constructors) {
+                if (c.getParameterTypes().length == 1 && c.getParameterTypes()[0].equals(this.getClass())) {
+                    constructor = c;
+                }
+            }
+            if (constructor == null) {
+                throw new InstantiationException("missing constructor SolrServerProvider(SolrServerConfiguration) for type "+ rawType);
+            }
         }
         return (S) constructor.newInstance(this); // TODO : each SolrServerProvider impl. is forced to have a constructor with a SolrServerConfiguration, fix?
     }

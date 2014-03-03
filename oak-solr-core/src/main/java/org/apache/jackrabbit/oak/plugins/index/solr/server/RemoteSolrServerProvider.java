@@ -49,7 +49,7 @@ public class RemoteSolrServerProvider implements SolrServerProvider {
     @Override
     public SolrServer getSolrServer() throws Exception {
 
-        if (solrServer == null && remoteSolrServerConfiguration.getSolrZkHost() != null) {
+        if (solrServer == null && remoteSolrServerConfiguration.getSolrZkHost() != null && remoteSolrServerConfiguration.getSolrZkHost().length() > 0) {
             try {
                 solrServer = initializeWithCloudSolrServer();
             } catch (Exception e) {

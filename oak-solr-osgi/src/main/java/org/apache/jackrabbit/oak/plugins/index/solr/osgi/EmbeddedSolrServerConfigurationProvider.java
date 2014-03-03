@@ -35,7 +35,7 @@ import org.osgi.service.component.ComponentContext;
 @Component(metatype = true, immediate = true,
         label = "Embedded Solr server configuration")
 @Service(value = SolrServerConfigurationProvider.class)
-@Property(name = "name", value = "EMBEDDED", propertyPrivate = true)
+@Property(name = "name", value = "embedded", propertyPrivate = true)
 public class EmbeddedSolrServerConfigurationProvider implements SolrServerConfigurationProvider<EmbeddedSolrServerProvider> {
 
     @Property(value = SolrServerConfigurationDefaults.SOLR_HOME_PATH)

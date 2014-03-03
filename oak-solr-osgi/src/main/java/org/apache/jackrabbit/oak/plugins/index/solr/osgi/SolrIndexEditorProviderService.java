@@ -33,14 +33,14 @@ import org.apache.jackrabbit.oak.spi.state.NodeState;
 
 /**
  * Osgi Service that provides Solr based {@link org.apache.jackrabbit.oak.plugins.index.IndexEditor}s
- * 
+ *
  * @see org.apache.jackrabbit.oak.plugins.index.solr.index.SolrIndexEditorProvider
  * @see org.apache.jackrabbit.oak.plugins.index.IndexEditorProvider
  */
 @Component(metatype = false, immediate = true)
 @Service(value = IndexEditorProvider.class)
 public class SolrIndexEditorProviderService implements IndexEditorProvider {
-    
+
     @Reference
     private SolrServerProviderFactory solrServerProviderFactory;
 
@@ -51,15 +51,19 @@ public class SolrIndexEditorProviderService implements IndexEditorProvider {
 
     @Override
     @CheckForNull
-    public Editor getIndexEditor(@Nonnull String type, @Nonnull NodeBuilder definition, 
-                    @Nonnull NodeState root, @Nonnull IndexUpdateCallback callback) throws CommitFailedException {
-        Editor indexEditor = null;
-        SolrServerProvider solrServerProvider = solrServerProviderFactory.getSolrServerProvider();
-        if (solrServerProvider != null && oakSolrConfigurationProvider != null && solrIndexEditorProvider == null) {
-            solrIndexEditorProvider = new SolrIndexEditorProvider(solrServerProvider, oakSolrConfigurationProvider);
-            indexEditor = solrIndexEditorProvider.getIndexEditor(type, definition, root, callback);
+    public Editor getIndexEditor(@Nonnull String type, @Nonnull NodeBuilder definition,
+                                 @Nonnull NodeState root, @Nonnull IndexUpdateCallback callback) throws CommitFailedException {
+        if (solrIndexEditorProvider != null) {
+            return solrIndexEditorProvider.getIndexEditor(type, definition, root, callback);
+        } else {
+            Editor indexEditor = null;
+            SolrServerProvider solrServerProvider = solrServerProviderFactory.getSolrServerProvider();
+            if (solrServerProvider != null && oakSolrConfigurationProvider != null && solrIndexEditorProvider == null) {
+                solrIndexEditorProvider = new SolrIndexEditorProvider(solrServerProvider, oakSolrConfigurationProvider);
+                indexEditor = solrIndexEditorProvider.getIndexEditor(type, definition, root, callback);
+            }
+            return indexEditor;
         }
-        return indexEditor;
     }
 
 }

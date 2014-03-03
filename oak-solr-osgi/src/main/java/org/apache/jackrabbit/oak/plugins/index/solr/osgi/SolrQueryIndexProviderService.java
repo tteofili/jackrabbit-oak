@@ -31,7 +31,7 @@ import org.apache.jackrabbit.oak.spi.state.NodeState;
 
 /**
  * Osgi Service that provides Solr based {@link org.apache.jackrabbit.oak.spi.query.QueryIndex}es
- * 
+ *
  * @see org.apache.jackrabbit.oak.plugins.index.solr.query.SolrQueryIndexProvider
  * @see QueryIndexProvider
  */
@@ -50,15 +50,21 @@ public class SolrQueryIndexProviderService implements QueryIndexProvider {
     @Override
     @Nonnull
     public List<? extends QueryIndex> getQueryIndexes(NodeState nodeState) {
-        List<? extends QueryIndex> queryIndexes = new ArrayList<QueryIndex>();
-        SolrServerProvider solrServerProvider = solrServerProviderFactory.getSolrServerProvider();
-        if (solrServerProvider != null && oakSolrConfigurationProvider != null
+        if (solrQueryIndexProvider != null) {
+            return solrQueryIndexProvider.getQueryIndexes(nodeState);
+        } else {
+            List<? extends QueryIndex> queryIndexes = new ArrayList<QueryIndex>();
+            if (solrQueryIndexProvider == null) {
+                SolrServerProvider solrServerProvider = solrServerProviderFactory.getSolrServerProvider();
+                if (solrServerProvider != null && oakSolrConfigurationProvider != null
                         && solrQueryIndexProvider == null) {
-            solrQueryIndexProvider = new SolrQueryIndexProvider(solrServerProvider,
+                    solrQueryIndexProvider = new SolrQueryIndexProvider(solrServerProvider,
                             oakSolrConfigurationProvider);
-            queryIndexes = solrQueryIndexProvider.getQueryIndexes(nodeState);
+                    queryIndexes = solrQueryIndexProvider.getQueryIndexes(nodeState);
+                }
+            }
+            return queryIndexes;
         }
-        return queryIndexes;
     }
 
 }
