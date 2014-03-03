@@ -36,6 +36,7 @@ import org.slf4j.LoggerFactory;
  */
 @Component(metatype = true, immediate = true, label = "Remote Solr Server configuration")
 @Service(SolrServerProvider.class)
+@Property(name = "name", value = "REMOTE", propertyPrivate = true)
 public class RemoteSolrServerConfigurationProvider implements SolrServerConfigurationProvider<RemoteSolrServerProvider> {
 
     private final Logger log = LoggerFactory.getLogger(RemoteSolrServerConfigurationProvider.class);
