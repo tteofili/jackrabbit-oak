@@ -24,7 +24,6 @@ import org.apache.felix.scr.annotations.Service;
 import org.apache.jackrabbit.oak.plugins.index.solr.configuration.SolrServerConfiguration;
 import org.apache.jackrabbit.oak.plugins.index.solr.configuration.SolrServerConfigurationProvider;
 import org.apache.jackrabbit.oak.plugins.index.solr.server.SolrServerProvider;
-import org.apache.solr.client.solrj.SolrServer;
 import org.osgi.framework.BundleContext;
 import org.osgi.framework.ServiceReference;
 import org.osgi.service.component.ComponentContext;
@@ -32,9 +31,9 @@ import org.osgi.service.component.ComponentContext;
 /**
  * OSGi service for {@link org.apache.jackrabbit.oak.plugins.index.solr.server.SolrServerProvider}
  */
-@Component(metatype = true, label = "SolrServer provider")
-@Service(SolrServerProvider.class)
-public class SolrServerProviderService implements SolrServerProvider {
+@Component(metatype = true, label = "SolrServer provider", immediate = true)
+@Service(SolrServerProviderFactory.class)
+public class SolrServerProviderFactoryService implements SolrServerProviderFactory {
 
     @Property(options = {
             @PropertyOption(name = "EMBEDDED",
@@ -47,24 +46,31 @@ public class SolrServerProviderService implements SolrServerProvider {
     )
     private static final String SERVER_TYPE = "server.type";
 
+    private BundleContext bundleContext;
+
     private SolrServerProvider solrServerProvider;
+    private String serverType;
 
     @Activate
     protected void activate(ComponentContext context) throws Exception {
-        String serverType = String.valueOf(context.getProperties().get(SERVER_TYPE));
-        BundleContext bundleContext = context.getBundleContext();
-        ServiceReference[] serviceReferences = bundleContext.getServiceReferences(SolrServerConfigurationProvider.class.getName(), "(name = " + serverType + ")");
-        if (serviceReferences.length == 1) {
-            SolrServerConfigurationProvider solrServerConfigurationProvider = (SolrServerConfigurationProvider) bundleContext.getService(serviceReferences[0]);
-            SolrServerConfiguration solrServerConfiguration = solrServerConfigurationProvider.getSolrServerConfiguration();
-            solrServerProvider = solrServerConfiguration.newInstance();
-        } else {
-            throw new RuntimeException("could not find Solr server of type" + serverType);
-        }
+        serverType = String.valueOf(context.getProperties().get(SERVER_TYPE));
+        bundleContext = context.getBundleContext();
     }
 
     @Override
-    public SolrServer getSolrServer() throws Exception {
-        return solrServerProvider.getSolrServer();
+    public SolrServerProvider getSolrServerProvider() {
+        if (solrServerProvider == null) {
+            try {
+                ServiceReference[] serviceReferences = bundleContext.getServiceReferences(SolrServerConfigurationProvider.class.getName(), "(name = " + serverType + ")");
+                if (serviceReferences != null && serviceReferences.length == 1) {
+                    SolrServerConfigurationProvider solrServerConfigurationProvider = (SolrServerConfigurationProvider) bundleContext.getService(serviceReferences[0]);
+                    SolrServerConfiguration solrServerConfiguration = solrServerConfigurationProvider.getSolrServerConfiguration();
+                    solrServerProvider = solrServerConfiguration.newInstance();
+                }
+            } catch (Exception e) {
+                // do nothing
+            }
+        }
+        return solrServerProvider;
     }
 }

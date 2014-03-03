@@ -31,7 +31,7 @@ import org.osgi.service.component.ComponentContext;
 /**
  * OSGi service for {@link org.apache.jackrabbit.oak.plugins.index.solr.configuration.OakSolrConfigurationProvider}
  */
-@Component(label = "Oak Solr Configuration", metatype = true)
+@Component(label = "Oak Solr Configuration", metatype = true, immediate = true)
 @Service(OakSolrConfigurationProvider.class)
 public class OakSolrConfigurationProviderService implements OakSolrConfigurationProvider {
 

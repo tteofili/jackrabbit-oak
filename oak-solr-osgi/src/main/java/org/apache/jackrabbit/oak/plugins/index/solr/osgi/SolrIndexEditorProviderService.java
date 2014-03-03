@@ -42,7 +42,7 @@ import org.apache.jackrabbit.oak.spi.state.NodeState;
 public class SolrIndexEditorProviderService implements IndexEditorProvider {
     
     @Reference
-    private SolrServerProvider solrServerProvider;
+    private SolrServerProviderFactory solrServerProviderFactory;
 
     @Reference
     private OakSolrConfigurationProvider oakSolrConfigurationProvider;
@@ -54,6 +54,7 @@ public class SolrIndexEditorProviderService implements IndexEditorProvider {
     public Editor getIndexEditor(@Nonnull String type, @Nonnull NodeBuilder definition, 
                     @Nonnull NodeState root, @Nonnull IndexUpdateCallback callback) throws CommitFailedException {
         Editor indexEditor = null;
+        SolrServerProvider solrServerProvider = solrServerProviderFactory.getSolrServerProvider();
         if (solrServerProvider != null && oakSolrConfigurationProvider != null && solrIndexEditorProvider == null) {
             solrIndexEditorProvider = new SolrIndexEditorProvider(solrServerProvider, oakSolrConfigurationProvider);
             indexEditor = solrIndexEditorProvider.getIndexEditor(type, definition, root, callback);

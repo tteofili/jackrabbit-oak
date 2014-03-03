@@ -49,31 +49,13 @@
               org.apache.jackrabbit.oak.plugins.index.solr.server,
               org.apache.jackrabbit.oak.plugins.index.solr.util
             </Export-Package>
-              <Import-Package>
-                  org.slf4j.impl;resolution:=optional,
-                  com.ibm.icu.*;resolution:=optional,
-                  org.apache.log4j.jmx;resolution:=optional,
-                  org.apache.log4j.spi;resolution:=optional,
-                  org.jboss.netty.*;resolution:=optional,
-                  org.eclipse.jetty.*;resolution:=optional,
-                  javax.servlet.*; version="[2.5.0,4.0.0)",
-                  org.tartarus.snowball;resolution:=optional,
-                  org.restlet;resolution:=optional,
-                  org.restlet.*;resolution:=optional,
-                  org.apache.hadoop.*;resolution:=optional,
-                  com.carrotsearch.hppc.*;resolution:=optional,
-                  com.googlecode.concurrentlinkedhashmap.*;resolution:=optional,
-                  com.spatial4j.core.*;resolution:=optional,
-                  org.apache.log4j.*;resolution:=optional,
-                  org.apache.zookeeper.server.quorum.flexible.*;resolution:=optional,
-                  org.joda.time.*;resolution:=optional,
-                  org.apache.lucene.*;resolution:=optional,
-                  *
-              </Import-Package>
-              <DynamicImport-Package>*</DynamicImport-Package>
-              <Embed-Dependency>solr-solrj,solr-core,noggit,commons-lang</Embed-Dependency>
-              <Fragment-Host>org.apache.jackrabbit.oak-lucene</Fragment-Host>
-          </instructions>
+            <Import-Package>
+              !*
+            </Import-Package>
+            <DynamicImport-Package>*</DynamicImport-Package>
+            <Embed-Dependency>solr-solrj,solr-core,noggit,commons-lang</Embed-Dependency>
+            <Fragment-Host>org.apache.jackrabbit.oak-lucene</Fragment-Host>
+           </instructions>
         </configuration>
       </plugin>
       <plugin>
@@ -145,6 +127,12 @@
           <groupId>org.noggit</groupId>
           <artifactId>noggit</artifactId>
           <version>0.5</version>
+          <scope>runtime</scope>
+      </dependency>
+      <dependency>
+          <groupId>commons-lang</groupId>
+          <artifactId>commons-lang</artifactId>
+          <version>2.6</version>
           <scope>runtime</scope>
       </dependency>
 

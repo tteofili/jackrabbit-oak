@@ -29,7 +29,7 @@
 
   <artifactId>oak-solr-osgi</artifactId>
   <name>Oak Solr OSGi</name>
-  <description>OSGi support for Oak integration with Apache Solr </description>
+  <description>OSGi support for Oak integration with Apache Solr</description>
   <packaging>bundle</packaging>
 
   <build>
@@ -39,15 +39,8 @@
         <artifactId>maven-bundle-plugin</artifactId>
         <configuration>
           <instructions>
-            <Import-Package>
-              org.apache.jackrabbit.oak.plugins.index.solr.configuration,
-              org.apache.jackrabbit.oak.plugins.index.solr.index,
-              org.apache.jackrabbit.oak.plugins.index.solr.query,
-              org.apache.jackrabbit.oak.plugins.index.solr.server,
-              org.apache.jackrabbit.oak.plugins.index.solr.util
-            </Import-Package>
               <Export-Package>
-                  |*
+                  !*
               </Export-Package>
           </instructions>
         </configuration>
@@ -80,7 +73,6 @@
           <artifactId>org.apache.felix.scr.annotations</artifactId>
           <scope>provided</scope>
       </dependency>
-
 
     <dependency>
       <groupId>org.apache.jackrabbit</groupId>

@@ -40,7 +40,7 @@ import org.apache.jackrabbit.oak.spi.state.NodeState;
 public class SolrQueryIndexProviderService implements QueryIndexProvider {
 
     @Reference
-    private SolrServerProvider solrServerProvider;
+    private SolrServerProviderFactory solrServerProviderFactory;
 
     @Reference
     private OakSolrConfigurationProvider oakSolrConfigurationProvider;
@@ -51,6 +51,7 @@ public class SolrQueryIndexProviderService implements QueryIndexProvider {
     @Nonnull
     public List<? extends QueryIndex> getQueryIndexes(NodeState nodeState) {
         List<? extends QueryIndex> queryIndexes = new ArrayList<QueryIndex>();
+        SolrServerProvider solrServerProvider = solrServerProviderFactory.getSolrServerProvider();
         if (solrServerProvider != null && oakSolrConfigurationProvider != null
                         && solrQueryIndexProvider == null) {
             solrQueryIndexProvider = new SolrQueryIndexProvider(solrServerProvider,

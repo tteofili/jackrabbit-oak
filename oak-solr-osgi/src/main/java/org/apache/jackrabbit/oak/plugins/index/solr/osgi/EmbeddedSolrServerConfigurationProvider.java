@@ -32,7 +32,7 @@ import org.osgi.service.component.ComponentContext;
 /**
  * An OSGi service {@link org.apache.jackrabbit.oak.plugins.index.solr.configuration.SolrServerConfigurationProvider}
  */
-@Component(metatype = true,
+@Component(metatype = true, immediate = true,
         label = "Embedded Solr server configuration")
 @Service(value = SolrServerConfigurationProvider.class)
 @Property(name = "name", value = "EMBEDDED", propertyPrivate = true)

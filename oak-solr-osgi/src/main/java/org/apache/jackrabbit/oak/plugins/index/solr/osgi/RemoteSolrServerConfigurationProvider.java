@@ -25,10 +25,7 @@ import org.apache.jackrabbit.oak.plugins.index.solr.configuration.RemoteSolrServ
 import org.apache.jackrabbit.oak.plugins.index.solr.configuration.SolrServerConfiguration;
 import org.apache.jackrabbit.oak.plugins.index.solr.configuration.SolrServerConfigurationProvider;
 import org.apache.jackrabbit.oak.plugins.index.solr.server.RemoteSolrServerProvider;
-import org.apache.solr.client.solrj.SolrServer;
 import org.osgi.service.component.ComponentContext;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * {@link org.apache.jackrabbit.oak.plugins.index.solr.server.SolrServerProvider} for remote Solr installations.
@@ -37,8 +34,6 @@ import org.slf4j.LoggerFactory;
 @Service(SolrServerConfigurationProvider.class)
 @Property(name = "name", value = "REMOTE", propertyPrivate = true)
 public class RemoteSolrServerConfigurationProvider implements SolrServerConfigurationProvider<RemoteSolrServerProvider> {
-
-    private final Logger log = LoggerFactory.getLogger(RemoteSolrServerConfigurationProvider.class);
 
     private static final String DEFAULT_COLLECTION = "oak";
     private static final String DEFAULT_HTTP_URL = "http://127.0.0.1:8983/solr/oak";
@@ -64,7 +59,6 @@ public class RemoteSolrServerConfigurationProvider implements SolrServerConfigur
     @Property(value = "", label = "Solr configuration directory")
     private static final String SOLR_CONF_DIR = "solr.conf.dir";
 
-    private SolrServer solrServer;
     private String solrHttpUrl;
     private String solrZkHost;
     private String solrCollection;
@@ -92,10 +86,6 @@ public class RemoteSolrServerConfigurationProvider implements SolrServerConfigur
         solrShardsNo = 0;
         solrReplicationFactor = 0;
         solrConfDir = null;
-        if (solrServer != null) {
-            solrServer.shutdown();
-            solrServer = null;
-        }
     }
 
 
