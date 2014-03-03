@@ -47,8 +47,6 @@ public class SolrServerProviderService implements SolrServerProvider {
     )
     private static final String SERVER_TYPE = "server.type";
 
-    private SolrServerConfigurationProvider solrServerConfigurationProvider;
-
     private SolrServerProvider solrServerProvider;
 
     @Activate
@@ -57,7 +55,7 @@ public class SolrServerProviderService implements SolrServerProvider {
         BundleContext bundleContext = context.getBundleContext();
         ServiceReference[] serviceReferences = bundleContext.getServiceReferences(SolrServerConfigurationProvider.class.getName(), "(name = " + serverType + ")");
         if (serviceReferences.length == 1) {
-            solrServerConfigurationProvider = (SolrServerConfigurationProvider) bundleContext.getService(serviceReferences[0]);
+            SolrServerConfigurationProvider solrServerConfigurationProvider = (SolrServerConfigurationProvider) bundleContext.getService(serviceReferences[0]);
             SolrServerConfiguration solrServerConfiguration = solrServerConfigurationProvider.getSolrServerConfiguration();
             solrServerProvider = solrServerConfiguration.newInstance();
         } else {

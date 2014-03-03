@@ -25,7 +25,6 @@ import org.apache.jackrabbit.oak.plugins.index.solr.configuration.RemoteSolrServ
 import org.apache.jackrabbit.oak.plugins.index.solr.configuration.SolrServerConfiguration;
 import org.apache.jackrabbit.oak.plugins.index.solr.configuration.SolrServerConfigurationProvider;
 import org.apache.jackrabbit.oak.plugins.index.solr.server.RemoteSolrServerProvider;
-import org.apache.jackrabbit.oak.plugins.index.solr.server.SolrServerProvider;
 import org.apache.solr.client.solrj.SolrServer;
 import org.osgi.service.component.ComponentContext;
 import org.slf4j.Logger;
@@ -35,7 +34,7 @@ import org.slf4j.LoggerFactory;
  * {@link org.apache.jackrabbit.oak.plugins.index.solr.server.SolrServerProvider} for remote Solr installations.
  */
 @Component(metatype = true, immediate = true, label = "Remote Solr Server configuration")
-@Service(SolrServerProvider.class)
+@Service(SolrServerConfigurationProvider.class)
 @Property(name = "name", value = "REMOTE", propertyPrivate = true)
 public class RemoteSolrServerConfigurationProvider implements SolrServerConfigurationProvider<RemoteSolrServerProvider> {
 

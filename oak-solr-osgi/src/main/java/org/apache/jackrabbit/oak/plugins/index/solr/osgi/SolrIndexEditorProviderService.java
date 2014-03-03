@@ -37,7 +37,7 @@ import org.apache.jackrabbit.oak.spi.state.NodeState;
  * @see org.apache.jackrabbit.oak.plugins.index.solr.index.SolrIndexEditorProvider
  * @see org.apache.jackrabbit.oak.plugins.index.IndexEditorProvider
  */
-@Component(metatype = false, immediate = true, label = "Solr IndexEditorProvider")
+@Component(metatype = false, immediate = true)
 @Service(value = IndexEditorProvider.class)
 public class SolrIndexEditorProviderService implements IndexEditorProvider {
     

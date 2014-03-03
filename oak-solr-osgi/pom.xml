@@ -90,7 +90,7 @@
     </dependency>
     <dependency>
       <groupId>org.apache.jackrabbit</groupId>
-      <artifactId>oak-solr</artifactId>
+      <artifactId>oak-solr-core</artifactId>
       <version>${project.version}</version>
       <scope>provided</scope>
     </dependency>
