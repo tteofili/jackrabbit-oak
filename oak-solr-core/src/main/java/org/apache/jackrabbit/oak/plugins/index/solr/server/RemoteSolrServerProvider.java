@@ -56,7 +56,8 @@ public class RemoteSolrServerProvider implements SolrServerProvider {
                 log.warn("unable to initialize SolrCloud client for {}", remoteSolrServerConfiguration.getSolrZkHost(), e);
             }
         }
-        if (solrServer == null && remoteSolrServerConfiguration.getSolrHttpUrls() != null && remoteSolrServerConfiguration.getSolrHttpUrls().length == 1) {
+        if (solrServer == null && remoteSolrServerConfiguration.getSolrHttpUrls() != null && remoteSolrServerConfiguration.getSolrHttpUrls().length == 1
+                && remoteSolrServerConfiguration.getSolrHttpUrls()[0] != null && remoteSolrServerConfiguration.getSolrHttpUrls()[0].length() > 0) {
             try {
                 solrServer = initializeWithExistingHttpServer();
             } catch (Exception e1) {
@@ -64,7 +65,7 @@ public class RemoteSolrServerProvider implements SolrServerProvider {
             }
         }
         if (solrServer == null) {
-            throw new IOException("could not connect to any HTTP Solr server");
+            throw new IOException("could not connect to any remote Solr server");
         }
         return solrServer;
     }

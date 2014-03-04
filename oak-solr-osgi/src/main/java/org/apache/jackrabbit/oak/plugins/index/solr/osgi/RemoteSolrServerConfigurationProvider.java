@@ -36,8 +36,8 @@ import org.osgi.service.component.ComponentContext;
 public class RemoteSolrServerConfigurationProvider implements SolrServerConfigurationProvider<RemoteSolrServerProvider> {
 
     private static final String DEFAULT_COLLECTION = "oak";
-    private static final String DEFAULT_HTTP_URL = "http://127.0.0.1:8983/solr/oak";
-    private static final String DEFAULT_ZK_HOST = "localhost:9983";
+    private static final String DEFAULT_HTTP_URL = "";
+    private static final String DEFAULT_ZK_HOST = "";
     private static final int DEFAULT_SHARDS_NO = 2;
     private static final int DEFAULT_REPLICATION_FACTOR = 2;
 

@@ -45,25 +45,15 @@ public class SolrQueryIndexProviderService implements QueryIndexProvider {
     @Reference
     private OakSolrConfigurationProvider oakSolrConfigurationProvider;
 
-    private SolrQueryIndexProvider solrQueryIndexProvider;
-
     @Override
     @Nonnull
     public List<? extends QueryIndex> getQueryIndexes(NodeState nodeState) {
-        if (solrQueryIndexProvider != null) {
-            return solrQueryIndexProvider.getQueryIndexes(nodeState);
+        SolrServerProvider solrServerProvider = solrServerProviderFactory.getSolrServerProvider();
+        if (solrServerProvider != null) {
+            return new SolrQueryIndexProvider(solrServerProvider,
+                    oakSolrConfigurationProvider).getQueryIndexes(nodeState);
         } else {
-            List<? extends QueryIndex> queryIndexes = new ArrayList<QueryIndex>();
-            if (solrQueryIndexProvider == null) {
-                SolrServerProvider solrServerProvider = solrServerProviderFactory.getSolrServerProvider();
-                if (solrServerProvider != null && oakSolrConfigurationProvider != null
-                        && solrQueryIndexProvider == null) {
-                    solrQueryIndexProvider = new SolrQueryIndexProvider(solrServerProvider,
-                            oakSolrConfigurationProvider);
-                    queryIndexes = solrQueryIndexProvider.getQueryIndexes(nodeState);
-                }
-            }
-            return queryIndexes;
+            return new ArrayList<QueryIndex>();
         }
     }
 

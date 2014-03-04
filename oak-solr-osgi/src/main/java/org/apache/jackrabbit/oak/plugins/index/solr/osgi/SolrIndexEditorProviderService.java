@@ -47,23 +47,16 @@ public class SolrIndexEditorProviderService implements IndexEditorProvider {
     @Reference
     private OakSolrConfigurationProvider oakSolrConfigurationProvider;
 
-    private SolrIndexEditorProvider solrIndexEditorProvider;
-
     @Override
     @CheckForNull
     public Editor getIndexEditor(@Nonnull String type, @Nonnull NodeBuilder definition,
                                  @Nonnull NodeState root, @Nonnull IndexUpdateCallback callback) throws CommitFailedException {
-        if (solrIndexEditorProvider != null) {
-            return solrIndexEditorProvider.getIndexEditor(type, definition, root, callback);
+        SolrServerProvider solrServerProvider = solrServerProviderFactory.getSolrServerProvider();
+        if (solrServerProvider != null) {
+            return new SolrIndexEditorProvider(solrServerProvider,
+                    oakSolrConfigurationProvider).getIndexEditor(type, definition, root, callback);
         } else {
-            Editor indexEditor = null;
-            SolrServerProvider solrServerProvider = solrServerProviderFactory.getSolrServerProvider();
-            if (solrServerProvider != null && oakSolrConfigurationProvider != null && solrIndexEditorProvider == null) {
-                solrIndexEditorProvider = new SolrIndexEditorProvider(solrServerProvider, oakSolrConfigurationProvider);
-                indexEditor = solrIndexEditorProvider.getIndexEditor(type, definition, root, callback);
-            }
-            return indexEditor;
+            return null;
         }
     }
-
 }

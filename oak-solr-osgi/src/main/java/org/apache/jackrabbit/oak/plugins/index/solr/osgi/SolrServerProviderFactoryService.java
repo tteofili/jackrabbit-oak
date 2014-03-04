@@ -16,16 +16,21 @@
  */
 package org.apache.jackrabbit.oak.plugins.index.solr.osgi;
 
+import java.util.HashMap;
+import java.util.Map;
 import org.apache.felix.scr.annotations.Activate;
 import org.apache.felix.scr.annotations.Component;
+import org.apache.felix.scr.annotations.Deactivate;
 import org.apache.felix.scr.annotations.Property;
 import org.apache.felix.scr.annotations.PropertyOption;
+import org.apache.felix.scr.annotations.Reference;
+import org.apache.felix.scr.annotations.ReferenceCardinality;
+import org.apache.felix.scr.annotations.ReferencePolicy;
+import org.apache.felix.scr.annotations.References;
 import org.apache.felix.scr.annotations.Service;
 import org.apache.jackrabbit.oak.plugins.index.solr.configuration.SolrServerConfiguration;
 import org.apache.jackrabbit.oak.plugins.index.solr.configuration.SolrServerConfigurationProvider;
 import org.apache.jackrabbit.oak.plugins.index.solr.server.SolrServerProvider;
-import org.osgi.framework.BundleContext;
-import org.osgi.framework.ServiceReference;
 import org.osgi.service.component.ComponentContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,6 +39,16 @@ import org.slf4j.LoggerFactory;
  * OSGi service for {@link org.apache.jackrabbit.oak.plugins.index.solr.server.SolrServerProvider}
  */
 @Component(metatype = true, label = "SolrServer provider", immediate = true)
+@References({
+        @Reference(name = "solrServerConfigurationProvider",
+                referenceInterface = SolrServerConfigurationProvider.class,
+                cardinality = ReferenceCardinality.MANDATORY_MULTIPLE,
+                policy = ReferencePolicy.DYNAMIC,
+                bind = "bindSolrServerConfigurationProvider",
+                unbind = "unbindSolrServerConfigurationProvider",
+                updated = "updateSolrServerConfigurationProvider"
+        )
+})
 @Service(SolrServerProviderFactory.class)
 public class SolrServerProviderFactoryService implements SolrServerProviderFactory {
 
@@ -50,42 +65,62 @@ public class SolrServerProviderFactoryService implements SolrServerProviderFacto
     )
     private static final String SERVER_TYPE = "server.type";
 
-    private BundleContext bundleContext;
+    private final Map<String, SolrServerConfigurationProvider> solrServerConfigurationProviders = new HashMap<String, SolrServerConfigurationProvider>();
 
-    private SolrServerProvider solrServerProvider;
     private String serverType;
+
+    private SolrServerProvider cachedSolrServerProvider;
+    private SolrServerConfiguration cachedSolrServerConfiguration;
 
     @Activate
     protected void activate(ComponentContext context) throws Exception {
         serverType = String.valueOf(context.getProperties().get(SERVER_TYPE));
-        bundleContext = context.getBundleContext();
+    }
+
+    @Deactivate
+    protected void deactivate() throws Exception {
+        solrServerConfigurationProviders.clear();
+    }
+
+    protected void bindSolrServerConfigurationProvider(final SolrServerConfigurationProvider solrServerConfigurationProvider, Map<String, Object> properties) {
+        synchronized (solrServerConfigurationProviders) {
+            String name = String.valueOf(properties.get("name"));
+            solrServerConfigurationProviders.put(name, solrServerConfigurationProvider);
+        }
+    }
+
+    protected void unbindSolrServerConfigurationProvider(final SolrServerConfigurationProvider solrServerConfigurationProvider, Map<String, Object> properties) {
+        synchronized (solrServerConfigurationProviders) {
+            String name = String.valueOf(properties.get("name"));
+            solrServerConfigurationProviders.remove(name);
+        }
+    }
+
+    protected void updatedSolrServerConfigurationProvider(final SolrServerConfigurationProvider solrServerConfigurationProvider, Map<String, Object> properties) {
+        synchronized (solrServerConfigurationProviders) {
+            String name = String.valueOf(properties.get("name"));
+            solrServerConfigurationProviders.put(name, solrServerConfigurationProvider);
+        }
     }
 
     @Override
     public SolrServerProvider getSolrServerProvider() {
-        if (solrServerProvider == null) {
-            log.info("getting server provider");
+        SolrServerProvider solrServerProvider = null;
+        synchronized (solrServerConfigurationProviders) {
+            SolrServerConfigurationProvider solrServerConfigurationProvider = solrServerConfigurationProviders.get(serverType);
             try {
-                ServiceReference[] serviceReferences = bundleContext.getServiceReferences(SolrServerConfigurationProvider.class.getName(), null);
-                log.info("found references {}", serviceReferences != null ? serviceReferences.length : false);
-                if (serviceReferences != null) {
-                    for (ServiceReference serviceReference : serviceReferences) {
-                        Object name = serviceReference.getProperty("name");
-                        log.info("name : "+name);
-                        if (serverType.equals(name)) {
-                            SolrServerConfigurationProvider solrServerConfigurationProvider = (SolrServerConfigurationProvider) bundleContext.getService(serviceReference);
-                            log.info("conf provider {}", solrServerConfigurationProvider);
-                            SolrServerConfiguration solrServerConfiguration = solrServerConfigurationProvider.getSolrServerConfiguration();
-                            log.info("server conf {}", solrServerConfiguration);
-                            solrServerProvider = solrServerConfiguration.newInstance();
-                            log.info("server provider {}", solrServerProvider);
-                            break;
-                        }
+                if (solrServerConfigurationProvider != null) {
+                    SolrServerConfiguration solrServerConfiguration = solrServerConfigurationProvider.getSolrServerConfiguration();
+                    if (solrServerConfiguration != cachedSolrServerConfiguration) {
+                        solrServerProvider = solrServerConfiguration.newInstance();
+                        cachedSolrServerConfiguration = solrServerConfiguration;
+                        cachedSolrServerProvider = solrServerProvider;
+                    } else {
+                        solrServerProvider = cachedSolrServerProvider;
                     }
                 }
             } catch (Exception e) {
-                // do nothing
-                log.error("error while getting solr server {}", e);
+                log.error("could not get a SolrServerProvider of type {}, {}", serverType, e);
             }
         }
         return solrServerProvider;
