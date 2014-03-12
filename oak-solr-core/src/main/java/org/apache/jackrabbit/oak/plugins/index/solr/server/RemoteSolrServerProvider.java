@@ -136,8 +136,10 @@ public class RemoteSolrServerProvider implements SolrServerProvider {
                 ZkController.uploadConfigDir(zkClient, dir, solrCollection);
                 UpdateRequest req = new UpdateRequest("/admin/collections");
                 req.setParam("action", "CREATE");
-                req.setParam("numShards", String.valueOf(remoteSolrServerConfiguration.getSolrShardsNo()));
-                req.setParam("replicationFactor", String.valueOf(remoteSolrServerConfiguration.getSolrReplicationFactor()));
+                if (remoteSolrServerConfiguration != null) {
+                    req.setParam("numShards", String.valueOf(remoteSolrServerConfiguration.getSolrShardsNo()));
+                    req.setParam("replicationFactor", String.valueOf(remoteSolrServerConfiguration.getSolrReplicationFactor()));
+                }
                 req.setParam("collection.configName", solrCollection);
                 req.setParam("name", solrCollection);
                 cloudSolrServer.request(req);
