@@ -100,7 +100,7 @@ public class SolrQueryIndex implements FulltextQueryIndex {
                 // native query support
                 if (NATIVE_SOLR_QUERY.equals(pr.propertyName)) {
                     String nativeQueryString = String.valueOf(pr.first.getValue(pr.first.getType()));
-                    if (isHttpRequest(nativeQueryString)) {
+                    if (isSupportedHttpRequest(nativeQueryString)) {
                         // pass through the native HTTP Solr request
                         String requestHandlerString = nativeQueryString.substring(0, nativeQueryString.indexOf('?'));
                         if (!"select".equals(requestHandlerString)) {
@@ -206,17 +206,16 @@ public class SolrQueryIndex implements FulltextQueryIndex {
         return solrQuery;
     }
 
-    private boolean isHttpRequest(String nativeQueryString) {
-        return nativeQueryString.matches("\\w+\\?.*"); // the query string starts with ${handler.selector}?
+    private boolean isSupportedHttpRequest(String nativeQueryString) {
+        // the query string starts with ${supported-handler.selector}?
+        return nativeQueryString.matches("(mlt|query|select|get)\\\\?.*");
     }
 
     private void setDefaults(SolrQuery solrQuery) {
         solrQuery.setParam("q.op", "AND");
+        solrQuery.setParam("df", configuration.getCatchAllField());
 
-        // TODO : change this to be not hard coded
-        solrQuery.setParam("df", "catch_all");
-
-        // TODO : can we handle this better?
+        // TODO : can we handle this better? e.g. with deep paging support?
         solrQuery.setParam("rows", String.valueOf(Integer.MAX_VALUE));
     }
 

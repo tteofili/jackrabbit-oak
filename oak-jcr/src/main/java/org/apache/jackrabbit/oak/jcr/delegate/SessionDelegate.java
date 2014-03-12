@@ -17,6 +17,9 @@
 package org.apache.jackrabbit.oak.jcr.delegate;
 
 import static com.google.common.base.Preconditions.checkNotNull;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
+import static java.util.concurrent.TimeUnit.NANOSECONDS;
+import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.apache.jackrabbit.api.stats.RepositoryStatistics.Type.SESSION_READ_COUNTER;
 import static org.apache.jackrabbit.api.stats.RepositoryStatistics.Type.SESSION_READ_DURATION;
 import static org.apache.jackrabbit.api.stats.RepositoryStatistics.Type.SESSION_WRITE_COUNTER;
@@ -24,8 +27,8 @@ import static org.apache.jackrabbit.api.stats.RepositoryStatistics.Type.SESSION_
 import static org.apache.jackrabbit.oak.commons.PathUtils.denotesRoot;
 
 import java.io.IOException;
+import java.util.Date;
 import java.util.Iterator;
-import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
 import javax.annotation.CheckForNull;
@@ -35,7 +38,8 @@ import javax.jcr.PathNotFoundException;
 import javax.jcr.RepositoryException;
 import javax.jcr.nodetype.ConstraintViolationException;
 
-import com.google.common.collect.Maps;
+import com.google.common.collect.ImmutableMap;
+
 import org.apache.jackrabbit.oak.api.AuthInfo;
 import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.api.ContentSession;
@@ -48,6 +52,7 @@ import org.apache.jackrabbit.oak.jcr.session.RefreshStrategy;
 import org.apache.jackrabbit.oak.jcr.session.SessionStats;
 import org.apache.jackrabbit.oak.jcr.session.operation.SessionOperation;
 import org.apache.jackrabbit.oak.plugins.identifier.IdentifierManager;
+import org.apache.jackrabbit.oak.stats.Clock;
 import org.apache.jackrabbit.oak.stats.StatisticManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -63,11 +68,42 @@ public class SessionDelegate {
 
     private final ContentSession contentSession;
     private final RefreshStrategy refreshStrategy;
+    private boolean refreshAtNextAccess = false;
+
+    /**
+     * The repository-wide {@link ThreadLocal} that keeps track of the number
+     * of saves performed in each thread.
+     */
+    private final ThreadLocal<Long> threadSaveCount;
+
+    /**
+     * Local copy of the {@link #threadSaveCount} for the current thread.
+     * If the repository-wide counter differs from our local copy, then
+     * some other session would have done a commit or this session is
+     * being accessed from some other thread. In either case it's best to
+     * refresh this session to avoid unexpected behaviour.
+     */
+    private long sessionSaveCount;
 
     private final Root root;
     private final IdentifierManager idManager;
     private final SessionStats sessionStats;
 
+    private final Clock clock;
+
+    // access time stamps and counters for statistics about this session
+    private final long loginTime;
+    private long accessTime;
+    private long readTime = 0;
+    private long writeTime = 0;
+    private long refreshTime = 0;
+    private long saveTime = 0;
+    private long readCount = 0;
+    private long writeCount = 0;
+    private long refreshCount = 0;
+    private long saveCount = 0;
+
+    // repository-wide counters for statistics about all sessions
     private final AtomicLong readCounter;
     private final AtomicLong readDuration;
     private final AtomicLong writeCounter;
@@ -94,12 +130,19 @@ public class SessionDelegate {
     public SessionDelegate(
             @Nonnull ContentSession contentSession,
             @Nonnull RefreshStrategy refreshStrategy,
-            @Nonnull StatisticManager statisticManager) {
+            @Nonnull ThreadLocal<Long> threadSaveCount,
+            @Nonnull StatisticManager statisticManager,
+            @Nonnull Clock clock) {
         this.contentSession = checkNotNull(contentSession);
         this.refreshStrategy = checkNotNull(refreshStrategy);
+        this.threadSaveCount = checkNotNull(threadSaveCount);
+        this.sessionSaveCount = getThreadSaveCount();
         this.root = contentSession.getLatestRoot();
         this.idManager = new IdentifierManager(root);
         this.sessionStats = new SessionStats(this);
+        this.clock = checkNotNull(clock);
+        this.loginTime = clock.getTime();
+        this.accessTime = loginTime;
         checkNotNull(statisticManager);
         readCounter = statisticManager.getCounter(SESSION_READ_COUNTER);
         readDuration = statisticManager.getCounter(SESSION_READ_DURATION);
@@ -112,8 +155,61 @@ public class SessionDelegate {
         return sessionStats;
     }
 
-    public void refreshAtNextAccess() {
-        refreshStrategy.refreshAtNextAccess();
+    private long getThreadSaveCount() {
+        Long c = threadSaveCount.get();
+        return c == null ? 0 : c;
+    }
+
+    public long getSecondsSinceLogin() {
+        return SECONDS.convert(clock.getTime() - loginTime, MILLISECONDS);
+    }
+
+    public Date getLoginTime() {
+        return new Date(loginTime);
+    }
+
+    private Date getTime(long timestamp) {
+        if (timestamp != 0) {
+            return new Date(timestamp);
+        } else {
+            return null;
+        }
+    }
+
+    public Date getReadTime() {
+        return getTime(readTime);
+    }
+
+    public Date getWriteTime() {
+        return getTime(writeTime);
+    }
+
+    public Date getRefreshTime() {
+        return getTime(refreshTime);
+    }
+
+    public Date getSaveTime() {
+        return getTime(saveTime);
+    }
+
+    public long getReadCount() {
+        return readCount;
+    }
+
+    public long getWriteCount() {
+        return writeCount;
+    }
+
+    public long getRefreshCount() {
+        return refreshCount;
+    }
+
+    public long getSaveCount() {
+        return saveCount;
+    }
+
+    public synchronized void refreshAtNextAccess() {
+        refreshAtNextAccess = true;
     }
 
     /**
@@ -142,38 +238,54 @@ public class SessionDelegate {
     public synchronized <T> T perform(SessionOperation<T> sessionOperation)
             throws RepositoryException {
         // Synchronize to avoid conflicting refreshes from concurrent JCR API calls
+        long t0 = clock.getTime();
         if (sessionOpCount == 0) {
-            // Refresh and precondition checks only for non re-entrant session operations
-            if (refreshStrategy.needsRefresh(sessionOperation)) {
+            // Refresh and precondition checks only for non re-entrant
+            // session operations. Don't refresh if this operation is a
+            // refresh operation itself or a save operation, which does an
+            // implicit refresh, or logout for obvious reasons.
+            if (!sessionOperation.isRefresh()
+                    && !sessionOperation.isSave()
+                    && !sessionOperation.isLogout()
+                    && (refreshAtNextAccess
+                        || sessionSaveCount != getThreadSaveCount()
+                        || refreshStrategy.needsRefresh(
+                                SECONDS.convert(t0 - accessTime, MILLISECONDS)))) {
                 refresh(true);
-                refreshStrategy.refreshed();
+                refreshAtNextAccess = false;
+                sessionSaveCount = getThreadSaveCount();
                 updateCount++;
             }
             sessionOperation.checkPreconditions();
         }
-        long t0 = System.nanoTime();
         try {
             sessionOpCount++;
             T result =  sessionOperation.perform();
             logOperationDetails(sessionOperation);
             return result;
         } finally {
-            long dt = System.nanoTime() - t0;
+            accessTime = t0;
+            long dt = NANOSECONDS.convert(clock.getTime() - t0, MILLISECONDS);
             sessionOpCount--;
             if (sessionOperation.isUpdate()) {
-                sessionStats.write();
+                writeTime = t0;
+                writeCount++;
                 writeCounter.incrementAndGet();
                 writeDuration.addAndGet(dt);
                 updateCount++;
             } else {
-                sessionStats.read();
+                readTime = t0;
+                readCount++;
                 readCounter.incrementAndGet();
                 readDuration.addAndGet(dt);
             }
             if (sessionOperation.isSave()) {
-                refreshStrategy.saved();
+                refreshAtNextAccess = false;
+                // Force refreshing on access through other sessions on the same thread
+                threadSaveCount.set(sessionSaveCount = (getThreadSaveCount() + 1));
             } else if (sessionOperation.isRefresh()) {
-                refreshStrategy.refreshed();
+                refreshAtNextAccess = false;
+                sessionSaveCount = getThreadSaveCount();
             }
         }
     }
@@ -234,6 +346,17 @@ public class SessionDelegate {
         this.userData = userData;
     }
 
+    private void commit(Root root, String path) throws CommitFailedException {
+        ImmutableMap.Builder<String, Object> info = ImmutableMap.builder();
+        if (path != null && !denotesRoot(path)) {
+            info.put(Root.COMMIT_PATH, path);
+        }
+        if (userData != null) {
+            info.put(EventFactory.USER_DATA, userData);
+        }
+        root.commit(info.build());
+    }
+
     /**
      * Commits the changes currently in the transient space.
      * TODO: Consolidate with save().
@@ -241,7 +364,7 @@ public class SessionDelegate {
      * @throws CommitFailedException if the commit failed
      */
     public void commit() throws CommitFailedException {
-        commit(root);
+        commit(root, null);
     }
 
     /**
@@ -253,9 +376,7 @@ public class SessionDelegate {
      * @throws CommitFailedException if the commit failed
      */
     public void commit(Root root) throws CommitFailedException {
-        Map<String, Object> info = Maps.newHashMap();
-        info.put(EventFactory.USER_DATA, userData);
-        root.commit(info);
+        commit(root, null);
     }
 
     public void checkProtectedNode(String path) throws RepositoryException {
@@ -361,10 +482,22 @@ public class SessionDelegate {
         return root.hasPendingChanges();
     }
 
-    public void save() throws RepositoryException {
-        sessionStats.save();
+    /**
+     * Save the subtree rooted at the given {@code path}, or the entire
+     * transient space if given the root path or {@code null}.
+     * <p>
+     * This implementation only performs the save if the subtree rooted
+     * at {@code path} contains all transient changes and will throw an
+     * {@link javax.jcr.UnsupportedRepositoryOperationException} otherwise.
+     *
+     * @param path
+     * @throws RepositoryException
+     */
+    public void save(String path) throws RepositoryException {
+        saveTime = clock.getTime();
+        saveCount++;
         try {
-            commit();
+            commit(root, path);
         } catch (CommitFailedException e) {
             RepositoryException repositoryException = newRepositoryException(e);
             sessionStats.failedSave(repositoryException);
@@ -372,33 +505,9 @@ public class SessionDelegate {
         }
     }
 
-    /**
-     * Save the subtree rooted at the given {@code path}.
-     * <p>
-     * This implementation only performs the save if the subtree rooted at {@code path} contains
-     * all transient changes and will throw an
-     * {@link javax.jcr.UnsupportedRepositoryOperationException} otherwise.
-     *
-     * @param path
-     * @throws RepositoryException
-     */
-    public void save(final String path) throws RepositoryException {
-        sessionStats.save();
-        if (denotesRoot(path)) {
-            save();
-        } else {
-            try {
-                root.commit(path);
-            } catch (CommitFailedException e) {
-                RepositoryException repositoryException = newRepositoryException(e);
-                sessionStats.failedSave(repositoryException);
-                throw repositoryException;
-            }
-        }
-    }
-
     public void refresh(boolean keepChanges) {
-        sessionStats.refresh();
+        refreshTime = clock.getTime();
+        refreshCount++;
         if (keepChanges && hasPendingChanges()) {
             root.rebase();
         } else {
@@ -450,7 +559,8 @@ public class SessionDelegate {
                 throw new RepositoryException("Cannot move node at " + srcPath + " to " + destPath);
             }
             if (!transientOp) {
-                sessionStats.save();
+                saveTime = clock.getTime();
+                saveCount++;
                 commit(moveRoot);
                 refresh(true);
             }

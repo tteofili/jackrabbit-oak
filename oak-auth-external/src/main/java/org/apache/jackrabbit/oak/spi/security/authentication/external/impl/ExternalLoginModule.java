@@ -103,6 +103,7 @@ public class ExternalLoginModule extends AbstractLoginModule {
         this.osgiConfig = osgiConfig;
     }
 
+    //--------------------------------------------------------< LoginModule >---
     @Override
     public void initialize(Subject subject, CallbackHandler callbackHandler, Map<String, ?> ss, Map<String, ?> opts) {
         super.initialize(subject, callbackHandler, ss, opts);
@@ -164,15 +165,15 @@ public class ExternalLoginModule extends AbstractLoginModule {
         try {
             externalUser = idp.authenticate(credentials);
             if (externalUser != null) {
-                if (log.isDebugEnabled()) {
-                    log.debug("IDP {} returned valid user {}", idp.getName(), externalUser);
-                }
+                log.debug("IDP {} returned valid user {}", idp.getName(), externalUser);
 
                 //noinspection unchecked
                 sharedState.put(SHARED_KEY_CREDENTIALS, credentials);
 
                 //noinspection unchecked
                 sharedState.put(SHARED_KEY_LOGIN_NAME, externalUser.getId());
+
+                syncUser(externalUser);
 
                 return true;
             } else {
@@ -185,16 +186,81 @@ public class ExternalLoginModule extends AbstractLoginModule {
                 }
             }
         } catch (ExternalIdentityException e) {
-            log.error("Error while authenticating credentials {} with {}: {}", new Object[]{
-                    credentials, idp.getName(), e.toString()});
+            log.error("Error while authenticating credentials {} with {}", new Object[]{credentials, idp.getName(), e});
             return false;
         } catch (LoginException e) {
-            if (log.isDebugEnabled()) {
-                log.debug("IDP {} throws login exception for {}", idp.getName(), credentials);
-            }
+            log.debug("IDP {} throws login exception for {}", new Object[] {idp.getName(), credentials, e});
             throw e;
+        } catch (SyncException e) {
+            log.debug("SyncHandler {} throws sync exception for {}", new Object[] {idp.getName(), credentials, e});
+            LoginException le = new LoginException("Error while syncing user.");
+            le.initCause(e);
+            throw le;
         }
         return false;
+    }
+
+    @Override
+    public boolean commit() throws LoginException {
+        if (externalUser == null) {
+            return false;
+        }
+        Set<? extends Principal> principals = getPrincipals(externalUser.getId());
+        if (!principals.isEmpty()) {
+            if (!subject.isReadOnly()) {
+                subject.getPrincipals().addAll(principals);
+                subject.getPublicCredentials().add(credentials);
+                setAuthInfo(new AuthInfoImpl(externalUser.getId(), null, principals), subject);
+            } else {
+                log.debug("Could not add information to read only subject {}", subject);
+            }
+            return true;
+        }
+        return false;
+    }
+
+    @Override
+    public boolean abort() throws LoginException {
+        clearState();
+        // do we need to remove the user again, in case we created it during login() ?
+        return true;
+    }
+
+    /**
+     * Initiates synchronization of the external user.
+     * @param user the external user
+     * @throws SyncException if an error occurs
+     */
+    private void syncUser(ExternalUser user) throws SyncException {
+        SyncContext context = null;
+        try {
+            Root root = getRoot();
+            if (root == null) {
+                throw new SyncException("Cannot synchronize user. root == null");
+            }
+            UserManager userManager = getUserManager();
+            if (userManager == null) {
+                throw new SyncException("Cannot synchronize user. userManager == null");
+            }
+            context = syncHandler.createContext(idp, userManager, root);
+            context.sync(user);
+            root.commit();
+        } catch (CommitFailedException e) {
+            throw new SyncException("User synchronization failed during commit.", e);
+        } finally {
+            if (context != null) {
+                context.close();
+            }
+        }
+    }
+
+    //------------------------------------------------< AbstractLoginModule >---
+
+    @Override
+    protected void clearState() {
+        super.clearState();
+        externalUser = null;
+        credentials = null;
     }
 
     /**
@@ -205,52 +271,5 @@ public class ExternalLoginModule extends AbstractLoginModule {
         // TODO: maybe delegate getSupportedCredentials to IDP
         Class scClass = SimpleCredentials.class;
         return Collections.singleton(scClass);
-    }
-
-    @Override
-    public boolean commit() throws LoginException {
-        if (externalUser == null || syncHandler == null) {
-            return false;
-        }
-
-        SyncContext context = null;
-        try {
-            Root root = getRoot();
-            UserManager userManager = getUserManager();
-            if (root == null || userManager == null) {
-                throw new LoginException("Cannot synchronize user.");
-            }
-            context = syncHandler.createContext(idp, userManager, root);
-            context.sync(externalUser);
-            root.commit();
-
-            Set<? extends Principal> principals = getPrincipals(externalUser.getId());
-            if (!principals.isEmpty()) {
-                if (!subject.isReadOnly()) {
-                    subject.getPrincipals().addAll(principals);
-                    subject.getPublicCredentials().add(credentials);
-                    setAuthInfo(new AuthInfoImpl(externalUser.getId(), null, principals), subject);
-                } else {
-                    log.debug("Could not add information to read only subject {}", subject);
-                }
-                return true;
-            }
-            return false;
-        } catch (SyncException e) {
-            throw new LoginException("User synchronization failed: " + e);
-        } catch (CommitFailedException e) {
-            throw new LoginException("User synchronization failed: " + e);
-        } finally {
-            if (context != null) {
-                context.close();
-            }
-        }
-    }
-
-    @Override
-    protected void clearState() {
-        super.clearState();
-        externalUser = null;
-        credentials = null;
     }
 }

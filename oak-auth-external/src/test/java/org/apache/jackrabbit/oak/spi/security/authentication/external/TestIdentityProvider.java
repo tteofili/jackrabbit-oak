@@ -33,6 +33,8 @@ public class TestIdentityProvider implements ExternalIdentityProvider {
 
 
     public TestIdentityProvider() {
+        addGroup(new TestGroup("aa"));
+        addGroup(new TestGroup("aaa"));
         addGroup(new TestGroup("a").withGroups("aa", "aaa"));
         addGroup(new TestGroup("b").withGroups("a"));
         addGroup(new TestGroup("c"));
@@ -41,7 +43,7 @@ public class TestIdentityProvider implements ExternalIdentityProvider {
                 .withProperty("name", "Test User")
                 .withProperty("profile/name", "Public Name")
                 .withProperty("profile/age", 72)
-                .withProperty("./email", "test@testuser.com")
+                .withProperty("email", "test@testuser.com")
                 .withGroups("a", "b", "c")
         );
     }
@@ -62,7 +64,11 @@ public class TestIdentityProvider implements ExternalIdentityProvider {
 
     @Override
     public ExternalIdentity getIdentity(@Nonnull ExternalIdentityRef ref) throws ExternalIdentityException {
-        return null;
+        ExternalIdentity id = externalUsers.get(ref.getId());
+        if (id != null) {
+            return id;
+        }
+        return externalGroups.get(ref.getId());
     }
 
     @Override

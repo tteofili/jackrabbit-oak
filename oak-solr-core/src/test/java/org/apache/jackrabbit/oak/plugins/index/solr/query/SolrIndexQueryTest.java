@@ -20,10 +20,14 @@ import java.util.Iterator;
 import org.apache.jackrabbit.oak.Oak;
 import org.apache.jackrabbit.oak.api.ContentRepository;
 import org.apache.jackrabbit.oak.api.Tree;
+import org.apache.jackrabbit.oak.plugins.index.CompositeIndexEditorProvider;
+import org.apache.jackrabbit.oak.plugins.index.property.PropertyIndexEditorProvider;
+import org.apache.jackrabbit.oak.plugins.index.property.PropertyIndexProvider;
 import org.apache.jackrabbit.oak.plugins.index.solr.TestUtils;
 import org.apache.jackrabbit.oak.plugins.index.solr.index.SolrIndexEditorProvider;
 import org.apache.jackrabbit.oak.plugins.nodetype.write.InitialContent;
 import org.apache.jackrabbit.oak.query.AbstractQueryTest;
+import org.apache.jackrabbit.oak.spi.query.CompositeQueryIndexProvider;
 import org.apache.jackrabbit.oak.spi.security.OpenSecurityProvider;
 import org.apache.solr.client.solrj.SolrServer;
 import org.junit.After;
@@ -63,8 +67,14 @@ public class SolrIndexQueryTest extends AbstractQueryTest {
         try {
             return new Oak().with(new InitialContent())
                     .with(new OpenSecurityProvider())
-                    .with(new SolrQueryIndexProvider(provider, provider))
-                    .with(new SolrIndexEditorProvider(provider, provider))
+                    .with(new CompositeQueryIndexProvider(
+                            new SolrQueryIndexProvider(provider, provider),
+                            new PropertyIndexProvider()
+                            ))
+                    .with(new CompositeIndexEditorProvider(
+                            new SolrIndexEditorProvider(provider, provider),
+                            new PropertyIndexEditorProvider()
+                            ))
                     .createContentRepository();
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -202,13 +212,32 @@ public class SolrIndexQueryTest extends AbstractQueryTest {
     }
 
     @Test
-     public void testNativeSolrNestedQuery() throws Exception {
+    public void testNativeSolrNestedQuery() throws Exception {
         String nativeQueryString = "select [jcr:path] from [nt:base] where native('solr', '_query_:\"{!dismax qf=catch_all q.op=OR}hello world\"')";
 
         Tree tree = root.getTree("/");
         Tree test = tree.addChild("test");
         test.addChild("a").setProperty("name", "Hello");
         test.addChild("b").setProperty("name", "World");
+        tree.addChild("c");
+        root.commit();
+
+        Iterator<String> strings = executeQuery(nativeQueryString, "JCR-SQL2").iterator();
+        assertTrue(strings.hasNext());
+        assertEquals("/test/a", strings.next());
+        assertTrue(strings.hasNext());
+        assertEquals("/test/b", strings.next());
+        assertFalse(strings.hasNext());
+    }
+
+    @Test
+    public void testNativeMLTQuery() throws Exception {
+        String nativeQueryString = "select [jcr:path] from [nt:base] where native('solr', 'mlt?q=name:World&mlt.fl=name&mlt.mindf=0&mlt.mintf=0')";
+
+        Tree tree = root.getTree("/");
+        Tree test = tree.addChild("test");
+        test.addChild("a").setProperty("name", "Hello World, today weather is nice");
+        test.addChild("b").setProperty("name", "Cheers World, today weather is quite nice");
         tree.addChild("c");
         root.commit();
 

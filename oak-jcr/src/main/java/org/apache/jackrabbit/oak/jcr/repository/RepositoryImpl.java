@@ -40,19 +40,17 @@ import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableScheduledFuture;
 import com.google.common.util.concurrent.ListeningScheduledExecutorService;
 import com.google.common.util.concurrent.MoreExecutors;
+
 import org.apache.jackrabbit.api.JackrabbitRepository;
 import org.apache.jackrabbit.api.security.authentication.token.TokenCredentials;
 import org.apache.jackrabbit.commons.SimpleValueFactory;
 import org.apache.jackrabbit.oak.api.ContentRepository;
 import org.apache.jackrabbit.oak.api.ContentSession;
 import org.apache.jackrabbit.oak.api.jmx.SessionMBean;
+import org.apache.jackrabbit.oak.stats.Clock;
 import org.apache.jackrabbit.oak.stats.StatisticManager;
 import org.apache.jackrabbit.oak.jcr.delegate.SessionDelegate;
 import org.apache.jackrabbit.oak.jcr.session.RefreshStrategy;
-import org.apache.jackrabbit.oak.jcr.session.RefreshStrategy.LogOnce;
-import org.apache.jackrabbit.oak.jcr.session.RefreshStrategy.Once;
-import org.apache.jackrabbit.oak.jcr.session.RefreshStrategy.ThreadSynchronising;
-import org.apache.jackrabbit.oak.jcr.session.RefreshStrategy.Timed;
 import org.apache.jackrabbit.oak.jcr.session.SessionContext;
 import org.apache.jackrabbit.oak.jcr.session.SessionStats;
 import org.apache.jackrabbit.oak.spi.security.SecurityProvider;
@@ -85,7 +83,22 @@ public class RepositoryImpl implements JackrabbitRepository {
     private final ContentRepository contentRepository;
     protected final Whiteboard whiteboard;
     private final SecurityProvider securityProvider;
-    private final ThreadLocal<Long> threadSaveCount;
+
+    private final Clock clock;
+
+    /**
+     * {@link ThreadLocal} counter that keeps track of the save operations
+     * performed per thread so far. This is is then used to determine if
+     * the current session needs to be refreshed to see the changes done by
+     * another session in the same thread.
+     * <p>
+     * <b>Note</b> - This thread local is never cleared. However, we only
+     * store a {@link Long} instance and do not derive from
+     * {@link ThreadLocal} so that (class loader) leaks typically associated
+     * with thread locals do not occur.
+     */
+    private final ThreadLocal<Long> threadSaveCount = new ThreadLocal<Long>();
+
     private final ListeningScheduledExecutorService scheduledExecutor =
             MoreExecutors.listeningDecorator(Executors.newSingleThreadScheduledExecutor());
     private final StatisticManager statisticManager;
@@ -96,9 +109,9 @@ public class RepositoryImpl implements JackrabbitRepository {
         this.contentRepository = checkNotNull(contentRepository);
         this.whiteboard = checkNotNull(whiteboard);
         this.securityProvider = checkNotNull(securityProvider);
-        this.threadSaveCount = new ThreadLocal<Long>();
         this.descriptors = determineDescriptors();
         this.statisticManager = new StatisticManager(whiteboard, scheduledExecutor);
+        this.clock = new Clock.Fast(scheduledExecutor);
     }
 
     //---------------------------------------------------------< Repository >---
@@ -235,7 +248,9 @@ public class RepositoryImpl implements JackrabbitRepository {
     private SessionDelegate createSessionDelegate(
             final RefreshStrategy refreshStrategy,
             final ContentSession contentSession) {
-        return new SessionDelegate(contentSession, refreshStrategy, statisticManager) {
+        return new SessionDelegate(
+                contentSession, refreshStrategy,
+                threadSaveCount, statisticManager, clock) {
             // Defer session MBean registration to avoid cluttering the
             // JMX name space with short lived sessions
             ListenableScheduledFuture<Registration> registration = scheduledExecutor.schedule(
@@ -364,15 +379,11 @@ public class RepositoryImpl implements JackrabbitRepository {
      * minute of inactivity.
      */
     private RefreshStrategy createRefreshStrategy(Long refreshInterval) {
-        return new RefreshStrategy(refreshInterval == null
-                ? new RefreshStrategy[] {
-                new Once(false),
-                new LogOnce(60),
-                new ThreadSynchronising(threadSaveCount)}
-                : new RefreshStrategy[] {
-                new Once(false),
-                new Timed(refreshInterval),
-                new ThreadSynchronising(threadSaveCount)});
+        if (refreshInterval == null) {
+            return new RefreshStrategy.LogOnce(60);
+        } else {
+            return new RefreshStrategy.Timed(refreshInterval);
+        }
     }
 
     private static class RegistrationCallable implements Callable<Registration> {

@@ -21,6 +21,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.Map;
 import java.util.Set;
 
 import javax.security.auth.login.AppConfigurationEntry;
@@ -45,17 +46,19 @@ import org.junit.Before;
  */
 public abstract class ExternalLoginModuleTestBase extends AbstractSecurityTest {
 
-    protected final HashMap<String, Object> options = new HashMap<String, Object>();
-
     private Set<String> ids = new HashSet<String>();
 
     private Registration testIdpReg;
 
     private Registration syncHandlerReg;
 
+    protected final HashMap<String, Object> options = new HashMap<String, Object>();
+
     protected Whiteboard whiteboard;
 
     protected ExternalIdentityProvider idp;
+
+    protected DefaultSyncConfig syncConfig;
 
     @Before
     public void before() throws Exception {
@@ -73,7 +76,15 @@ public abstract class ExternalLoginModuleTestBase extends AbstractSecurityTest {
         options.put(ExternalLoginModule.PARAM_IDP_NAME, idp.getName());
 
         // set default sync config
-        setSyncConfig(new DefaultSyncConfig());
+        syncConfig = new DefaultSyncConfig();
+        Map<String, String> mapping = new HashMap<String, String>();
+        mapping.put("name", "name");
+        mapping.put("email", "email");
+        mapping.put("profile/name", "profile/name");
+        mapping.put("profile/age", "profile/age");
+        syncConfig.user().setPropertyMapping(mapping);
+        syncConfig.user().setMembershipNestingDepth(1);
+        setSyncConfig(syncConfig);
     }
 
     @After

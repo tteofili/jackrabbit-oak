@@ -17,7 +17,7 @@
 
 package org.apache.jackrabbit.oak.spi.security.authentication.external.impl;
 
-import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -60,15 +60,15 @@ public class DefaultSyncConfig {
     /**
      * @see DefaultSyncConfig.User#getExpirationTime()
      */
-    public static final long PARAM_USER_EXPIRATION_TIME_DEFAULT = 3600*1000;
+    public static final String PARAM_USER_EXPIRATION_TIME_DEFAULT = "1h";
 
     /**
      * @see DefaultSyncConfig.User#getExpirationTime()
      */
     @Property(
             label = "User Expiration Time",
-            description = "Duration in milliseconds until a synced user gets expired.",
-            longValue = PARAM_USER_EXPIRATION_TIME_DEFAULT
+            description = "Duration until a synced user gets expired (eg. '1h 30m' or '1d').",
+            value = PARAM_USER_EXPIRATION_TIME_DEFAULT
     )
     public static final String PARAM_USER_EXPIRATION_TIME = "user.expirationTime";
 
@@ -123,15 +123,15 @@ public class DefaultSyncConfig {
     /**
      * @see DefaultSyncConfig.User#getMembershipExpirationTime()
      */
-    public static final long PARAM_USER_MEMBERSHIP_EXPIRATION_TIME_DEFAULT = 3600*1000;
+    public static final String PARAM_USER_MEMBERSHIP_EXPIRATION_TIME_DEFAULT = "1h";
 
     /**
      * @see DefaultSyncConfig.User#getMembershipExpirationTime()
      */
     @Property(
             label = "User Membership Expiration",
-            description = "Time in milliseconds after which membership expires.",
-            longValue = PARAM_USER_MEMBERSHIP_EXPIRATION_TIME_DEFAULT
+            description = "Time after which membership expires (eg. '1h 30m' or '1d').",
+            value = PARAM_USER_MEMBERSHIP_EXPIRATION_TIME_DEFAULT
     )
     public static final String PARAM_USER_MEMBERSHIP_EXPIRATION_TIME = "user.membershipExpTime";
 
@@ -156,15 +156,15 @@ public class DefaultSyncConfig {
     /**
      * @see DefaultSyncConfig.Group#getExpirationTime()
      */
-    public static final long PARAM_GROUP_EXPIRATION_TIME_DEFAULT = 24*3600*1000;
+    public static final String PARAM_GROUP_EXPIRATION_TIME_DEFAULT = "1d";
 
     /**
      * @see DefaultSyncConfig.Group#getExpirationTime()
      */
     @Property(
             label = "Group Expiration Time",
-            description = "Duration in milliseconds until a synced group expires.",
-            longValue = PARAM_GROUP_EXPIRATION_TIME_DEFAULT
+            description = "Duration until a synced group expires (eg. '1h 30m' or '1d').",
+            value = PARAM_GROUP_EXPIRATION_TIME_DEFAULT
     )
     public static final String PARAM_GROUP_EXPIRATION_TIME = "group.expirationTime";
 
@@ -255,7 +255,7 @@ public class DefaultSyncConfig {
          */
         @Nonnull
         public Set<String> getAutoMembership() {
-            return autoMembership;
+            return autoMembership == null ? Collections.<String>emptySet() : autoMembership;
         }
 
         /**
@@ -266,7 +266,12 @@ public class DefaultSyncConfig {
          */
         @Nonnull
         public Authorizable setAutoMembership(String ... autoMembership) {
-            this.autoMembership = new HashSet<String>(Arrays.asList(autoMembership));
+            this.autoMembership = new HashSet<String>();
+            for (String groupName: autoMembership) {
+                if (groupName.trim().length() > 0) {
+                    this.autoMembership.add(groupName.trim());
+                }
+            }
             return this;
         }
 
@@ -291,7 +296,7 @@ public class DefaultSyncConfig {
          */
         @Nonnull
         public Map<String, String> getPropertyMapping() {
-            return propertyMapping;
+            return propertyMapping == null ? Collections.<String, String>emptyMap() : propertyMapping;
         }
 
         /**
@@ -313,7 +318,7 @@ public class DefaultSyncConfig {
          */
         @Nonnull
         public String getPathPrefix() {
-            return pathPrefix;
+            return pathPrefix == null ? "" : pathPrefix;
         }
 
         /**
@@ -324,7 +329,7 @@ public class DefaultSyncConfig {
          */
         @Nonnull
         public Authorizable setPathPrefix(String pathPrefix) {
-            this.pathPrefix = pathPrefix == null ? "" : pathPrefix;
+            this.pathPrefix = pathPrefix;
             return this;
         }
     }
@@ -404,16 +409,22 @@ public class DefaultSyncConfig {
                 .setName(params.getConfigValue(PARAM_NAME, PARAM_NAME_DEFAULT));
 
         cfg.user()
-                .setMembershipExpirationTime(params.getConfigValue(PARAM_USER_MEMBERSHIP_EXPIRATION_TIME, PARAM_USER_MEMBERSHIP_EXPIRATION_TIME_DEFAULT))
+                .setMembershipExpirationTime(
+                        ConfigurationParameters.Milliseconds.of(params.getConfigValue(PARAM_USER_MEMBERSHIP_EXPIRATION_TIME, PARAM_USER_MEMBERSHIP_EXPIRATION_TIME_DEFAULT)).value
+                )
                 .setMembershipNestingDepth(params.getConfigValue(PARAM_USER_MEMBERSHIP_NESTING_DEPTH, PARAM_USER_MEMBERSHIP_NESTING_DEPTH_DEFAULT))
-                .setExpirationTime(params.getConfigValue(PARAM_USER_EXPIRATION_TIME, PARAM_USER_EXPIRATION_TIME_DEFAULT))
+                .setExpirationTime(
+                        ConfigurationParameters.Milliseconds.of(params.getConfigValue(PARAM_USER_EXPIRATION_TIME, PARAM_USER_EXPIRATION_TIME_DEFAULT)).value
+                )
                 .setPathPrefix(params.getConfigValue(PARAM_USER_PATH_PREFIX, PARAM_USER_PATH_PREFIX_DEFAULT))
                 .setAutoMembership(params.getConfigValue(PARAM_USER_AUTO_MEMBERSHIP, PARAM_USER_AUTO_MEMBERSHIP_DEFAULT))
                 .setPropertyMapping(createMapping(
                         params.getConfigValue(PARAM_USER_PROPERTY_MAPPING, PARAM_USER_PROPERTY_MAPPING_DEFAULT)));
 
         cfg.group()
-                .setExpirationTime(params.getConfigValue(PARAM_GROUP_EXPIRATION_TIME, PARAM_GROUP_EXPIRATION_TIME_DEFAULT))
+                .setExpirationTime(
+                        ConfigurationParameters.Milliseconds.of(params.getConfigValue(PARAM_GROUP_EXPIRATION_TIME, PARAM_GROUP_EXPIRATION_TIME_DEFAULT)).value
+                )
                 .setPathPrefix(params.getConfigValue(PARAM_GROUP_PATH_PREFIX, PARAM_GROUP_PATH_PREFIX_DEFAULT))
                 .setAutoMembership(params.getConfigValue(PARAM_GROUP_AUTO_MEMBERSHIP, PARAM_GROUP_AUTO_MEMBERSHIP_DEFAULT))
                 .setPropertyMapping(createMapping(

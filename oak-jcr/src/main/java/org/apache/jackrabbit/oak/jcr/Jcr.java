@@ -30,6 +30,7 @@ import org.apache.jackrabbit.oak.plugins.commit.ConflictValidatorProvider;
 import org.apache.jackrabbit.oak.plugins.commit.JcrConflictHandler;
 import org.apache.jackrabbit.oak.plugins.index.IndexEditorProvider;
 import org.apache.jackrabbit.oak.plugins.index.nodetype.NodeTypeIndexProvider;
+import org.apache.jackrabbit.oak.plugins.index.property.OrderedPropertyIndexEditorProvider;
 import org.apache.jackrabbit.oak.plugins.index.property.PropertyIndexEditorProvider;
 import org.apache.jackrabbit.oak.plugins.index.property.PropertyIndexProvider;
 import org.apache.jackrabbit.oak.plugins.index.reference.ReferenceEditorProvider;
@@ -46,6 +47,7 @@ import org.apache.jackrabbit.oak.spi.commit.ConflictHandler;
 import org.apache.jackrabbit.oak.spi.commit.Editor;
 import org.apache.jackrabbit.oak.spi.commit.EditorHook;
 import org.apache.jackrabbit.oak.spi.commit.EditorProvider;
+import org.apache.jackrabbit.oak.spi.commit.Observer;
 import org.apache.jackrabbit.oak.spi.lifecycle.RepositoryInitializer;
 import org.apache.jackrabbit.oak.spi.query.QueryIndexProvider;
 import org.apache.jackrabbit.oak.spi.security.SecurityProvider;
@@ -79,6 +81,8 @@ public class Jcr {
 
         with(new PropertyIndexProvider());
         with(new NodeTypeIndexProvider());
+        
+        with(new OrderedPropertyIndexEditorProvider());
     }
 
     public Jcr() {
@@ -147,6 +151,12 @@ public class Jcr {
     @Nonnull
     public final Jcr with(@Nonnull Executor executor) {
         oak.with(checkNotNull(executor));
+        return this;
+    }
+
+    @Nonnull
+    public final Jcr with(@Nonnull Observer observer) {
+        oak.with(checkNotNull(observer));
         return this;
     }
 

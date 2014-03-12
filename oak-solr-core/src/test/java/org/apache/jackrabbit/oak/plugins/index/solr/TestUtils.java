@@ -97,6 +97,11 @@ public class TestUtils
                 return CommitPolicy.HARD;
             }
 
+            @Override
+            public String getCatchAllField() {
+                return "catch_all";
+            }
+
         };
     }
 

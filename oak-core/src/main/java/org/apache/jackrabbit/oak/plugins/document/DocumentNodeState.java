@@ -52,6 +52,7 @@ import com.google.common.collect.Iterators;
 import com.google.common.collect.Maps;
 
 import static com.google.common.base.Preconditions.checkNotNull;
+import static org.apache.jackrabbit.oak.plugins.document.DocumentMK.MANY_CHILDREN_THRESHOLD;
 import static org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState.EMPTY_NODE;
 
 /**
@@ -71,19 +72,13 @@ class DocumentNodeState extends AbstractNodeState implements CacheValue {
      */
     static final int MAX_FETCH_SIZE = INITIAL_FETCH_SIZE << 4;
 
-    /**
-     * Number of child nodes beyond which {@link DocumentNodeStore#}
-     * is used for diffing.
-     */
-    public static final int LOCAL_DIFF_THRESHOLD = 10;
-
-    private final DocumentNodeStore store;
-
     final String path;
     final Revision rev;
     final Map<String, PropertyState> properties = Maps.newHashMap();
     Revision lastRevision;
     final boolean hasChildren;
+
+    private final DocumentNodeStore store;
 
     /**
      * TODO: OAK-1056
@@ -246,7 +241,7 @@ class DocumentNodeState extends AbstractNodeState implements CacheValue {
                     if (lastRevision.equals(mBase.lastRevision)) {
                         // no differences
                         return true;
-                    } else if (getChildNodeCount(LOCAL_DIFF_THRESHOLD) > LOCAL_DIFF_THRESHOLD) {
+                    } else if (getChildNodeCount(MANY_CHILDREN_THRESHOLD) > MANY_CHILDREN_THRESHOLD) {
                         // use DocumentNodeStore compare when there are many children
                         return dispatch(store.diffChildren(this, mBase), mBase, diff);
                     }
@@ -386,28 +381,25 @@ class DocumentNodeState extends AbstractNodeState implements CacheValue {
             }
             switch (r) {
                 case '+': {
-                    String path = t.readString();
+                    String name = t.readString();
                     t.read(':');
                     t.read('{');
                     while (t.read() != '}') {
                         // skip properties
                     }
-                    String name = PathUtils.getName(path);
                     continueComparison = diff.childNodeAdded(name, getChildNode(name));
                     break;
                 }
                 case '-': {
-                    String path = t.readString();
-                    String name = PathUtils.getName(path);
+                    String name = t.readString();
                     continueComparison = diff.childNodeDeleted(name, base.getChildNode(name));
                     break;
                 }
                 case '^': {
-                    String path = t.readString();
+                    String name = t.readString();
                     t.read(':');
                     if (t.matches('{')) {
                         t.read('}');
-                        String name = PathUtils.getName(path);
                         continueComparison = diff.childNodeChanged(name,
                                 base.getChildNode(name), getChildNode(name));
                     } else if (t.matches('[')) {
@@ -419,21 +411,6 @@ class DocumentNodeState extends AbstractNodeState implements CacheValue {
                         // ignore single valued property
                         t.read();
                     }
-                    break;
-                }
-                case '>': {
-                    String from = t.readString();
-                    t.read(':');
-                    String to = t.readString();
-                    String fromName = PathUtils.getName(from);
-                    continueComparison = diff.childNodeDeleted(
-                            fromName, base.getChildNode(fromName));
-                    if (!continueComparison) {
-                        break;
-                    }
-                    String toName = PathUtils.getName(to);
-                    continueComparison = diff.childNodeAdded(
-                            toName, getChildNode(toName));
                     break;
                 }
                 default:
@@ -483,6 +460,9 @@ class DocumentNodeState extends AbstractNodeState implements CacheValue {
      */
     public static class Children implements CacheValue {
 
+        /**
+         * Ascending sorted list of names of child nodes.
+         */
         final ArrayList<String> children = new ArrayList<String>();
         boolean hasMore;
 

@@ -54,8 +54,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
-
 import org.apache.jackrabbit.oak.plugins.index.aggregate.NodeAggregator;
+import org.apache.jackrabbit.oak.plugins.index.lucene.util.MoreLikeThisHelper;
 import org.apache.jackrabbit.oak.query.fulltext.FullTextAnd;
 import org.apache.jackrabbit.oak.query.fulltext.FullTextExpression;
 import org.apache.jackrabbit.oak.query.fulltext.FullTextOr;
@@ -79,6 +79,7 @@ import org.apache.lucene.index.MultiFields;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.index.Terms;
 import org.apache.lucene.index.TermsEnum;
+import org.apache.lucene.queries.mlt.MoreLikeThis;
 import org.apache.lucene.queryparser.classic.ParseException;
 import org.apache.lucene.queryparser.classic.QueryParser;
 import org.apache.lucene.search.BooleanClause;
@@ -104,11 +105,11 @@ import org.slf4j.LoggerFactory;
 
 /**
  * Provides a QueryIndex that does lookups against a Lucene-based index
- * 
+ *
  * <p>
  * To define a lucene index on a subtree you have to add an
  * <code>oak:index<code> node.
- * 
+ *
  * Under it follows the index definition node that:
  * <ul>
  * <li>must be of type <code>oak:QueryIndexDefinition</code></li>
@@ -137,9 +138,9 @@ import org.slf4j.LoggerFactory;
  * }
  * </code>
  * </pre>
- * 
+ *
  * @see QueryIndex
- * 
+ *
  */
 public class LuceneIndex implements FulltextQueryIndex {
 
@@ -200,7 +201,7 @@ public class LuceneIndex implements FulltextQueryIndex {
      * { "a", "c" } is returned. If there are no relative properties, then one
      * entry is returned (the empty string). If there is no expression, then an
      * empty set is returned.
-     * 
+     *
      * @param ft the full-text expression
      * @return the set of relative paths (possibly empty)
      */
@@ -409,7 +410,7 @@ public class LuceneIndex implements FulltextQueryIndex {
 
     /**
      * Get the Lucene query for the given filter.
-     * 
+     *
      * @param filter the filter, including full-text constraint
      * @param reader the Lucene reader
      * @param nonFullTextConstraints whether non-full-text constraints (such a
@@ -431,12 +432,23 @@ public class LuceneIndex implements FulltextQueryIndex {
         }
         PropertyRestriction pr = filter.getPropertyRestriction(NATIVE_QUERY_FUNCTION);
         if (pr != null) {
-            QueryParser queryParser = new QueryParser(VERSION, "", analyzer);
             String query = String.valueOf(pr.first.getValue(pr.first.getType()));
-            try {
-                qs.add(queryParser.parse(query));
-            } catch (ParseException e) {
-                throw new RuntimeException(e);
+            QueryParser queryParser = new QueryParser(VERSION, "", analyzer);
+            if (query.startsWith("mlt?")) {
+                String mltQueryString = query.replace("mlt?", "");
+                if (reader != null) {
+                    Query moreLikeThis = MoreLikeThisHelper.getMoreLikeThis(reader, analyzer, mltQueryString);
+                    if (moreLikeThis != null) {
+                        qs.add(moreLikeThis);
+                    }
+                }
+            }
+            else {
+                try {
+                    qs.add(queryParser.parse(query));
+                } catch (ParseException e) {
+                    throw new RuntimeException(e);
+                }
             }
         }
         else if (nonFullTextConstraints) {
@@ -707,7 +719,7 @@ public class LuceneIndex implements FulltextQueryIndex {
                 MultiPhraseQuery mpq = new MultiPhraseQuery();
                 for(String token: tokens){
                     if (hasFulltextToken(token)) {
-                        Term[] terms = extractMatchingTokens(reader, token);
+                        Term[] terms = extractMatchingTokens(reader, fieldName, token);
                         if (terms != null && terms.length > 0) {
                             mpq.add(terms);
                         }
@@ -726,7 +738,7 @@ public class LuceneIndex implements FulltextQueryIndex {
         }
     }
 
-    private static Term[] extractMatchingTokens(IndexReader reader, String token) {
+    private static Term[] extractMatchingTokens(IndexReader reader, String fieldName, String token) {
         if (reader == null) {
             // getPlan call
             return null;
@@ -734,13 +746,14 @@ public class LuceneIndex implements FulltextQueryIndex {
 
         try {
             List<Term> terms = new ArrayList<Term>();
-            Terms t = MultiFields.getTerms(reader, FieldNames.FULLTEXT);
-            Automaton a = WildcardQuery.toAutomaton(newFulltextTerm(token));
+            Term onTerm = newFulltextTerm(token, fieldName);
+            Terms t = MultiFields.getTerms(reader, onTerm.field());
+            Automaton a = WildcardQuery.toAutomaton(onTerm);
             CompiledAutomaton ca = new CompiledAutomaton(a);
             TermsEnum te = ca.getTermsEnum(t);
             BytesRef text;
             while ((text = te.next()) != null) {
-                terms.add(newFulltextTerm(text.utf8ToString()));
+                terms.add(newFulltextTerm(text.utf8ToString(), fieldName));
             }
             return terms.toArray(new Term[terms.size()]);
         } catch (IOException e) {
@@ -772,8 +785,8 @@ public class LuceneIndex implements FulltextQueryIndex {
     /**
      * Tries to merge back tokens that are split on relevant fulltext query
      * wildcards ('*' or '?')
-     * 
-     * 
+     *
+     *
      * @param text
      * @param analyzer
      * @return

@@ -2,13 +2,43 @@ Oak Runnable Jar
 ================
 
 This jar contains everything you need for a simple Oak installation.
-The following three runmodes are available:
+The following runmodes are currently available:
 
-    * Oak server
-    * MicroKernel server
-    * benchmark
+    * backup    : Backup an existing Oak repository
+    * benchmark : Run benchmark tests against different Oak repository fixtures.
+    * debug     : Print status information about an Oak repository.
+    * upgrade   : Upgrade from Jackrabbit 2.x repository to Oak.
+    * server    : Run the Oak Server
 
 See the subsections below for more details on how to use these modes.
+
+Backup
+------
+
+The 'backup' mode creates a backup from an existing oak repository. To start this
+mode, use:
+
+    $ java -jar oak-run-*.jar backup /path/to/repository /path/to/backup
+
+
+Debug
+-----
+
+The 'debug' mode allows to obtain information about the status of the specified
+store. Currently this is only supported for the segment store (aka tar mk). To
+start this mode, use:
+
+    $ java -jar oak-run-*.jar debug /path/to/oakrepository [id...]
+
+
+Upgrade
+-------
+
+The 'upgrade' mode allows to upgrade an existing Jackrabbit 2.x installation to
+Oak. To start the upgrade, use
+
+    $ java -jar oak-run-*.jar upgrade /path/to/jr2repository /path/to/oakrepository
+
 
 Oak server mode
 ---------------
@@ -17,33 +47,48 @@ The Oak server mode starts a full Oak instance with the standard JCR plugins
 and makes it available over a simple HTTP mapping defined in the `oak-http`
 component. To start this mode, use:
 
-    $ java -jar oak-run-*.jar [/path/to/mk...]
+    $ java -jar oak-run-*.jar server [uri] [fixture] [options]
 
 If no arguments are specified, the command starts an in-memory repository
-and makes it available at http://localhost:8080/. Possible path arguments
-specify the locations of on-disk MicroKernel backends that are each opened
-and mapped to URLs under http://localhost:8080/.
+and makes it available at http://localhost:8080/. Specify an `uri` and a
+`fixture` argument to change the host name and port and specify a different
+repository backend.
+
+The optional fixture argument allows to specify the repository implementation
+to be used. The following fixtures are currently supported:
+
+| Fixture     | Description                                           |
+|-------------|-------------------------------------------------------|
+| Jackrabbit  | Jackrabbit with the default embedded Derby  bundle PM |
+| Oak-Memory  | Oak with default in-memory storage                    |
+| Oak-MemoryNS| Oak with default in-memory NodeStore                  |
+| Oak-MemoryMK| Oak with default in-memory MicroKernel                |
+| Oak-Mongo   | Oak with the default Mongo backend                    |
+| Oak-MongoNS | Oak with the Mongo NodeStore                          |
+| Oak-MongoMK | Oak with the Mongo MicroKernel                        |
+| Oak-Tar     | Oak with the Tar backend (aka Segment NodeStore)      |
+| Oak-H2      | Oak with the MK using embedded H2 database            |
+
+
+Depending on the fixture the following options are available:
+
+    --cache 100            - cache size (in MB)
+    --host localhost       - MongoDB host
+    --port 27101           - MongoDB port
+    --db <name>            - MongoDB database (default is a generated name)
+    --clusterIds           - Cluster Ids for the Mongo setup: a comma separated list of integers
+    --base <file>          - Tar and H2: Path to the base file
+    --mmap <64bit?>        - TarMK memory mapping (the default on 64 bit JVMs)
+
+Examples:
+
+    $ java -jar oak-run-*.jar server
+    $ java -jar oak-run-*.jar server http://localhost:4503 Oak-Tar --base myOak
+    $ java -jar oak-run-*.jar server http://localhost:4502 Oak-Mongo --db myOak --clusterIds c1,c2,c3
 
 See the documentation in the `oak-http` component for details about the
 available functionality.
 
-MicroKernel server mode
------------------------
-
-The MicroKernel server mode starts a MicroKernel instance and makes it
-available over HTTP mapping defined in the `oak-mk-remote` component.
-To start this mode, use:
-
-    $ java -jar oak-run-*.jar mk /path/to/mk [port] [bindaddr]
-
-The given path specific the directory that contains the MicroKernel backend.
-The optional `port` and `bindaddr` arguments can be used to control the
-address of the HTTP mapping.
-
-The resulting web interface at http://localhost:8080/ (with default
-`bindaddr` and `port` values) maps simple HTTP forms to the respective
-MicroKernel methods. See the javadocs of the MicroKernel interface for
-more details.
 
 Benchmark mode
 --------------
@@ -59,6 +104,7 @@ The following benchmark options (with default values) are currently supported:
     --port 27101           - MongoDB port
     --db <name>            - MongoDB database (default is a generated name)
     --dropDBAfterTest true - Whether to drop the MongoDB database after the test
+    --base target          - Path to the base file (Tar and H2 setup),
     --mmap <64bit?>        - TarMK memory mapping (the default on 64 bit JVMs)
     --cache 100            - cache size (in MB)
     --wikipedia <file>     - Wikipedia dump
@@ -109,16 +155,21 @@ Finally the benchmark runner supports the following repository fixtures:
 | Fixture     | Description                                           |
 |-------------|-------------------------------------------------------|
 | Jackrabbit  | Jackrabbit with the default embedded Derby  bundle PM |
-| Oak-Memory  | Oak with the default MK using in-memory storage       |
-| Oak-Default | Oak with the default MK using embedded H2 database    |
-| Oak-Mongo   | Oak with the new MongoMK                              |
-| Oak-Tar     | Oak with the TarMK                                    |
+| Oak-Memory  | Oak with default in-memory storage                    |
+| Oak-MemoryNS| Oak with default in-memory NodeStore                  |
+| Oak-MemoryMK| Oak with default in-memory MicroKernel                |
+| Oak-Mongo   | Oak with the default Mongo backend                    |
+| Oak-MongoNS | Oak with the Mongo NodeStore                          |
+| Oak-MongoMK | Oak with the Mongo MicroKernel                        |
+| Oak-Tar     | Oak with the Tar backend (aka Segment NodeStore)      |
+| Oak-H2      | Oak with the MK using embedded H2 database            |
+
 
 Once started, the benchmark runner will execute each listed test case
 against all the listed repository fixtures. After starting up the
 repository and preparing the test environment, the test case is first
 executed a few times to warm up caches before measurements are
-started. Then the test case is run repeatedly for one minute 
+started. Then the test case is run repeatedly for one minute
 and the number of milliseconds used by each execution
 is recorded. Once done, the following statistics are computed and
 reported:

@@ -76,11 +76,11 @@ public class BenchmarkRunner {
         OptionSet options = parser.parse(args);
         int cacheSize = cache.value(options);
         RepositoryFixture[] allFixtures = new RepositoryFixture[] {
-                new JackrabbitRepositoryFixture(
-                        base.value(options), cacheSize),
+                new JackrabbitRepositoryFixture(base.value(options), cacheSize),
                 OakRepositoryFixture.getMemory(cacheSize * MB),
-                OakRepositoryFixture.getDefault(
-                        base.value(options), cacheSize * MB),
+                OakRepositoryFixture.getMemoryNS(cacheSize * MB),
+                OakRepositoryFixture.getMemoryMK(cacheSize * MB),
+                OakRepositoryFixture.getH2MK(base.value(options), cacheSize * MB),
                 OakRepositoryFixture.getMongo(
                         host.value(options), port.value(options),
                         dbName.value(options), dropDBAfterTest.value(options),
@@ -97,6 +97,13 @@ public class BenchmarkRunner {
                         base.value(options), 256, cacheSize, mmap.value(options))
         };
         Benchmark[] allBenchmarks = new Benchmark[] {
+            new OrderedIndexQueryOrderedIndexTest(),
+            new OrderedIndexQueryStandardIndexTest(),
+            new OrderedIndexQueryNoIndexTest(),
+            new OrderedIndexInsertOrderedPropertyTest(),
+            new OrderedIndexInsertStandardPropertyTest(),
+            new OrderedIndexInsertNoIndexTest(),
+            new OrderByQueryTest(),
             new LoginTest(),
             new LoginLogoutTest(),
             new NamespaceTest(),
@@ -150,6 +157,14 @@ public class BenchmarkRunner {
                     runAsAdmin.value(options),
                     itemsToRead.value(options),
                     report.value(options)),
+            new ConcurrentHasPermissionTest(
+                    runAsAdmin.value(options),
+                    itemsToRead.value(options),
+                    report.value(options)),
+            new ConcurrentHasPermissionTest2(
+                    runAsAdmin.value(options),
+                    itemsToRead.value(options),
+                    report.value(options)),
             new ManyUserReadTest(
                     runAsAdmin.value(options),
                     itemsToRead.value(options),
@@ -160,6 +175,8 @@ public class BenchmarkRunner {
                     itemsToRead.value(options),
                     report.value(options),
                     randomUser.value(options)),
+            new ConcurrentWriteACLTest(itemsToRead.value(options)),
+            new ConcurrentEveryoneACLTest(runAsAdmin.value(options), itemsToRead.value(options)),
             ReadManyTest.linear("LinearReadEmpty", 1, ReadManyTest.EMPTY),
             ReadManyTest.linear("LinearReadFiles", 1, ReadManyTest.FILES),
             ReadManyTest.linear("LinearReadNodes", 1, ReadManyTest.NODES),
