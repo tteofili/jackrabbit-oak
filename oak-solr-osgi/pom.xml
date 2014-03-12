@@ -27,9 +27,9 @@
         <relativePath>../oak-parent/pom.xml</relativePath>
     </parent>
 
-    <artifactId>oak-fulltext</artifactId>
-    <name>Oak Fulltext</name>
-    <description>Oak OSGi package for full text indexers</description>
+    <artifactId>oak-solr-osgi</artifactId>
+    <name>Oak Solr OSGi</name>
+    <description>Oak Solr OSGi support</description>
     <packaging>bundle</packaging>
 
     <properties>
@@ -58,26 +58,38 @@
                             *
                         </Import-Package>
                         <Export-Package>
-                            !org.apache.jackrabbit.oak.plugins.index.solr.osgi,
-                            org.apache.jackrabbit.oak.plugins.index.*
+                            org.apache.jackrabbit.oak.plugins.index.solr.configuration,
+                            org.apache.jackrabbit.oak.plugins.index.solr.index,
+                            org.apache.jackrabbit.oak.plugins.index.solr.query,
+                            org.apache.jackrabbit.oak.plugins.index.solr.server,
+                            org.apache.jackrabbit.oak.plugins.index.solr.util
                         </Export-Package>
                         <Embed-Dependency>*;scope=runtime;inline=true</Embed-Dependency>
+                        <Service-Component>OSGI-INF/org.apache.jackrabbit.oak.plugins.index.solr
+                            .osgi.SolrQueryIndexProviderService.xml,OSGI-INF/org.apache.jackrabbit.
+                            oak.plugins.index.solr.osgi.SolrServerProviderFactoryService.xml,OSGI-I
+                            NF/org.apache.jackrabbit.oak.plugins.index.solr.osgi.SolrIndexEditorPro
+                            viderService.xml,OSGI-INF/org.apache.jackrabbit.oak.plugins.index.solr.
+                            osgi.EmbeddedSolrServerConfigurationProvider.xml,OSGI-INF/org.apache.ja
+                            ckrabbit.oak.plugins.index.solr.osgi.RemoteSolrServerConfigurationProvi
+                            der.xml,OSGI-INF/org.apache.jackrabbit.oak.plugins.index.solr.osgi.OakS
+                            olrConfigurationProviderService.xml</Service-Component>
                     </instructions>
                 </configuration>
             </plugin>
-            <plugin>
-                <groupId>org.apache.felix</groupId>
-                <artifactId>maven-scr-plugin</artifactId>
-            </plugin>
+            <!--<plugin>-->
+                <!--<groupId>org.apache.felix</groupId>-->
+                <!--<artifactId>maven-scr-plugin</artifactId>-->
+            <!--</plugin>-->
         </plugins>
     </build>
 
     <dependencies>
-        <dependency>
-            <groupId>org.apache.felix</groupId>
-            <artifactId>org.apache.felix.scr.annotations</artifactId>
-            <scope>provided</scope>
-        </dependency>
+        <!--<dependency>-->
+            <!--<groupId>org.apache.felix</groupId>-->
+            <!--<artifactId>org.apache.felix.scr.annotations</artifactId>-->
+            <!--<scope>provided</scope>-->
+        <!--</dependency>-->
 
         <dependency>
             <groupId>org.osgi</groupId>
@@ -102,13 +114,6 @@
         <dependency>
             <groupId>org.apache.jackrabbit</groupId>
             <artifactId>oak-solr-core</artifactId>
-            <version>${project.version}</version>
-            <scope>runtime</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.jackrabbit</groupId>
-            <artifactId>oak-lucene</artifactId>
             <version>${project.version}</version>
             <scope>runtime</scope>
         </dependency>
