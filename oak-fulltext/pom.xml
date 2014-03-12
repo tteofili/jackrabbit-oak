@@ -57,6 +57,10 @@
                             org.joda.time.*;resolution:=optional,
                             *
                         </Import-Package>
+                        <Export-Package>
+                            !org.apache.jackrabbit.oak.plugins.index.solr.osgi,
+                            org.apache.jackrabbit.oak.plugins.index.*
+                        </Export-Package>
                         <Embed-Dependency>*;scope=runtime</Embed-Dependency>
                     </instructions>
                 </configuration>
