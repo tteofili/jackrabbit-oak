@@ -61,7 +61,7 @@ public class SolrServerProviderFactoryService implements SolrServerProviderFacto
             @PropertyOption(name = "remote",
                     value = "Remote Solr"
             )},
-            value = "remote"
+            value = ""
     )
     private static final String SERVER_TYPE = "server.type";
 
@@ -107,20 +107,22 @@ public class SolrServerProviderFactoryService implements SolrServerProviderFacto
     public SolrServerProvider getSolrServerProvider() {
         SolrServerProvider solrServerProvider = null;
         synchronized (solrServerConfigurationProviders) {
+            if (serverType != null && serverType.length() > 0) {
             SolrServerConfigurationProvider solrServerConfigurationProvider = solrServerConfigurationProviders.get(serverType);
-            try {
-                if (solrServerConfigurationProvider != null) {
-                    SolrServerConfiguration solrServerConfiguration = solrServerConfigurationProvider.getSolrServerConfiguration();
-                    if (solrServerConfiguration != cachedSolrServerConfiguration) {
-                        solrServerProvider = solrServerConfiguration.newInstance();
-                        cachedSolrServerConfiguration = solrServerConfiguration;
-                        cachedSolrServerProvider = solrServerProvider;
-                    } else {
-                        solrServerProvider = cachedSolrServerProvider;
+                try {
+                    if (solrServerConfigurationProvider != null) {
+                        SolrServerConfiguration solrServerConfiguration = solrServerConfigurationProvider.getSolrServerConfiguration();
+                        if (solrServerConfiguration != cachedSolrServerConfiguration) {
+                            solrServerProvider = solrServerConfiguration.newInstance();
+                            cachedSolrServerConfiguration = solrServerConfiguration;
+                            cachedSolrServerProvider = solrServerProvider;
+                        } else {
+                            solrServerProvider = cachedSolrServerProvider;
+                        }
                     }
+                } catch (Exception e) {
+                    log.error("could not get a SolrServerProvider of type {}, {}", serverType, e);
                 }
-            } catch (Exception e) {
-                log.error("could not get a SolrServerProvider of type {}, {}", serverType, e);
             }
         }
         return solrServerProvider;

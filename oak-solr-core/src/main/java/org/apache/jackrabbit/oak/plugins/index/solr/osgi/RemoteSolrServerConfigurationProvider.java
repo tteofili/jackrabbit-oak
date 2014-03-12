@@ -60,10 +60,6 @@ public class RemoteSolrServerConfigurationProvider implements SolrServerConfigur
     @Property(value = "", label = "Solr configuration directory")
     private static final String SOLR_CONF_DIR = "solr.conf.dir";
 
-    @Property(value = DEFAULT_CATCHALL_FIELD,label = "catch all field")
-    private static final String CATCH_ALL_FIELD = "catch.all.field";
-
-
     private String solrHttpUrl;
     private String solrZkHost;
     private String solrCollection;
@@ -71,7 +67,6 @@ public class RemoteSolrServerConfigurationProvider implements SolrServerConfigur
     private int solrReplicationFactor;
     private String solrConfDir;
     private RemoteSolrServerConfiguration remoteSolrServerConfiguration;
-    private String catchAllField;
 
   @Activate
     protected void activate(ComponentContext componentContext) throws Exception {
@@ -81,7 +76,6 @@ public class RemoteSolrServerConfigurationProvider implements SolrServerConfigur
         solrShardsNo = Integer.valueOf(componentContext.getProperties().get(SOLR_SHARDS_NO).toString());
         solrReplicationFactor = Integer.valueOf(componentContext.getProperties().get(SOLR_REPLICATION_FACTOR).toString());
         solrConfDir = String.valueOf(componentContext.getProperties().get(SOLR_CONF_DIR));
-        catchAllField = String.valueOf(componentContext.getProperties().get(CATCH_ALL_FIELD));
     }
 
     @Deactivate
