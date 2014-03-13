@@ -55,13 +55,16 @@ public class SolrServerProviderFactoryService implements SolrServerProviderFacto
     private final Logger log = LoggerFactory.getLogger(getClass());
 
     @Property(options = {
+            @PropertyOption(name = "none",
+                    value = "None"
+            ),
             @PropertyOption(name = "embedded",
                     value = "Embedded Solr"
             ),
             @PropertyOption(name = "remote",
                     value = "Remote Solr"
             )},
-            value = ""
+            value = "none"
     )
     private static final String SERVER_TYPE = "server.type";
 
@@ -107,7 +110,7 @@ public class SolrServerProviderFactoryService implements SolrServerProviderFacto
     public SolrServerProvider getSolrServerProvider() {
         SolrServerProvider solrServerProvider = null;
         synchronized (solrServerConfigurationProviders) {
-            if (serverType != null && serverType.length() > 0) {
+            if (serverType != null && !"none".equals(serverType)) {
                 SolrServerConfigurationProvider solrServerConfigurationProvider = solrServerConfigurationProviders.get(serverType);
                 try {
                     if (solrServerConfigurationProvider != null) {
