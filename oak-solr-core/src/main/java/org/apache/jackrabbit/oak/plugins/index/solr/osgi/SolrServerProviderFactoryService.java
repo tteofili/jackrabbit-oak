@@ -108,7 +108,7 @@ public class SolrServerProviderFactoryService implements SolrServerProviderFacto
         SolrServerProvider solrServerProvider = null;
         synchronized (solrServerConfigurationProviders) {
             if (serverType != null && serverType.length() > 0) {
-            SolrServerConfigurationProvider solrServerConfigurationProvider = solrServerConfigurationProviders.get(serverType);
+                SolrServerConfigurationProvider solrServerConfigurationProvider = solrServerConfigurationProviders.get(serverType);
                 try {
                     if (solrServerConfigurationProvider != null) {
                         SolrServerConfiguration solrServerConfiguration = solrServerConfigurationProvider.getSolrServerConfiguration();

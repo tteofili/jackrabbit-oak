@@ -40,7 +40,6 @@ public class RemoteSolrServerConfigurationProvider implements SolrServerConfigur
     private static final String DEFAULT_ZK_HOST = "";
     private static final int DEFAULT_SHARDS_NO = 2;
     private static final int DEFAULT_REPLICATION_FACTOR = 2;
-    private static final String DEFAULT_CATCHALL_FIELD = "catch_all";
 
     @Property(value = DEFAULT_HTTP_URL, label = "Solr HTTP URL")
     private static final String SOLR_HTTP_URL = "solr.http.url";
@@ -68,7 +67,7 @@ public class RemoteSolrServerConfigurationProvider implements SolrServerConfigur
     private String solrConfDir;
     private RemoteSolrServerConfiguration remoteSolrServerConfiguration;
 
-  @Activate
+    @Activate
     protected void activate(ComponentContext componentContext) throws Exception {
         solrHttpUrl = String.valueOf(componentContext.getProperties().get(SOLR_HTTP_URL));
         solrZkHost = String.valueOf(componentContext.getProperties().get(SOLR_ZK_HOST));
@@ -76,6 +75,7 @@ public class RemoteSolrServerConfigurationProvider implements SolrServerConfigur
         solrShardsNo = Integer.valueOf(componentContext.getProperties().get(SOLR_SHARDS_NO).toString());
         solrReplicationFactor = Integer.valueOf(componentContext.getProperties().get(SOLR_REPLICATION_FACTOR).toString());
         solrConfDir = String.valueOf(componentContext.getProperties().get(SOLR_CONF_DIR));
+        remoteSolrServerConfiguration = new RemoteSolrServerConfiguration(solrZkHost, solrCollection, solrShardsNo, solrReplicationFactor, solrConfDir, solrHttpUrl);
     }
 
     @Deactivate
