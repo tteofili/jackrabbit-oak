@@ -29,6 +29,7 @@ public class ClockTest {
     public void testClockDrift() throws InterruptedException {
         ScheduledExecutorService executor =
                 Executors.newSingleThreadScheduledExecutor();
+        final long limit = 20;
         try {
             Clock[] clocks = new Clock[] {
                     Clock.SIMPLE,
@@ -38,14 +39,38 @@ public class ClockTest {
 
             for (Clock clock : clocks) {
                 long drift = clock.getTime() - System.currentTimeMillis();
-                assertTrue(Math.abs(drift) < 20); // Windows can have 15ms gaps
+                assertTrue("unexpected drift: " + Math.abs(drift) + " (limit " + limit +")", Math.abs(drift) < limit); // Windows can have 15ms gaps
             }
 
             Thread.sleep(100);
 
             for (Clock clock : clocks) {
                 long drift = clock.getTime() - System.currentTimeMillis();
-                assertTrue(Math.abs(drift) < 20);
+                assertTrue("unexpected drift: " + Math.abs(drift) + " (limit " + limit +")", Math.abs(drift) < limit);
+            }
+        } finally {
+            executor.shutdown();
+        }
+    }
+
+    @Test
+    public void testClockIncreasing() throws InterruptedException {
+        ScheduledExecutorService executor =
+                Executors.newSingleThreadScheduledExecutor();
+        try {
+            Clock[] clocks = new Clock[] {
+                    Clock.SIMPLE,
+                    Clock.ACCURATE,
+                    new Clock.Fast(executor)
+            };
+
+            long[] time = new long[clocks.length];
+            for (int i = 0; i < 10; i++) {
+                for (int j = 0; j < clocks.length; j++) {
+                    long now = clocks[j].getTimeIncreasing();
+                    assertTrue(time[j] < now);
+                    time[j] = now;
+                }
             }
         } finally {
             executor.shutdown();
