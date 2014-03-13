@@ -1,19 +1,3 @@
-/*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.
- * The ASF licenses this file to You under the Apache License, Version 2.0
- * (the "License"); you may not use this file except in compliance with
- * the License.  You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 package org.apache.jackrabbit.oak.plugins.index.solr.osgi;
 
 import java.util.HashMap;
@@ -31,6 +15,7 @@ import org.apache.felix.scr.annotations.Service;
 import org.apache.jackrabbit.oak.plugins.index.solr.configuration.SolrServerConfiguration;
 import org.apache.jackrabbit.oak.plugins.index.solr.configuration.SolrServerConfigurationProvider;
 import org.apache.jackrabbit.oak.plugins.index.solr.server.SolrServerProvider;
+import org.apache.solr.client.solrj.SolrServer;
 import org.osgi.service.component.ComponentContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -49,8 +34,8 @@ import org.slf4j.LoggerFactory;
                 updated = "updateSolrServerConfigurationProvider"
         )
 })
-@Service(SolrServerProviderFactory.class)
-public class SolrServerProviderFactoryService implements SolrServerProviderFactory {
+@Service(SolrServerProvider.class)
+public class SolrServerProviderService implements SolrServerProvider {
 
     private final Logger log = LoggerFactory.getLogger(getClass());
 
@@ -72,7 +57,8 @@ public class SolrServerProviderFactoryService implements SolrServerProviderFacto
 
     private String serverType;
 
-    private SolrServerProvider cachedSolrServerProvider;
+    private SolrServer cachedSolrServer;
+
     private SolrServerConfiguration cachedSolrServerConfiguration;
 
     @Activate
@@ -83,6 +69,15 @@ public class SolrServerProviderFactoryService implements SolrServerProviderFacto
     @Deactivate
     protected void deactivate() throws Exception {
         solrServerConfigurationProviders.clear();
+        if (cachedSolrServer != null) {
+            try {
+                cachedSolrServer.shutdown();
+            } catch (Exception e) {
+                log.error("could not correctly shutdown Solr {} server {}", serverType, cachedSolrServer);
+            } finally {
+                cachedSolrServer = null;
+            }
+        }
     }
 
     protected void bindSolrServerConfigurationProvider(final SolrServerConfigurationProvider solrServerConfigurationProvider, Map<String, Object> properties) {
@@ -107,8 +102,8 @@ public class SolrServerProviderFactoryService implements SolrServerProviderFacto
     }
 
     @Override
-    public SolrServerProvider getSolrServerProvider() {
-        SolrServerProvider solrServerProvider = null;
+    public SolrServer getSolrServer() throws Exception {
+        SolrServer solrServer = null;
         synchronized (solrServerConfigurationProviders) {
             if (serverType != null && !"none".equals(serverType)) {
                 SolrServerConfigurationProvider solrServerConfigurationProvider = solrServerConfigurationProviders.get(serverType);
@@ -116,11 +111,14 @@ public class SolrServerProviderFactoryService implements SolrServerProviderFacto
                     if (solrServerConfigurationProvider != null) {
                         SolrServerConfiguration solrServerConfiguration = solrServerConfigurationProvider.getSolrServerConfiguration();
                         if (solrServerConfiguration != cachedSolrServerConfiguration) {
-                            solrServerProvider = solrServerConfiguration.newInstance();
+                            SolrServerProvider solrServerProvider = solrServerConfiguration.newInstance();
                             cachedSolrServerConfiguration = solrServerConfiguration;
-                            cachedSolrServerProvider = solrServerProvider;
+                            if (cachedSolrServer != null) {
+                                cachedSolrServer.shutdown();
+                            }
+                            cachedSolrServer = solrServerProvider.getSolrServer();
                         } else {
-                            solrServerProvider = cachedSolrServerProvider;
+                            solrServer = cachedSolrServer;
                         }
                     }
                 } catch (Exception e) {
@@ -128,6 +126,7 @@ public class SolrServerProviderFactoryService implements SolrServerProviderFacto
                 }
             }
         }
-        return solrServerProvider;
+        return solrServer;
     }
+
 }

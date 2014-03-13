@@ -64,7 +64,7 @@
                         <Embed-Dependency>*;scope=runtime;inline=true</Embed-Dependency>
                         <Service-Component>OSGI-INF/org.apache.jackrabbit.oak.plugins.index.solr
                             .osgi.SolrQueryIndexProviderService.xml,OSGI-INF/org.apache.jackrabbit.
-                            oak.plugins.index.solr.osgi.SolrServerProviderFactoryService.xml,OSGI-I
+                            oak.plugins.index.solr.osgi.SolrServerProviderService.xml,OSGI-I
                             NF/org.apache.jackrabbit.oak.plugins.index.solr.osgi.SolrIndexEditorPro
                             viderService.xml,OSGI-INF/org.apache.jackrabbit.oak.plugins.index.solr.
                             osgi.EmbeddedSolrServerConfigurationProvider.xml,OSGI-INF/org.apache.ja

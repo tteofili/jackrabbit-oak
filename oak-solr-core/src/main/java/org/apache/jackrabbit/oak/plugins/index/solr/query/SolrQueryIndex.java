@@ -18,6 +18,7 @@ package org.apache.jackrabbit.oak.plugins.index.solr.query;
 
 import java.util.Collection;
 import javax.annotation.CheckForNull;
+import org.apache.jackrabbit.JcrConstants;
 import org.apache.jackrabbit.oak.api.PropertyValue;
 import org.apache.jackrabbit.oak.plugins.index.aggregate.NodeAggregator;
 import org.apache.jackrabbit.oak.plugins.index.solr.configuration.OakSolrConfiguration;
@@ -68,7 +69,8 @@ public class SolrQueryIndex implements FulltextQueryIndex {
 
     @Override
     public double getCost(Filter filter, NodeState root) {
-        if (filter.getFullTextConstraint() == null && filter.getFulltextConditions() == null) {
+        if (filter.getFullTextConstraint() == null && filter.getFulltextConditions() == null ||
+                (filter.getPropertyRestrictions() != null && filter.getPropertyRestrictions().size() == 1 && filter.getPropertyRestriction(JcrConstants.JCR_UUID) != null)) {
             return Double.POSITIVE_INFINITY;
         }
         int cost = 10;
