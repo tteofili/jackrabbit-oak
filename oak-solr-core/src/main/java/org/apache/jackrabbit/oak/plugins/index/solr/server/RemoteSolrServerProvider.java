@@ -92,7 +92,7 @@ public class RemoteSolrServerProvider implements SolrServerProvider {
             createCollectionIfNeeded(cloudSolrServer);
         } catch (Throwable t) {
             if (log.isWarnEnabled()) {
-                log.warn("could not create the collection on {}, {}", remoteSolrServerConfiguration.getSolrZkHost(), t);
+                log.warn("could not create the collection on {}", remoteSolrServerConfiguration.getSolrZkHost(), t);
             }
         }
 
@@ -106,7 +106,7 @@ public class RemoteSolrServerProvider implements SolrServerProvider {
                 if (ping != null && 0 == ping.getStatus()) {
                     return cloudSolrServer;
                 } else {
-                    throw new IOException("the found HTTP Solr server is not alive");
+                    throw new IOException("the found SolrCloud server is not alive");
                 }
             } catch (Exception e) {
                 // wait a bit

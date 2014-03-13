@@ -215,10 +215,13 @@ public class SolrQueryIndex implements FulltextQueryIndex {
 
     private void setDefaults(SolrQuery solrQuery) {
         solrQuery.setParam("q.op", "AND");
-        solrQuery.setParam("df", configuration.getCatchAllField());
+        String catchAllField = configuration.getCatchAllField();
+        if (catchAllField != null && catchAllField.length() > 0) {
+            solrQuery.setParam("df", catchAllField);
+        }
 
         // TODO : can we handle this better? e.g. with deep paging support?
-        solrQuery.setParam("rows", String.valueOf(Integer.MAX_VALUE));
+        solrQuery.setParam("rows", "100000");
     }
 
     private static String createRangeQuery(String first, String last, boolean firstIncluding, boolean lastIncluding) {
