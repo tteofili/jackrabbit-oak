@@ -31,6 +31,7 @@ import org.apache.jackrabbit.oak.plugins.commit.JcrConflictHandler;
 import org.apache.jackrabbit.oak.plugins.index.IndexEditorProvider;
 import org.apache.jackrabbit.oak.plugins.index.nodetype.NodeTypeIndexProvider;
 import org.apache.jackrabbit.oak.plugins.index.property.OrderedPropertyIndexEditorProvider;
+import org.apache.jackrabbit.oak.plugins.index.property.OrderedPropertyIndexProvider;
 import org.apache.jackrabbit.oak.plugins.index.property.PropertyIndexEditorProvider;
 import org.apache.jackrabbit.oak.plugins.index.property.PropertyIndexProvider;
 import org.apache.jackrabbit.oak.plugins.index.reference.ReferenceEditorProvider;
@@ -42,6 +43,7 @@ import org.apache.jackrabbit.oak.plugins.nodetype.TypeEditorProvider;
 import org.apache.jackrabbit.oak.plugins.nodetype.write.InitialContent;
 import org.apache.jackrabbit.oak.plugins.observation.CommitRateLimiter;
 import org.apache.jackrabbit.oak.plugins.version.VersionEditorProvider;
+import org.apache.jackrabbit.oak.query.QueryEngineSettings;
 import org.apache.jackrabbit.oak.security.SecurityProviderImpl;
 import org.apache.jackrabbit.oak.spi.commit.CommitHook;
 import org.apache.jackrabbit.oak.spi.commit.ConflictHandler;
@@ -55,7 +57,7 @@ import org.apache.jackrabbit.oak.spi.security.SecurityProvider;
 import org.apache.jackrabbit.oak.spi.state.NodeStore;
 
 public class Jcr {
-    private static final int DEFAULT_OBSERVATION_QUEUE_LENGTH = 1000;
+    public static final int DEFAULT_OBSERVATION_QUEUE_LENGTH = 1000;
 
     private final Oak oak;
 
@@ -84,6 +86,7 @@ public class Jcr {
         with(new PropertyIndexEditorProvider());
 
         with(new PropertyIndexProvider());
+        with(new OrderedPropertyIndexProvider());
         with(new NodeTypeIndexProvider());
         
         with(new OrderedPropertyIndexEditorProvider());
@@ -180,6 +183,12 @@ public class Jcr {
     public Jcr with(CommitRateLimiter commitRateLimiter) {
         oak.with(commitRateLimiter);
         this.commitRateLimiter = commitRateLimiter;
+        return this;
+    }
+    
+    @Nonnull
+    public Jcr with(QueryEngineSettings qs) {
+        oak.with(qs);
         return this;
     }
 

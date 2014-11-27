@@ -30,14 +30,22 @@ public class SolrServerConfigurationTest {
     @Test
     public void testCreateRemoteServerFromConfig() throws Exception {
         SolrServerConfiguration<RemoteSolrServerProvider> remoteSolrServerProviderSolrServerConfiguration = new RemoteSolrServerConfiguration(null, null, 1, 1, null);
+<<<<<<< HEAD
         RemoteSolrServerProvider remoteSolrServerProvider = remoteSolrServerProviderSolrServerConfiguration.newInstance();
+=======
+        RemoteSolrServerProvider remoteSolrServerProvider = remoteSolrServerProviderSolrServerConfiguration.getProvider();
+>>>>>>> 946101f1867fca376a421a5346a53559d0aaf516
         assertNotNull(remoteSolrServerProvider);
     }
 
     @Test
     public void testCreteEmbeddedServerFromConfig() throws Exception {
         SolrServerConfiguration<EmbeddedSolrServerProvider> embeddedSolrServerSolrServerConfiguration = new EmbeddedSolrServerConfiguration(null, null, null);
+<<<<<<< HEAD
         EmbeddedSolrServerProvider embeddedSolrServerProvider = embeddedSolrServerSolrServerConfiguration.newInstance();
+=======
+        EmbeddedSolrServerProvider embeddedSolrServerProvider = embeddedSolrServerSolrServerConfiguration.getProvider();
+>>>>>>> 946101f1867fca376a421a5346a53559d0aaf516
         assertNotNull(embeddedSolrServerProvider);
     }
 }

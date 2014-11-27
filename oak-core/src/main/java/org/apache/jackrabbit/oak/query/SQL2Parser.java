@@ -102,6 +102,10 @@ public class SQL2Parser {
     private boolean supportSQL1;
 
     private NamePathMapper namePathMapper;
+    
+    private final QueryEngineSettings settings;
+    
+    private boolean literalUsageLogged;
 
     /**
      * Create a new parser. A parser can be re-used, but it is not thread safe.
@@ -109,9 +113,10 @@ public class SQL2Parser {
      * @param namePathMapper the name-path mapper to use
      * @param types the node with the node type information
      */
-    public SQL2Parser(NamePathMapper namePathMapper, NodeState types) {
+    public SQL2Parser(NamePathMapper namePathMapper, NodeState types, QueryEngineSettings settings) {
         this.namePathMapper = namePathMapper;
         this.types = checkNotNull(types);
+        this.settings = checkNotNull(settings);
     }
 
     /**
@@ -143,7 +148,7 @@ public class SQL2Parser {
             }
             boolean unionAll = readIf("ALL");
             QueryImpl q2 = parseSelect();
-            q = new UnionQueryImpl(unionAll, q, q2);
+            q = new UnionQueryImpl(unionAll, q, q2, settings);
         }
         OrderingImpl[] orderings = null;
         if (readIf("ORDER")) {
@@ -183,7 +188,7 @@ public class SQL2Parser {
             constraint = parseConstraint();
         }
         QueryImpl q = new QueryImpl(
-                statement, source, constraint, columnArray, namePathMapper);
+                statement, source, constraint, columnArray, namePathMapper, settings);
         q.setDistinct(distinct);
         return q;
     }
@@ -512,6 +517,32 @@ public class SQL2Parser {
                 c = factory.descendantNode(name, readAbsolutePath());
             } else {
                 c = factory.descendantNode(getOnlySelectorName(), name);
+            }
+        } else if ("SIMILAR".equalsIgnoreCase(functionName)) {
+            if (readIf(".") || readIf("*")) {
+                read(",");
+                c = factory.similar(
+                        getOnlySelectorName(), null, parseStaticOperand());
+            } else {
+                String name = readName();
+                if (readIf(".")) {
+                    if (readIf("*")) {
+                        read(",");
+                        c = factory.fullTextSearch(
+                                name, null, parseStaticOperand());
+                    } else {
+                        String selector = name;
+                        name = readName();
+                        read(",");
+                        c = factory.fullTextSearch(
+                                selector, name, parseStaticOperand());
+                    }
+                } else {
+                    read(",");
+                    c = factory.fullTextSearch(
+                            getOnlySelectorName(), name,
+                            parseStaticOperand());
+                }
             }
         } else if ("NATIVE".equalsIgnoreCase(functionName)) {
             String selectorName;
@@ -1207,8 +1238,9 @@ public class SQL2Parser {
     }
 
     private void checkLiterals(boolean text) throws ParseException {
-        if (LOG.isDebugEnabled()) {
-            LOG.debug("Literal used in query: " + statement);
+        if (LOG.isDebugEnabled() && !literalUsageLogged) {
+            literalUsageLogged = true;
+            LOG.debug("Literal used");
         }
         if (text && !allowTextLiterals || !text && !allowNumberLiterals) {
             throw getSyntaxError("bind variable (literals of this type not allowed)");

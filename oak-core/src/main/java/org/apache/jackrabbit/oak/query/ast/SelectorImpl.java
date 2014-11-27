@@ -19,6 +19,7 @@
 package org.apache.jackrabbit.oak.query.ast;
 
 import static com.google.common.base.Preconditions.checkNotNull;
+import static com.google.common.collect.Lists.newArrayList;
 import static com.google.common.collect.Sets.newHashSet;
 import static org.apache.jackrabbit.JcrConstants.JCR_ISMIXIN;
 import static org.apache.jackrabbit.JcrConstants.JCR_MIXINTYPES;
@@ -33,6 +34,7 @@ import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.REP_P
 import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.REP_SUPERTYPES;
 
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 
 import javax.annotation.Nonnull;
@@ -42,6 +44,7 @@ import org.apache.jackrabbit.oak.api.PropertyValue;
 import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.commons.PathUtils;
+import org.apache.jackrabbit.oak.plugins.memory.PropertyBuilder;
 import org.apache.jackrabbit.oak.query.QueryImpl;
 import org.apache.jackrabbit.oak.query.fulltext.FullTextExpression;
 import org.apache.jackrabbit.oak.query.index.FilterImpl;
@@ -52,7 +55,11 @@ import org.apache.jackrabbit.oak.spi.query.Cursors;
 import org.apache.jackrabbit.oak.spi.query.IndexRow;
 import org.apache.jackrabbit.oak.spi.query.PropertyValues;
 import org.apache.jackrabbit.oak.spi.query.QueryIndex;
+import org.apache.jackrabbit.oak.spi.query.QueryIndex.AdvancedQueryIndex;
+import org.apache.jackrabbit.oak.spi.query.QueryIndex.IndexPlan;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
@@ -61,6 +68,7 @@ import com.google.common.collect.Iterables;
  * A selector within a query.
  */
 public class SelectorImpl extends SourceImpl {
+    private static final Logger LOG = LoggerFactory.getLogger(SelectorImpl.class);
     
     // TODO possibly support using multiple indexes (using index intersection / index merge)
     private SelectorExecutionPlan plan;
@@ -138,14 +146,14 @@ public class SelectorImpl extends SourceImpl {
             new ArrayList<JoinConditionImpl>();
 
     /**
-     * The selector condition can be evaluated when the given selector is
+     * The selector constraints can be evaluated when the given selector is
      * evaluated. For example, for the query
      * "select * from nt:base a inner join nt:base b where a.x = 1 and b.y = 2",
      * the condition "a.x = 1" can be evaluated when evaluating selector a. The
      * other part of the condition can't be evaluated until b is available.
-     * This field is set during the prepare phase.
+     * These constraints are collected during the prepare phase.
      */
-    private ConstraintImpl selectorCondition;
+    private final List<ConstraintImpl> selectorConstraints = newArrayList();
 
     private Cursor cursor;
     private IndexRow currentRow;
@@ -236,7 +244,7 @@ public class SelectorImpl extends SourceImpl {
     @Override
     public void unprepare() {
         plan = null;
-        selectorCondition = null;
+        selectorConstraints.clear();
         isParent = false;
         joinCondition = null;
         allJoinConditions.clear();
@@ -276,6 +284,10 @@ public class SelectorImpl extends SourceImpl {
         return plan;
     }
     
+    public SelectorExecutionPlan getExecutionPlan() {
+        return plan;
+    }
+    
     @Override
     public void setQueryConstraint(ConstraintImpl queryConstraint) {
         this.queryConstraint = queryConstraint;
@@ -300,10 +312,18 @@ public class SelectorImpl extends SourceImpl {
 
     @Override
     public void execute(NodeState rootState) {
-        if (plan.getIndex() != null) {
-            cursor = plan.getIndex().query(createFilter(false), rootState);
+        QueryIndex index = plan.getIndex();
+        if (index == null) {
+            cursor = Cursors.newPathCursor(new ArrayList<String>(), query.getSettings());
+            return;
+        }
+        IndexPlan p = plan.getIndexPlan();
+        if (p != null) {
+            p.setFilter(createFilter(false));
+            AdvancedQueryIndex adv = (AdvancedQueryIndex) index;
+            cursor = adv.query(p, rootState);
         } else {
-            cursor = Cursors.newPathCursor(new ArrayList<String>());
+            cursor = index.query(createFilter(false), rootState);
         }
     }
 
@@ -312,13 +332,20 @@ public class SelectorImpl extends SourceImpl {
         StringBuilder buff = new StringBuilder();
         buff.append(toString());
         buff.append(" /* ");
-        if (getIndex() != null) {
-            buff.append(getIndex().getPlan(createFilter(true), rootState));
+        QueryIndex index = getIndex();
+        if (index != null) {
+            if (index instanceof AdvancedQueryIndex) {
+                AdvancedQueryIndex adv = (AdvancedQueryIndex) index;
+                IndexPlan p = plan.getIndexPlan();
+                buff.append(adv.getPlanDescription(p, rootState));
+            } else {
+                buff.append(index.getPlan(createFilter(true), rootState));
+            }
         } else {
             buff.append("no-index");
         }
-        if (selectorCondition != null) {
-            buff.append(" where ").append(selectorCondition);
+        if (!selectorConstraints.isEmpty()) {
+            buff.append(" where ").append(new AndImpl(selectorConstraints).toString());
         }
         buff.append(" */");
         return buff.toString();
@@ -332,7 +359,7 @@ public class SelectorImpl extends SourceImpl {
      */
     @Override
     public FilterImpl createFilter(boolean preparing) {
-        FilterImpl f = new FilterImpl(this, query.getStatement());
+        FilterImpl f = new FilterImpl(this, query.getStatement(), query.getSettings());
         f.setPreparing(preparing);
         if (joinCondition != null) {
             joinCondition.restrict(f);
@@ -362,8 +389,8 @@ public class SelectorImpl extends SourceImpl {
             FullTextExpression ft = queryConstraint.getFullTextConstraint(this);
             f.setFullTextConstraint(ft);
         }
-        if (selectorCondition != null) {
-            selectorCondition.restrict(f);
+        for (ConstraintImpl constraint : selectorConstraints) {
+            constraint.restrict(f);
         }
 
         return f;
@@ -399,20 +426,32 @@ public class SelectorImpl extends SourceImpl {
                     continue;
                 }
             }
-            if (!matchesAllTypes && !evaluateTypeMatch()) {
-                continue;
+            if (evaluateCurrentRow()) {
+                return true;
             }
-            if (selectorCondition != null && !selectorCondition.evaluate()) {
-                continue;
-            }
-            if (joinCondition != null && !joinCondition.evaluate()) {
-                continue;
-            }
-            return true;
         }
         cursor = null;
         currentRow = null;
         return false;
+    }
+
+    private boolean evaluateCurrentRow() {
+        if (!matchesAllTypes && !evaluateTypeMatch()) {
+            return false;
+        }
+        for (ConstraintImpl constraint : selectorConstraints) {
+            if (!constraint.evaluate()) {
+                if (constraint.evaluateStop()) {
+                    // stop processing from now on
+                    cursor = null;
+                }
+                return false;
+            }
+        }
+        if (joinCondition != null && !joinCondition.evaluate()) {
+            return false;
+        }
+        return true;
     }
 
     private boolean evaluateTypeMatch() {
@@ -515,16 +554,48 @@ public class SelectorImpl extends SourceImpl {
         boolean asterisk = oakPropertyName.indexOf('*') >= 0;
         if (asterisk) {
             Tree t = currentTree();
+            if (t != null) {
+                LOG.trace("currentOakProperty() - '*' case. looking for '{}' in '{}'",
+                    oakPropertyName, t.getPath());
+            }
             ArrayList<PropertyValue> list = new ArrayList<PropertyValue>();
             readOakProperties(list, t, oakPropertyName, propertyType);
             if (list.size() == 0) {
                 return null;
+            } else if (list.size() == 1) {
+                return list.get(0);
             }
-            ArrayList<String> strings = new ArrayList<String>();
-            for (PropertyValue p : list) {
-                Iterables.addAll(strings, p.getValue(Type.STRINGS));
+            Type<?> type = list.get(0).getType();
+            for (int i = 1; i < list.size(); i++) {
+                Type<?> t2 = list.get(i).getType();
+                if (t2 != type) {
+                    // types don't match
+                    type = Type.STRING;
+                    break;
+                }
             }
-            return PropertyValues.newString(strings);                    
+            if (type == Type.STRING) {
+                ArrayList<String> strings = new ArrayList<String>();
+                for (PropertyValue p : list) {
+                    Iterables.addAll(strings, p.getValue(Type.STRINGS));
+                }
+                return PropertyValues.newString(strings);
+            }
+            Type<?> baseType = type.isArray() ? type.getBaseType() : type;
+            @SuppressWarnings("unchecked")
+            PropertyBuilder<Object> builder = (PropertyBuilder<Object>) PropertyBuilder.array(baseType);
+            builder.setName("");
+            for (PropertyValue v : list) {
+                if (type.isArray()) {
+                    for (Object value : (Iterable<?>) v.getValue(type)) {
+                        builder.addValue(value);
+                    }
+                } else {
+                    builder.addValue(v.getValue(type));
+                }
+            }
+            PropertyState s = builder.getPropertyState();
+            return PropertyValues.create(s);
         }
         boolean relative = oakPropertyName.indexOf('/') >= 0;
         Tree t = currentTree();
@@ -576,10 +647,14 @@ public class SelectorImpl extends SourceImpl {
     }
     
     private void readOakProperties(ArrayList<PropertyValue> target, Tree t, String oakPropertyName, Integer propertyType) {
-        while (true) {
+        boolean skipCurrentNode = false;
+
+        while (!skipCurrentNode) {
             if (t == null || !t.exists()) {
                 return;
             }
+            LOG.trace("readOakProperties() - reading '{}' for '{}'", t.getPath(),
+                oakPropertyName);
             int slash = oakPropertyName.indexOf('/');
             if (slash < 0) {
                 break;
@@ -594,23 +669,28 @@ public class SelectorImpl extends SourceImpl {
                 for (Tree child : t.getChildren()) {
                     readOakProperties(target, child, oakPropertyName, propertyType);
                 }
+                skipCurrentNode = true;
             } else {
                 t = t.getChild(parent);
             }
         }
+        if (skipCurrentNode) {
+            return;
+        }
         if (!"*".equals(oakPropertyName)) {
             PropertyValue value = currentOakProperty(t, oakPropertyName, propertyType);
             if (value != null) {
+                LOG.trace("readOakProperties() - adding: '{}' from '{}'", value, t.getPath());
                 target.add(value);
             }
             return;
         }
-          for (PropertyState p : t.getProperties()) {
-              if (propertyType == null || p.getType().tag() == propertyType) {
-                  PropertyValue v = PropertyValues.create(p);
-                  target.add(v);
-              }
-          }
+        for (PropertyState p : t.getProperties()) {
+            if (propertyType == null || p.getType().tag() == propertyType) {
+                PropertyValue v = PropertyValues.create(p);
+                target.add(v);
+            }
+        }
     }
 
     @Override
@@ -626,13 +706,13 @@ public class SelectorImpl extends SourceImpl {
     }
 
     public void restrictSelector(ConstraintImpl constraint) {
-        if (selectorCondition == null) {
-            selectorCondition = constraint;
-        } else {
-            selectorCondition = new AndImpl(selectorCondition, constraint);
-        }
+        selectorConstraints.add(constraint);
     }
-    
+
+    public List<ConstraintImpl> getSelectorConstraints() {
+        return selectorConstraints;
+    }
+
     @Override
     public boolean equals(Object other) {
         if (this == other) {

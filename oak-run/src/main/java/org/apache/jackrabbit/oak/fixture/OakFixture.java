@@ -17,18 +17,20 @@
 package org.apache.jackrabbit.oak.fixture;
 
 import java.io.File;
+import java.net.UnknownHostException;
+
+import javax.sql.DataSource;
 
 import org.apache.commons.io.FileUtils;
 import org.apache.jackrabbit.mk.api.MicroKernel;
-import org.apache.jackrabbit.mk.core.MicroKernelImpl;
 import org.apache.jackrabbit.oak.Oak;
 import org.apache.jackrabbit.oak.kernel.KernelNodeStore;
-import org.apache.jackrabbit.oak.plugins.blob.BlobStoreConfiguration;
-import org.apache.jackrabbit.oak.plugins.blob.BlobStoreHelper;
-import org.apache.jackrabbit.oak.plugins.blob.cloud.CloudBlobStore;
-import org.apache.jackrabbit.oak.plugins.blob.datastore.DataStoreBlobStore;
+import org.apache.jackrabbit.oak.kernel.NodeStoreKernel;
 import org.apache.jackrabbit.oak.plugins.document.DocumentMK;
+import org.apache.jackrabbit.oak.plugins.document.rdb.RDBBlobStore;
+import org.apache.jackrabbit.oak.plugins.document.rdb.RDBDataSourceFactory;
 import org.apache.jackrabbit.oak.plugins.document.util.MongoConnection;
+import org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState;
 import org.apache.jackrabbit.oak.plugins.memory.MemoryNodeStore;
 import org.apache.jackrabbit.oak.plugins.segment.SegmentNodeStore;
 import org.apache.jackrabbit.oak.plugins.segment.SegmentStore;
@@ -39,14 +41,16 @@ public abstract class OakFixture {
 
     public static final String OAK_MEMORY = "Oak-Memory";
     public static final String OAK_MEMORY_NS = "Oak-MemoryNS";
-    public static final String OAK_MEMORY_MK = "Oak-MemoryMK";
 
     public static final String OAK_MONGO = "Oak-Mongo";
+    public static final String OAK_MONGO_FDS = "Oak-Mongo-FDS";
     public static final String OAK_MONGO_NS = "Oak-MongoNS";
     public static final String OAK_MONGO_MK = "Oak-MongoMK";
 
-    public static final String OAK_H2 = "Oak-H2";
+    public static final String OAK_RDB = "Oak-RDB";
+
     public static final String OAK_TAR = "Oak-Tar";
+    public static final String OAK_TAR_FDS = "Oak-Tar-FDS";
 
 
     private final String name;
@@ -54,11 +58,19 @@ public abstract class OakFixture {
 
     protected OakFixture(String name) {
         this.name = name;
-        this.unique = String.format("%s-%d", name, System.currentTimeMillis());
+        this.unique = getUniqueDatabaseName(name);
     }
 
+    private static String getUniqueDatabaseName(String name) {
+        return String.format("%s-%d", name, System.currentTimeMillis());
+    }
+
+    public abstract MicroKernel getMicroKernel() throws Exception;
+
     public abstract Oak getOak(int clusterId) throws Exception;
+
     public abstract Oak[] setUpCluster(int n) throws Exception;
+
     public abstract void tearDownCluster();
 
     @Override
@@ -67,28 +79,24 @@ public abstract class OakFixture {
     }
 
     public static OakFixture getMemory(long cacheSize) {
-        return getMemory(OAK_MEMORY, false, cacheSize);
+        return getMemory(OAK_MEMORY, cacheSize);
     }
 
     public static OakFixture getMemoryNS(long cacheSize) {
-        return getMemory(OAK_MEMORY_NS, false, cacheSize);
+        return getMemory(OAK_MEMORY_NS, cacheSize);
     }
 
-    public static OakFixture getMemoryMK(long cacheSize) {
-        return getMemory(OAK_MEMORY_MK, true, cacheSize);
-    }
-
-    public static OakFixture getMemory(String name, final boolean useMk, final long cacheSize) {
+    public static OakFixture getMemory(String name, final long cacheSize) {
         return new OakFixture(name) {
+            @Override
+            public MicroKernel getMicroKernel() {
+                return new NodeStoreKernel(new MemoryNodeStore());
+            }
+
             @Override
             public Oak getOak(int clusterId) throws Exception {
                 Oak oak;
-                if (useMk) {
-                    MicroKernel kernel = new MicroKernelImpl();
-                    oak = new Oak(new KernelNodeStore(kernel, cacheSize));
-                } else {
-                    oak = new Oak(new MemoryNodeStore());
-                }
+                oak = new Oak(new MemoryNodeStore());
                 return oak;
             }
 
@@ -97,12 +105,7 @@ public abstract class OakFixture {
                 Oak[] cluster = new Oak[n];
                 for (int i = 0; i < cluster.length; i++) {
                     Oak oak;
-                    if (useMk) {
-                        MicroKernel kernel = new MicroKernelImpl();
-                        oak = new Oak(new KernelNodeStore(kernel, cacheSize));
-                    } else {
-                        oak = new Oak(new MemoryNodeStore());
-                    }
+                    oak = new Oak(new MemoryNodeStore());
                     cluster[i] = oak;
                 }
                 return cluster;
@@ -118,34 +121,141 @@ public abstract class OakFixture {
     public static OakFixture getMongo(String host, int port, String database,
                                       boolean dropDBAfterTest, long cacheSize) {
         return getMongo(OAK_MONGO, false, host, port, database,
-                dropDBAfterTest, cacheSize);
+                dropDBAfterTest, cacheSize, false, null, 0);
     }
 
     public static OakFixture getMongoMK(String host, int port, String database,
                                         boolean dropDBAfterTest, long cacheSize) {
         return getMongo(OAK_MONGO_MK, true, host, port, database,
-                dropDBAfterTest, cacheSize);
+                dropDBAfterTest, cacheSize, false, null, 0);
     }
 
     public static OakFixture getMongoNS(String host, int port, String database,
                                         boolean dropDBAfterTest, long cacheSize) {
         return getMongo(OAK_MONGO_NS, false, host, port, database,
-                dropDBAfterTest, cacheSize);
+                dropDBAfterTest, cacheSize, false, null, 0);
     }
 
     public static OakFixture getMongo(String name, final boolean useMk, final String host,
-                                      final int port, final String database,
-                                      final boolean dropDBAfterTest, final long cacheSize) {
+                                      final int port, String database,
+                                      final boolean dropDBAfterTest, final long cacheSize,
+                                      final boolean useFileDataStore,
+                                      final File base,
+                                      final int fdsCacheInMB) {
+        if (database == null) {
+            database = getUniqueDatabaseName(name);
+        }
+        String uri = "mongodb://" + host + ":" + port + "/" + database;
+        return getMongo(name, uri, useMk, dropDBAfterTest, cacheSize, useFileDataStore, base, fdsCacheInMB);
+    }
+
+    public static OakFixture getMongo(final String name, final String uri,
+                                      final boolean useMk,
+                                      final boolean dropDBAfterTest, final long cacheSize,
+                                      final boolean useFileDataStore,
+                                      final File base, final int fdsCacheInMB) {
         return new OakFixture(name) {
-            private String dbName = database != null ? database : unique;
+            private DocumentMK[] kernels;
+            private BlobStoreFixture blobStoreFixture;
+
+            {
+                if (useFileDataStore) {
+                    blobStoreFixture = BlobStoreFixture.getFileDataStore(base, fdsCacheInMB);
+                } else {
+                    blobStoreFixture = BlobStoreFixture.create(base, false);
+                }
+            }
+
+            @Override
+            public MicroKernel getMicroKernel() throws UnknownHostException {
+                MongoConnection mongo = new MongoConnection(uri);
+                DocumentMK.Builder mkBuilder = new DocumentMK.Builder().
+                        setMongoDB(mongo.getDB()).
+                        memoryCacheSize(cacheSize).
+                        setLogging(false);
+                setupBlobStore(mkBuilder);
+                return mkBuilder.open();
+            }
+
+            @Override
+            public Oak getOak(int clusterId) throws Exception {
+                MongoConnection mongo = new MongoConnection(uri);
+                DocumentMK.Builder mkBuilder = new DocumentMK.Builder().
+                        setMongoDB(mongo.getDB()).
+                        memoryCacheSize(cacheSize).
+                        setClusterId(clusterId).setLogging(false);
+                setupBlobStore(mkBuilder);
+                DocumentMK dmk = mkBuilder.open();
+                Oak oak;
+                if (useMk) {
+                    oak = new Oak(new KernelNodeStore(dmk, cacheSize));
+                } else {
+                    oak = new Oak(dmk.getNodeStore());
+                }
+                return oak;
+            }
+
+            @Override
+            public Oak[] setUpCluster(int n) throws Exception {
+                Oak[] cluster = new Oak[n];
+                kernels = new DocumentMK[cluster.length];
+                for (int i = 0; i < cluster.length; i++) {
+                    MongoConnection mongo = new MongoConnection(uri);
+                    DocumentMK.Builder mkBuilder = new DocumentMK.Builder().
+                            setMongoDB(mongo.getDB()).
+                            memoryCacheSize(cacheSize).
+                            setClusterId(i).setLogging(false);
+                    setupBlobStore(mkBuilder);
+                    kernels[i] = mkBuilder.open();
+                    Oak oak;
+                    if (useMk) {
+                        oak = new Oak(new KernelNodeStore(kernels[i], cacheSize));
+                    } else {
+                        oak = new Oak(kernels[i].getNodeStore());
+                    }
+                    cluster[i] = oak;
+                }
+                return cluster;
+            }
+
+            @Override
+            public void tearDownCluster() {
+                for (DocumentMK kernel : kernels) {
+                    kernel.dispose();
+                }
+                if (dropDBAfterTest) {
+                    try {
+                        MongoConnection mongo =
+                                new MongoConnection(uri);
+                        mongo.getDB().dropDatabase();
+                        mongo.close();
+                        if(blobStoreFixture != null){
+                            blobStoreFixture.tearDown();
+                        }
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                }
+            }
+
+            private void setupBlobStore(DocumentMK.Builder mkBuilder) {
+                if (blobStoreFixture != null) {
+                    mkBuilder.setBlobStore(blobStoreFixture.setUp());
+                }
+            }
+        };
+    }
+
+    public static OakFixture getRDB(final String name, final String jdbcuri, final String jdbcuser, final String jdbcpasswd,
+                                    final boolean useMk, final boolean dropDBAfterTest, final long cacheSize) {
+        return new OakFixture(name) {
             private DocumentMK[] kernels;
             private BlobStore blobStore;
 
             private BlobStore getBlobStore() {
-                BlobStoreConfiguration config =
-                        BlobStoreConfiguration.newInstance().loadFromSystemProps();
                 try {
-                    blobStore = BlobStoreHelper.create(config).orNull();
+                    DataSource ds = RDBDataSourceFactory.forJdbcUrl(jdbcuri, jdbcuser, jdbcpasswd);
+                    blobStore = new RDBBlobStore(ds);
                 } catch (Exception e) {
                     throw new RuntimeException(e);
                 }
@@ -154,13 +264,23 @@ public abstract class OakFixture {
             }
 
             @Override
-            public Oak getOak(int clusterId) throws Exception {
-                MongoConnection mongo = new MongoConnection(host, port, dbName);
+            public MicroKernel getMicroKernel() {
+                DataSource ds = RDBDataSourceFactory.forJdbcUrl(jdbcuri, jdbcuser, jdbcpasswd);
+                DocumentMK.Builder mkBuilder = new DocumentMK.Builder().setRDBConnection(ds).memoryCacheSize(cacheSize)
+                        .setLogging(false);
                 BlobStore blobStore = getBlobStore();
-                DocumentMK.Builder mkBuilder = new DocumentMK.Builder().
-                        setMongoDB(mongo.getDB()).
-                        memoryCacheSize(cacheSize).
-                        setClusterId(clusterId).setLogging(false);
+                if (blobStore != null) {
+                    mkBuilder.setBlobStore(blobStore);
+                }
+                return mkBuilder.open();
+            }
+
+            @Override
+            public Oak getOak(int clusterId) throws Exception {
+                DataSource ds = RDBDataSourceFactory.forJdbcUrl(jdbcuri, jdbcuser, jdbcpasswd);
+                DocumentMK.Builder mkBuilder = new DocumentMK.Builder().setRDBConnection(ds).memoryCacheSize(cacheSize)
+                        .setClusterId(clusterId).setLogging(false);
+                BlobStore blobStore = getBlobStore();
                 if (blobStore != null) {
                     mkBuilder.setBlobStore(blobStore);
                 }
@@ -179,12 +299,10 @@ public abstract class OakFixture {
                 Oak[] cluster = new Oak[n];
                 kernels = new DocumentMK[cluster.length];
                 for (int i = 0; i < cluster.length; i++) {
-                    MongoConnection mongo = new MongoConnection(host, port, dbName);
                     BlobStore blobStore = getBlobStore();
-                    DocumentMK.Builder mkBuilder = new DocumentMK.Builder().
-                            setMongoDB(mongo.getDB()).
-                            memoryCacheSize(cacheSize).
-                            setClusterId(i).setLogging(false);
+                    DataSource ds = RDBDataSourceFactory.forJdbcUrl(jdbcuri, jdbcuser, jdbcpasswd);
+                    DocumentMK.Builder mkBuilder = new DocumentMK.Builder().setRDBConnection(ds).memoryCacheSize(cacheSize)
+                            .setClusterId(i).setLogging(false);
                     if (blobStore != null) {
                         mkBuilder.setBlobStore(blobStore);
                     }
@@ -206,86 +324,91 @@ public abstract class OakFixture {
                     kernel.dispose();
                 }
                 if (dropDBAfterTest) {
-                    try {
-                        MongoConnection mongo =
-                                new MongoConnection(host, port, dbName);
-                        mongo.getDB().dropDatabase();
-                        mongo.close();
-                        if (blobStore instanceof CloudBlobStore) {
-                            ((CloudBlobStore) blobStore).deleteBucket();
-                        } else if (blobStore instanceof DataStoreBlobStore) {
-                            ((DataStoreBlobStore) blobStore).clearInUse();
-                            ((DataStoreBlobStore) blobStore).deleteAllOlderThan(
-                                    System.currentTimeMillis() + 10000000);
-                        }
-                    } catch (Exception e) {
-                        throw new RuntimeException(e);
-                    }
+                    throw new RuntimeException("dropdb not supported for RDB persistence");
                 }
             }
         };
     }
 
     public static OakFixture getTar(
-            final File base, final int maxFileSizeMB, final int cacheSizeMB,
-            final boolean memoryMapping) {
-        return new OakFixture(OAK_TAR) {
-            private SegmentStore[] stores;
-
-            @Override
-            public Oak getOak(int clusterId) throws Exception {
-                FileStore fs = new FileStore(base, maxFileSizeMB, cacheSizeMB, memoryMapping);
-                return new Oak(new SegmentNodeStore(fs));
-            }
-
-            @Override
-            public Oak[] setUpCluster(int n) throws Exception {
-                Oak[] cluster = new Oak[n];
-                stores = new FileStore[cluster.length];
-                for (int i = 0; i < cluster.length; i++) {
-                    stores[i] = new FileStore(
-                            new File(base, unique),
-                            maxFileSizeMB, cacheSizeMB, memoryMapping);
-                    cluster[i] = new Oak(new SegmentNodeStore(stores[i]));
-                }
-                return cluster;
-            }
-            @Override
-            public void tearDownCluster() {
-                for (SegmentStore store : stores) {
-                    store.close();
-                }
-                FileUtils.deleteQuietly(new File(base, unique));
-            }
-        };
+            final String name, final File base, final int maxFileSizeMB, final int cacheSizeMB,
+            final boolean memoryMapping, final boolean useBlobStore) {
+        return new SegmentFixture(name, base, maxFileSizeMB, cacheSizeMB, memoryMapping, useBlobStore);
     }
 
-    public static OakFixture getH2MK(final File base, final long cacheSize) {
-        return new OakFixture(OAK_H2) {
-            private MicroKernelImpl[] kernels;
+    public static class SegmentFixture extends OakFixture {
+        private FileStore[] stores;
+        private BlobStoreFixture[] blobStoreFixtures = new BlobStoreFixture[0];
+        private final File base;
+        private final int maxFileSizeMB;
+        private final int cacheSizeMB;
+        private final boolean memoryMapping;
+        private final boolean useBlobStore;
 
-            @Override
-            public Oak getOak(int clusterId) throws Exception {
-                return new Oak(new KernelNodeStore(new MicroKernelImpl(base.getPath()), cacheSize));
+        public SegmentFixture(String name, File base, int maxFileSizeMB, int cacheSizeMB,
+                              boolean memoryMapping, boolean useBlobStore) {
+            super(name);
+            this.base = base;
+            this.maxFileSizeMB = maxFileSizeMB;
+            this.cacheSizeMB = cacheSizeMB;
+            this.memoryMapping = memoryMapping;
+            this.useBlobStore = useBlobStore;
+        }
+
+        @Override
+        public MicroKernel getMicroKernel() throws Exception {
+            FileStore fs = new FileStore(base, maxFileSizeMB, cacheSizeMB, memoryMapping);
+            return new NodeStoreKernel(new SegmentNodeStore(fs));
+        }
+
+        @Override
+        public Oak getOak(int clusterId) throws Exception {
+            FileStore fs = new FileStore(base, maxFileSizeMB, cacheSizeMB, memoryMapping);
+            return new Oak(new SegmentNodeStore(fs));
+        }
+
+        @Override
+        public Oak[] setUpCluster(int n) throws Exception {
+            Oak[] cluster = new Oak[n];
+            stores = new FileStore[cluster.length];
+            if (useBlobStore) {
+                blobStoreFixtures = new BlobStoreFixture[cluster.length];
             }
 
-            @Override
-            public Oak[] setUpCluster(int n) throws Exception {
-                Oak[] cluster = new Oak[n];
-                kernels = new MicroKernelImpl[cluster.length];
-                for (int i = 0; i < cluster.length; i++) {
-                    kernels[i] = new MicroKernelImpl(new File(base, unique).getPath());
-                    cluster[i] = new Oak(new KernelNodeStore(kernels[i], cacheSize));
+            for (int i = 0; i < cluster.length; i++) {
+                BlobStore blobStore = null;
+                if (useBlobStore) {
+                    blobStoreFixtures[i] = BlobStoreFixture.create(base, true);
+                    blobStore = blobStoreFixtures[i].setUp();
                 }
-                return cluster;
+
+                stores[i] = new FileStore(blobStore,
+                        new File(base, unique),
+                        EmptyNodeState.EMPTY_NODE,
+                        maxFileSizeMB, cacheSizeMB, memoryMapping);
+                cluster[i] = new Oak(new SegmentNodeStore(stores[i]));
             }
-            @Override
-            public void tearDownCluster() {
-                for (MicroKernelImpl kernel : kernels) {
-                    kernel.dispose();
-                }
-                FileUtils.deleteQuietly(new File(base, unique));
+            return cluster;
+        }
+
+        @Override
+        public void tearDownCluster() {
+            for (SegmentStore store : stores) {
+                store.close();
             }
-        };
+            for (BlobStoreFixture blobStore : blobStoreFixtures) {
+                blobStore.tearDown();
+            }
+            FileUtils.deleteQuietly(new File(base, unique));
+        }
+
+        public BlobStoreFixture[] getBlobStoreFixtures() {
+            return blobStoreFixtures;
+        }
+
+        public FileStore[] getStores() {
+            return stores;
+        }
     }
+
 }

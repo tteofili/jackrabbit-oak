@@ -71,6 +71,7 @@ import org.apache.jackrabbit.oak.spi.security.authorization.accesscontrol.Access
 import org.apache.jackrabbit.oak.spi.security.authorization.accesscontrol.TestACL;
 import org.apache.jackrabbit.oak.spi.security.authorization.restriction.Restriction;
 import org.apache.jackrabbit.oak.spi.security.authorization.restriction.RestrictionProvider;
+import org.apache.jackrabbit.oak.spi.security.principal.AdminPrincipal;
 import org.apache.jackrabbit.oak.spi.security.principal.EveryonePrincipal;
 import org.apache.jackrabbit.oak.spi.security.principal.PrincipalImpl;
 import org.apache.jackrabbit.oak.spi.security.privilege.PrivilegeBits;
@@ -81,6 +82,7 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
+import static com.google.common.collect.Sets.newHashSet;
 import static java.util.Collections.singletonMap;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
@@ -106,7 +108,6 @@ public class AccessControlManagerImplTest extends AbstractAccessControlTest impl
     private Privilege[] testPrivileges;
     private Root testRoot;
 
-    private NameMapper nameMapper;
     private NamePathMapper npMapper;
 
     private AccessControlManagerImpl acMgr;
@@ -118,7 +119,7 @@ public class AccessControlManagerImplTest extends AbstractAccessControlTest impl
         super.before();
 
         registerNamespace(TEST_PREFIX, TEST_URI);
-        nameMapper = new GlobalNameMapper(root);
+        NameMapper nameMapper = new GlobalNameMapper(root);
         npMapper = new NamePathMapperImpl(nameMapper);
 
         acMgr = getAccessControlManager(npMapper);
@@ -189,8 +190,9 @@ public class AccessControlManagerImplTest extends AbstractAccessControlTest impl
             }
 
             @Override
-            void checkValidPrincipal(Principal principal) throws AccessControlException {
+            boolean checkValidPrincipal(Principal principal) throws AccessControlException {
                 Util.checkValidPrincipal(principal, pm, true);
+                return true;
             }
 
             @Override
@@ -1242,14 +1244,16 @@ public class AccessControlManagerImplTest extends AbstractAccessControlTest impl
         Tree ace = children.next();
         assertEquals(NT_REP_GRANT_ACE, TreeUtil.getPrimaryTypeName(ace));
         assertEquals(testPrincipal.getName(), TreeUtil.getString(ace, REP_PRINCIPAL_NAME));
-        assertArrayEquals(testPrivileges, privilegesFromNames(TreeUtil.getStrings(ace, REP_PRIVILEGES)));
+        assertEquals(
+                newHashSet(testPrivileges),
+                newHashSet(privilegesFromNames(TreeUtil.getStrings(ace, REP_PRIVILEGES))));
         assertFalse(ace.hasChild(REP_RESTRICTIONS));
 
         Tree ace2 = children.next();
         assertEquals(NT_REP_DENY_ACE, TreeUtil.getPrimaryTypeName(ace2));
         assertEquals(EveryonePrincipal.NAME, ace2.getProperty(REP_PRINCIPAL_NAME).getValue(Type.STRING));
         Privilege[] privs = privilegesFromNames(TreeUtil.getNames(ace2, REP_PRIVILEGES));
-        assertArrayEquals(testPrivileges, privs);
+        assertEquals(newHashSet(testPrivileges), newHashSet(privs));
         assertTrue(ace2.hasChild(REP_RESTRICTIONS));
         Tree restr = ace2.getChild(REP_RESTRICTIONS);
         assertEquals("*/something", restr.getProperty(REP_GLOB).getValue(Type.STRING));
@@ -1652,6 +1656,40 @@ public class AccessControlManagerImplTest extends AbstractAccessControlTest impl
         policies = acMgr.getPolicies(testPrincipal);
         assertNotNull(policies);
         assertEquals(1, policies.length);
+    }
+
+    /**
+     * Test if the ACL code prevents the creation of ACEs for administrative
+     * principals which have full access anyway.
+     *
+     * @since Oak 1.1.1
+     * @see <a href="https://issues.apache.org/jira/browse/OAK-2158">OAK-2158</a>
+     */
+    @Test
+    public void testAdminPrincipal() throws Exception {
+        ACL acl = getApplicablePolicy(testPath);
+        try {
+            acl.addAccessControlEntry(new AdminPrincipal() {
+                @Override
+                public String getName() {
+                    return "admin";
+                }
+            }, privilegesFromNames(PrivilegeConstants.JCR_READ));
+            fail("Adding an ACE for an admin principal should fail");
+        } catch (AccessControlException e) {
+            // success
+        }
+
+        try {
+            for (Principal p : adminSession.getAuthInfo().getPrincipals()) {
+                if (p instanceof AdminPrincipal) {
+                    acl.addAccessControlEntry(p, privilegesFromNames(PrivilegeConstants.JCR_READ));
+                    fail("Adding an ACE for an admin principal should fail");
+                }
+            }
+        } catch (AccessControlException e) {
+            // success
+        }
     }
 
     @Test

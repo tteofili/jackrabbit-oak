@@ -17,8 +17,12 @@
 package org.apache.jackrabbit.oak.plugins.segment;
 
 import static com.google.common.collect.Lists.newArrayList;
+import static java.util.Collections.singletonList;
+import static junit.framework.Assert.assertNotNull;
 import static junit.framework.Assert.fail;
 import static org.apache.jackrabbit.oak.api.Type.BINARIES;
+import static org.apache.jackrabbit.oak.api.Type.STRING;
+import static org.apache.jackrabbit.oak.api.Type.STRINGS;
 import static org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState.EMPTY_NODE;
 import static org.apache.jackrabbit.oak.plugins.segment.ListRecord.LEVEL_SIZE;
 import static org.junit.Assert.assertEquals;
@@ -54,15 +58,14 @@ public class RecordTest {
 
     private SegmentStore store = new MemoryStore();
 
-    private SegmentWriter writer = store.getWriter();
+    private SegmentWriter writer = store.getTracker().getWriter();
 
     private final Random random = new Random(0xcafefaceL);
 
     @Test
     public void testBlockRecord() {
         RecordId blockId = writer.writeBlock(bytes, 0, bytes.length);
-        BlockRecord block = new BlockRecord(
-                writer.getDummySegment(), blockId, bytes.length);
+        BlockRecord block = new BlockRecord(blockId, bytes.length);
 
         // Check reading with all valid positions and lengths
         for (int n = 1; n < bytes.length; n++) {
@@ -119,13 +122,12 @@ public class RecordTest {
 
     private ListRecord writeList(int size, RecordId id) {
         List<RecordId> list = Collections.nCopies(size, id);
-        return new ListRecord(
-                writer.getDummySegment(), writer.writeList(list), size);
+        return new ListRecord(writer.writeList(list), size);
     }
 
     @Test
     public void testListWithLotsOfReferences() { // OAK-1184
-        SegmentIdFactory factory = new SegmentIdFactory();
+        SegmentTracker factory = store.getTracker();
         List<RecordId> list = newArrayList();
         for (int i = 0; i < 1000; i++) {
             list.add(new RecordId(factory.newBulkSegmentId(), 0));
@@ -183,7 +185,7 @@ public class RecordTest {
         }
         RecordId large = writer.writeString(builder.toString());
 
-        Segment segment = store.readSegment(large.getSegmentId());
+        Segment segment = large.getSegmentId().getSegment();
 
         assertEquals("", segment.readString(empty));
         assertEquals(" ", segment.readString(space));
@@ -354,6 +356,22 @@ public class RecordTest {
                 fail("OAK-1374");
             }
         }
+    }
+
+    @Test
+    public void testStringPrimaryType() {
+        NodeBuilder builder = EMPTY_NODE.builder();
+        builder.setProperty("jcr:primaryType", "foo", STRING);
+        NodeState state = writer.writeNode(builder.getNodeState());
+        assertNotNull(state.getProperty("jcr:primaryType"));
+    }
+
+    @Test
+    public void testStringMixinTypes() {
+        NodeBuilder builder = EMPTY_NODE.builder();
+        builder.setProperty("jcr:mixinTypes", singletonList("foo"), STRINGS);
+        NodeState state = writer.writeNode(builder.getNodeState());
+        assertNotNull(state.getProperty("jcr:mixinTypes"));
     }
 
 }

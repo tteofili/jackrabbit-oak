@@ -29,7 +29,6 @@ import java.util.Map;
 import javax.jcr.RepositoryException;
 
 import com.google.common.collect.ImmutableMap;
-
 import org.apache.jackrabbit.oak.plugins.identifier.IdentifierManager;
 import org.junit.Test;
 
@@ -38,14 +37,13 @@ public class NamePathMapperImplTest {
     private static final Map<String, String> GLOBAL = ImmutableMap.of(
             "oak-jcr", "http://www.jcp.org/jcr/1.0",
             "oak-nt", "http://www.jcp.org/jcr/nt/1.0",
-            "oak-mix", "http://www.jcp.org/jcr/mix/1.0",
             "oak-foo", "http://www.example.com/foo",
-            "oak-quu", "http://www.example.com/quu");
+            "oak-quu", "http://www.example.com/quu",
+            "oak",     "http://jackrabbit.apache.org/oak/ns/1.0");
 
     private static final Map<String, String> LOCAL = ImmutableMap.of(
             "jcr-jcr", "http://www.jcp.org/jcr/1.0",
             "jcr-nt", "http://www.jcp.org/jcr/nt/1.0",
-            "jcr-mix", "http://www.jcp.org/jcr/mix/1.0",
             "foo", "http://www.example.com/foo",
             "quu", "http://www.example.com/quu");
 
@@ -100,30 +98,7 @@ public class NamePathMapperImplTest {
         assertEquals("foobar/oak-jcr:content", npMapper.getOakPath("foobar/./{http://www.jcp.org/jcr/1.0}content"));
         assertEquals("oak-jcr:content", npMapper.getOakPath("foobar/./../{http://www.jcp.org/jcr/1.0}content"));
         assertEquals("/a/b/c", npMapper.getOakPath("/a/b[1]/c[01]"));
-    }
-
-    @Test
-    public void testJcrToOakKeepIndex() {
-        assertEquals("/", npMapper.getOakPathKeepIndex("/"));
-        assertEquals("foo", npMapper.getOakPathKeepIndex("{}foo"));
-        assertEquals("/oak-foo:bar", npMapper.getOakPathKeepIndex("/foo:bar"));
-        assertEquals("/oak-foo:bar/oak-quu:qux", npMapper.getOakPathKeepIndex("/foo:bar/quu:qux"));
-        assertEquals("oak-foo:bar", npMapper.getOakPathKeepIndex("foo:bar"));
-        assertEquals("oak-nt:unstructured", npMapper.getOakPathKeepIndex("{http://www.jcp.org/jcr/nt/1.0}unstructured"));
-        assertEquals("foobar/oak-jcr:content", npMapper.getOakPathKeepIndex("foobar/{http://www.jcp.org/jcr/1.0}content"));
-        assertEquals("foobar", npMapper.getOakPathKeepIndex("foobar/{http://www.jcp.org/jcr/1.0}content/.."));
-        assertEquals("", npMapper.getOakPathKeepIndex("foobar/{http://www.jcp.org/jcr/1.0}content/../.."));
-        assertEquals("..", npMapper.getOakPathKeepIndex("foobar/{http://www.jcp.org/jcr/1.0}content/../../.."));
-        assertEquals("../..", npMapper.getOakPathKeepIndex("foobar/{http://www.jcp.org/jcr/1.0}content/../../../.."));
-        assertEquals("oak-jcr:content", npMapper.getOakPathKeepIndex("foobar/../{http://www.jcp.org/jcr/1.0}content"));
-        assertEquals("../oak-jcr:content", npMapper.getOakPathKeepIndex("foobar/../../{http://www.jcp.org/jcr/1.0}content"));
-        assertEquals("..", npMapper.getOakPathKeepIndex(".."));
-        assertEquals("", npMapper.getOakPathKeepIndex("."));
-        assertEquals("foobar/oak-jcr:content", npMapper.getOakPathKeepIndex("foobar/{http://www.jcp.org/jcr/1.0}content/."));
-        assertEquals("foobar/oak-jcr:content", npMapper.getOakPathKeepIndex("foobar/{http://www.jcp.org/jcr/1.0}content/./."));
-        assertEquals("foobar/oak-jcr:content", npMapper.getOakPathKeepIndex("foobar/./{http://www.jcp.org/jcr/1.0}content"));
-        assertEquals("oak-jcr:content", npMapper.getOakPathKeepIndex("foobar/./../{http://www.jcp.org/jcr/1.0}content"));
-        assertEquals("/a/b[1]/c[1]", npMapper.getOakPathKeepIndex("/a/b[1]/c[01]"));
+        assertEquals("/a/b[2]/c[3]", npMapper.getOakPath("/a[1]/b[2]/c[03]"));
     }
 
     @Test
@@ -131,10 +106,10 @@ public class NamePathMapperImplTest {
         NameMapper mapper = new GlobalNameMapper(GLOBAL);
         NamePathMapper npMapper = new NamePathMapperImpl(mapper);
 
-        assertEquals("/", npMapper.getOakPathKeepIndex("/"));
-        assertEquals("/foo:bar", npMapper.getOakPathKeepIndex("/foo:bar"));
-        assertEquals("/foo:bar/quu:qux", npMapper.getOakPathKeepIndex("/foo:bar/quu:qux"));
-        assertEquals("foo:bar", npMapper.getOakPathKeepIndex("foo:bar"));
+        assertEquals("/", npMapper.getOakPath("/"));
+        assertEquals("/foo:bar", npMapper.getOakPath("/foo:bar"));
+        assertEquals("/foo:bar/quu:qux", npMapper.getOakPath("/foo:bar/quu:qux"));
+        assertEquals("foo:bar", npMapper.getOakPath("foo:bar"));
     }
 
     @Test
@@ -167,7 +142,10 @@ public class NamePathMapperImplTest {
                 "/foo/../..",
                 "foo::bar",
                 "foo:bar:baz",
-//                "foo:bar]baz",  FIXME OAK-1168
+                "foo:bar]baz",
+                "foo:bar[baz",
+                "foo:bar|baz",
+                "foo:bar*baz"
         };
 
         NamePathMapper[] mappers = {
@@ -216,6 +194,19 @@ public class NamePathMapperImplTest {
 
         for (String name : childNames) {
             assertEquals(name, npMapper.getOakName(name));
+        }
+    }
+
+    @Test
+    public void testWhitespace() {
+        String[] paths = new String[] {
+                " leading", "trailing\n", " ", "\t",
+                "oak: leading", "oak:trailing\n", "oak: ", "oak:\t" };
+        NamePathMapper noLocal = new NamePathMapperImpl(new LocalNameMapper(
+                GLOBAL, Collections.<String, String>emptyMap()));
+        for (String path : paths) {
+            assertEquals("without local mappings", path, noLocal.getOakPath(path));
+            assertEquals("with local mappings", path, npMapper.getOakPath(path));
         }
     }
 

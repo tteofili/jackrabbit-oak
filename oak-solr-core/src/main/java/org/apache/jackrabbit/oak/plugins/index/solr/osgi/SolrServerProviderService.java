@@ -1,3 +1,22 @@
+<<<<<<< HEAD
+=======
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+>>>>>>> 946101f1867fca376a421a5346a53559d0aaf516
 package org.apache.jackrabbit.oak.plugins.index.solr.osgi;
 
 import java.util.HashMap;
@@ -59,8 +78,11 @@ public class SolrServerProviderService implements SolrServerProvider {
 
     private SolrServer cachedSolrServer;
 
+<<<<<<< HEAD
     private SolrServerConfiguration cachedSolrServerConfiguration;
 
+=======
+>>>>>>> 946101f1867fca376a421a5346a53559d0aaf516
     @Activate
     protected void activate(ComponentContext context) throws Exception {
         serverType = String.valueOf(context.getProperties().get(SERVER_TYPE));
@@ -69,6 +91,13 @@ public class SolrServerProviderService implements SolrServerProvider {
     @Deactivate
     protected void deactivate() throws Exception {
         solrServerConfigurationProviders.clear();
+<<<<<<< HEAD
+=======
+        shutdownSolrServer();
+    }
+
+    private void shutdownSolrServer() {
+>>>>>>> 946101f1867fca376a421a5346a53559d0aaf516
         if (cachedSolrServer != null) {
             try {
                 cachedSolrServer.shutdown();
@@ -84,6 +113,10 @@ public class SolrServerProviderService implements SolrServerProvider {
         synchronized (solrServerConfigurationProviders) {
             String name = String.valueOf(properties.get("name"));
             solrServerConfigurationProviders.put(name, solrServerConfigurationProvider);
+<<<<<<< HEAD
+=======
+            shutdownSolrServer();
+>>>>>>> 946101f1867fca376a421a5346a53559d0aaf516
         }
     }
 
@@ -91,6 +124,10 @@ public class SolrServerProviderService implements SolrServerProvider {
         synchronized (solrServerConfigurationProviders) {
             String name = String.valueOf(properties.get("name"));
             solrServerConfigurationProviders.remove(name);
+<<<<<<< HEAD
+=======
+            shutdownSolrServer();
+>>>>>>> 946101f1867fca376a421a5346a53559d0aaf516
         }
     }
 
@@ -98,11 +135,16 @@ public class SolrServerProviderService implements SolrServerProvider {
         synchronized (solrServerConfigurationProviders) {
             String name = String.valueOf(properties.get("name"));
             solrServerConfigurationProviders.put(name, solrServerConfigurationProvider);
+<<<<<<< HEAD
+=======
+            shutdownSolrServer();
+>>>>>>> 946101f1867fca376a421a5346a53559d0aaf516
         }
     }
 
     @Override
     public SolrServer getSolrServer() throws Exception {
+<<<<<<< HEAD
         SolrServer solrServer = null;
         synchronized (solrServerConfigurationProviders) {
             if (serverType != null && !"none".equals(serverType)) {
@@ -127,6 +169,25 @@ public class SolrServerProviderService implements SolrServerProvider {
             }
         }
         return solrServer;
+=======
+        synchronized (solrServerConfigurationProviders) {
+            if (cachedSolrServer == null) {
+                if (serverType != null && !"none".equals(serverType)) {
+                    SolrServerConfigurationProvider solrServerConfigurationProvider = solrServerConfigurationProviders.get(serverType);
+                    if (solrServerConfigurationProvider != null) {
+                        try {
+                            SolrServerConfiguration solrServerConfiguration = solrServerConfigurationProvider.getSolrServerConfiguration();
+                            SolrServerProvider solrServerProvider = solrServerConfiguration.getProvider();
+                            cachedSolrServer = solrServerProvider.getSolrServer();
+                        } catch (Exception e) {
+                            log.error("could not get a SolrServerProvider of type {}", serverType, e);
+                        }
+                    }
+                }
+            }
+            return cachedSolrServer;
+        }
+>>>>>>> 946101f1867fca376a421a5346a53559d0aaf516
     }
 
 }

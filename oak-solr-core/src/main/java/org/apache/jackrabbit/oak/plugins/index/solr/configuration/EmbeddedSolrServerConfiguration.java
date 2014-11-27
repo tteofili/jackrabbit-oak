@@ -80,8 +80,13 @@ public class EmbeddedSolrServerConfiguration extends SolrServerConfiguration<Emb
     }
 
     public class HttpConfiguration {
+<<<<<<< HEAD
         private String context;
         private Integer httpPort;
+=======
+        private final String context;
+        private final Integer httpPort;
+>>>>>>> 946101f1867fca376a421a5346a53559d0aaf516
 
         HttpConfiguration(String context, Integer httpPort) {
             this.context = context;

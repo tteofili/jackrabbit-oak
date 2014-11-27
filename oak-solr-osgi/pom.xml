@@ -23,7 +23,11 @@
     <parent>
         <groupId>org.apache.jackrabbit</groupId>
         <artifactId>oak-parent</artifactId>
+<<<<<<< HEAD
         <version>0.19-SNAPSHOT</version>
+=======
+        <version>1.1-SNAPSHOT</version>
+>>>>>>> 946101f1867fca376a421a5346a53559d0aaf516
         <relativePath>../oak-parent/pom.xml</relativePath>
     </parent>
 
@@ -43,7 +47,11 @@
                             org.apache.lucene.*;resolution:=optional,
                             com.carrotsearch.*;resolution:=optional,
                             com.googlecode.*;resolution:=optional,
+<<<<<<< HEAD
                             com.spatial4j.*;resolution:=optional,
+=======
+                            com.vividsolutions.jts.*;resolution:=optional,
+>>>>>>> 946101f1867fca376a421a5346a53559d0aaf516
                             com.sun.*;resolution:=optional,
                             jline;resolution:=optional,
                             org.apache.hadoop.*;resolution:=optional,
@@ -52,6 +60,7 @@
                             org.jboss.netty.*;resolution:=optional,
                             org.restlet.*;resolution:=optional,
                             org.joda.time.*;resolution:=optional,
+<<<<<<< HEAD
                             *
                         </Import-Package>
                         <Export-Package>
@@ -61,6 +70,12 @@
                             org.apache.jackrabbit.oak.plugins.index.solr.server,
                             org.apache.jackrabbit.oak.plugins.index.solr.util
                         </Export-Package>
+=======
+                            org.eclipse.*;resolution:=optional,
+                            javax.servlet.*;resolution:=optional,
+                            *
+                        </Import-Package>
+>>>>>>> 946101f1867fca376a421a5346a53559d0aaf516
                         <Embed-Dependency>*;scope=runtime;inline=true</Embed-Dependency>
                         <Service-Component>OSGI-INF/org.apache.jackrabbit.oak.plugins.index.solr
                             .osgi.SolrQueryIndexProviderService.xml,OSGI-INF/org.apache.jackrabbit.
@@ -192,6 +207,22 @@
             <version>${lucene.version}</version>
             <scope>runtime</scope>
         </dependency>
+<<<<<<< HEAD
+=======
+        <dependency>
+            <groupId>org.apache.lucene</groupId>
+            <artifactId>lucene-spatial</artifactId>
+            <version>${lucene.version}</version>
+            <scope>runtime</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>com.spatial4j</groupId>
+            <artifactId>spatial4j</artifactId>
+            <version>0.4.1</version>
+            <scope>runtime</scope>
+        </dependency>
+>>>>>>> 946101f1867fca376a421a5346a53559d0aaf516
 
         <dependency>
             <groupId>commons-lang</groupId>
@@ -208,19 +239,31 @@
         <dependency>
             <groupId>org.apache.httpcomponents</groupId>
             <artifactId>httpclient</artifactId>
+<<<<<<< HEAD
             <version>4.2</version>
+=======
+            <version>4.3.3</version>
+>>>>>>> 946101f1867fca376a421a5346a53559d0aaf516
             <scope>runtime</scope>
         </dependency>
         <dependency>
             <groupId>org.apache.httpcomponents</groupId>
             <artifactId>httpcore</artifactId>
+<<<<<<< HEAD
             <version>4.2</version>
+=======
+            <version>4.3.2</version>
+>>>>>>> 946101f1867fca376a421a5346a53559d0aaf516
             <scope>runtime</scope>
         </dependency>
         <dependency>
             <groupId>org.apache.httpcomponents</groupId>
             <artifactId>httpmime</artifactId>
+<<<<<<< HEAD
             <version>4.2</version>
+=======
+            <version>4.3.3</version>
+>>>>>>> 946101f1867fca376a421a5346a53559d0aaf516
             <scope>runtime</scope>
         </dependency>
         <dependency>

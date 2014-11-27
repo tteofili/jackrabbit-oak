@@ -17,16 +17,16 @@
 package org.apache.jackrabbit.oak.plugins.document;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
+import java.util.Iterator;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.NavigableMap;
+import java.util.Queue;
 import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 import javax.annotation.CheckForNull;
@@ -35,9 +35,17 @@ import javax.annotation.Nullable;
 
 import com.google.common.base.Function;
 import com.google.common.base.Predicate;
+import com.google.common.collect.AbstractIterator;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Iterators;
+import com.google.common.collect.Queues;
 import org.apache.jackrabbit.oak.cache.CacheValue;
 import org.apache.jackrabbit.oak.commons.PathUtils;
+import org.apache.jackrabbit.oak.commons.json.JsopBuilder;
+import org.apache.jackrabbit.oak.commons.json.JsopReader;
+import org.apache.jackrabbit.oak.commons.json.JsopTokenizer;
+import org.apache.jackrabbit.oak.commons.json.JsopWriter;
 import org.apache.jackrabbit.oak.plugins.document.memory.MemoryDocumentStore;
 import org.apache.jackrabbit.oak.plugins.document.util.Utils;
 import org.slf4j.Logger;
@@ -51,6 +59,7 @@ import static com.google.common.collect.Iterables.filter;
 import static com.google.common.collect.Iterables.transform;
 import static org.apache.jackrabbit.oak.plugins.document.UpdateOp.Key;
 import static org.apache.jackrabbit.oak.plugins.document.UpdateOp.Operation;
+import static org.apache.jackrabbit.oak.plugins.document.util.Utils.isRevisionNewer;
 
 /**
  * A document storing data about a node.
@@ -67,7 +76,19 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
     }
 
     static final Logger LOG = LoggerFactory.getLogger(NodeDocument.class);
-    
+
+    /**
+     * All NodeDocument ID value would be greater than this value
+     * It can be used as startKey in DocumentStore#query methods
+     */
+    public static final String MIN_ID_VALUE = "0000000";
+
+    /**
+     * All NodeDocument ID value would be less than this value
+     * It can be used as endKey in DocumentStore#query methods
+     */
+    public static final String MAX_ID_VALUE = ";";
+
     /**
      * A size threshold after which to consider a document a split candidate.
      * TODO: check which value is the best one
@@ -92,16 +113,32 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
     static final float SPLIT_RATIO = 0.3f;
 
     /**
+     * Create an intermediate previous document when there are this many
+     * previous documents of equal height.
+     */
+    static final int PREV_SPLIT_FACTOR = 10;
+
+    /**
      * Revision collision markers set by commits with modifications, which
      * overlap with un-merged branch commits.
      * Key: revision, value: always true
      */
-    static final String COLLISIONS = "_collisions";
+    public static final String COLLISIONS = "_collisions";
 
     /**
-     * The modified time (5 second resolution).
+     * Optional counter for changes to {@link #COLLISIONS} map.
      */
-    public static final String MODIFIED = "_modified";
+    public static final String COLLISIONSMODCOUNT = "_collisionsModCount";
+
+    /**
+     * The modified time in seconds (5 second resolution).
+     */
+    public static final String MODIFIED_IN_SECS = "_modified";
+
+    /**
+     * The resolution of the modified time.
+     */
+    static final int MODIFIED_IN_SECS_RESOLUTION = 5;
 
     private static final NavigableMap<Revision, Range> EMPTY_RANGE_MAP =
             Maps.unmodifiableNavigableMap(new TreeMap<Revision, Range>());
@@ -111,7 +148,7 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
      * revision is actually committed. Depth 0 means the commit is in the root node,
      * depth 1 means one node below the root, and so on.
      */
-    private static final String COMMIT_ROOT = "_commitRoot";
+    static final String COMMIT_ROOT = "_commitRoot";
 
     /**
      * The number of previous documents (documents that contain old revisions of
@@ -131,19 +168,29 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
     private static final String DELETED = "_deleted";
 
     /**
+     * Flag indicating that whether this node was ever deleted.
+     * Its just used as a hint. If set to true then it indicates that
+     * node was once deleted.
+     *
+     * <p>Note that a true value does not mean that node should be considered
+     * deleted as it might have been resurrected in later revision</p>
+     */
+    public static final String DELETED_ONCE = "_deletedOnce";
+
+    /**
      * The list of recent revisions for this node, where this node is the
-     * root of the commit. 
+     * root of the commit.
      * <p>
      * Key: revision.
      * <p>
-     * Value: "c" for a regular (non-branch) commit, 
+     * Value: "c" for a regular (non-branch) commit,
      * "c-" + base revision of the successfully merged branch commit,
      * "b" + base revision of an un-merged branch commit
      */
-    private static final String REVISIONS = "_revisions";
+    static final String REVISIONS = "_revisions";
 
     /**
-     * The last revision. 
+     * The last revision.
      * <p>
      * Key: machine id, in the form "r0-0-1".
      * <p>
@@ -158,17 +205,123 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
      * node had a child node
      */
     private static final String CHILDREN_FLAG = "_children";
-    
+
     /**
      * The node path, in case the id can not be converted to a path.
      */
     public static final String PATH = "_path";
 
+    public static final String HAS_BINARY_FLAG = "_bin";
+
+    //~----------------------------< Split Document Types >
+
     /**
-     * Properties to ignore when a document is split.
+     * Defines the type of split document. Its value is an integer whose value is
+     * defined as per
+     *
+     * @see org.apache.jackrabbit.oak.plugins.document.NodeDocument.SplitDocType
      */
-    private static final Set<String> IGNORE_ON_SPLIT = ImmutableSet.of(ID, MOD_COUNT, MODIFIED, PREVIOUS,
-            LAST_REV, CHILDREN_FLAG);
+    public static final String SD_TYPE = "_sdType";
+
+    /**
+     * Property name which refers to timestamp (long) of the latest revision kept
+     * in the document
+     */
+    public static final String SD_MAX_REV_TIME_IN_SECS = "_sdMaxRevTime";
+
+    /**
+     * Return time in seconds with 5 second resolution
+     *
+     * @param timestamp time in millis to convert
+     * @return the time in seconds with the given resolution.
+     */
+    public static long getModifiedInSecs(long timestamp) {
+        // 5 second resolution
+        long timeInSec = TimeUnit.MILLISECONDS.toSeconds(timestamp);
+        return timeInSec - timeInSec % MODIFIED_IN_SECS_RESOLUTION;
+    }
+
+    /**
+     * A document which is created from splitting a main document can be classified
+     * into multiple types depending on the content i.e. weather it contains
+     * REVISIONS, COMMIT_ROOT, property history etc
+     */
+    public static enum SplitDocType {
+        /**
+         * Not a split document
+         */
+        NONE(-1),
+        /**
+         * A split document which contains all types of data
+         */
+        DEFAULT(10),
+        /**
+         * A split document which contains all types of data. In addition
+         * when the split document was created the main document did not had
+         * any child.
+         * This type is deprecated because these kind of documents cannot be
+         * garbage collected independently. The main document may still
+         * reference _commitRoot entries in the previous document. See OAK-1794
+         */
+        @Deprecated
+        DEFAULT_NO_CHILD(20),
+        /**
+         * A split document which does not contain REVISIONS history.
+         * This type is deprecated because these kind of documents cannot be
+         * garbage collected independently. The main document may still
+         * reference _commitRoot entries in the previous document. See OAK-1794
+         */
+        @Deprecated
+        PROP_COMMIT_ONLY(30),
+        /**
+         * Its an intermediate split document which only contains version ranges
+         * and does not contain any other attributes
+         */
+        INTERMEDIATE(40),
+        /**
+         * A split document which contains all types of data. In addition
+         * when the split document was created the main document did not had
+         * any child.
+         */
+        DEFAULT_LEAF(50),
+        /**
+         * A split document which does not contain REVISIONS history.
+         */
+        COMMIT_ROOT_ONLY(60),
+        ;
+
+        final int type;
+
+        private SplitDocType(int type){
+            this.type = type;
+        }
+
+        public int typeCode() {
+            return type;
+        }
+
+        static SplitDocType valueOf(Integer type){
+            if(type == null){
+                return NONE;
+            }
+            for(SplitDocType docType : values()){
+                if(docType.type == type){
+                    return docType;
+                }
+            }
+            throw new IllegalArgumentException("Not a valid SplitDocType :" + type);
+        }
+    }
+
+
+    /**
+     * Properties to ignore when a document is split (see OAK-2044).
+     */
+    static final Set<String> IGNORE_ON_SPLIT = ImmutableSet.of(
+            ID, MOD_COUNT, COLLISIONSMODCOUNT, MODIFIED_IN_SECS, PREVIOUS, LAST_REV, CHILDREN_FLAG,
+            HAS_BINARY_FLAG, PATH, DELETED_ONCE, COLLISIONS);
+
+    public static final long HAS_BINARY_VAL = 1;
 
     final DocumentStore store;
 
@@ -191,7 +344,7 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
     /**
      * Required for serialization
      *
-     * @param store
+     * @param store the document store.
      * @param creationTime time at which it was created. Would be different from current time
      *                     in case of being resurrected from a serialized for
      */
@@ -211,8 +364,7 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
      */
     @Nonnull
     public Map<Revision, String> getValueMap(@Nonnull String key) {
-        Object value = super.get(key);
-        if (IGNORE_ON_SPLIT.contains(key) || !(value instanceof Map)) {
+        if (IGNORE_ON_SPLIT.contains(key)) {
             return Collections.emptyMap();
         } else {
             return ValueMap.create(this, key);
@@ -228,17 +380,72 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
     }
 
     /**
-     * @return the approximate number of children for this node.
+     * Returns <tt>true</tt> if this node possibly has children.
+     * If false then that indicates that there are no child
+     *
+     * @return <tt>true</tt> if this node has children
      */
     public boolean hasChildren() {
         Boolean childrenFlag = (Boolean) get(CHILDREN_FLAG);
-        return childrenFlag != null ? childrenFlag.booleanValue() : false;
+        return childrenFlag != null && childrenFlag;
+    }
+
+    /**
+     * Returns <tt>true</tt> if this document was ever deleted in past.
+     */
+    public boolean wasDeletedOnce() {
+        Boolean deletedOnceFlag = (Boolean) get(DELETED_ONCE);
+        return deletedOnceFlag != null && deletedOnceFlag;
+    }
+
+    /**
+     * Checks if this document has been modified after the given lastModifiedTime
+     *
+     * @param lastModifiedTime time to compare against in millis
+     * @return <tt>true</tt> if this document was modified after the given
+     *  lastModifiedTime
+     */
+    public boolean hasBeenModifiedSince(long lastModifiedTime){
+        Long modified = (Long) get(MODIFIED_IN_SECS);
+        return modified != null && modified > TimeUnit.MILLISECONDS.toSeconds(lastModifiedTime);
+    }
+
+    /**
+     * Checks if revision time of all entries in this document is less than the passed
+     * time
+     *
+     * @param maxRevisionTime timemstamp (in millis) of revision to check
+     * @return <tt>true</tt> if timestamp of maximum revision stored in this document
+     * is less than than the passed revision timestamp
+     */
+    public boolean hasAllRevisionLessThan(long maxRevisionTime){
+        Long maxRevTimeStamp = (Long) get(SD_MAX_REV_TIME_IN_SECS);
+        return maxRevTimeStamp != null && maxRevTimeStamp < TimeUnit.MILLISECONDS.toSeconds(maxRevisionTime);
+    }
+
+    /**
+     * Determines if this document is a split document
+     *
+     * @return <tt>true</tt> if this document is a split document
+     */
+    public boolean isSplitDocument(){
+        return getSplitDocType() != SplitDocType.NONE;
+    }
+
+    /**
+     * Determines the type of split document
+     *
+     * @return type of Split Document
+     */
+    public SplitDocType getSplitDocType() {
+        Object t = get(SD_TYPE);
+        return t == null ? SplitDocType.valueOf((Integer) null) : SplitDocType.valueOf(((Number) t).intValue());
     }
 
     /**
      * Mark this instance as up-to-date (matches the state in persistence
      * store).
-     * 
+     *
      * @param checkTime time at which the check was performed
      */
     @Override
@@ -249,7 +456,7 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
     /**
      * Returns true if the document has already been checked for consistency
      * in current cycle.
-     * 
+     *
      * @param lastCheckTime time at which current cycle started
      * @return if the document was checked
      */
@@ -260,12 +467,41 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
 
     /**
      * Returns the last time when this object was checked for consistency.
-     * 
+     *
      * @return the last check time
      */
     @Override
     public long getLastCheckTime() {
         return lastCheckTime.get();
+    }
+
+    public boolean hasBinary() {
+        Number flag = (Number) get(HAS_BINARY_FLAG);
+        if(flag == null){
+            return false;
+        }
+        return flag.intValue() == HAS_BINARY_VAL;
+    }
+
+    /**
+     * Returns the path of the main document if this document is part of a _prev
+     * history tree. Otherwise this method simply returns {@link #getPath()}.
+     *
+     * @return the path of the main document.
+     */
+    @Nonnull
+    public String getMainPath() {
+        String p = getPath();
+        if (p.startsWith("p")) {
+            p = PathUtils.getAncestorPath(p, 2);
+            if (p.length() == 1) {
+                return "/";
+            } else {
+                return p.substring(1);
+            }
+        } else {
+            return p;
+        }
     }
 
     /**
@@ -331,30 +567,40 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
     }
 
     /**
-     * Gets a sorted map of uncommitted revisions of this document with the
+     * Purge the  uncommitted revisions of this document with the
      * local cluster node id as returned by the {@link RevisionContext}. These
      * are the {@link #REVISIONS} entries where {@link Utils#isCommitted(String)}
      * returns false.
      *
+     * <p>
+     *     <bold>Note</bold> - This method should only be invoked upon startup
+     *     as then only we can safely assume that these revisions would not be
+     *     committed
+     * </p>
+     *
      * @param context the revision context.
-     * @return the uncommitted revisions of this document.
+     * @return count of the revision entries purged
      */
-    public SortedMap<Revision, Revision> getUncommittedRevisions(RevisionContext context) {
+    public int purgeUncommittedRevisions(RevisionContext context) {
         // only look at revisions in this document.
         // uncommitted revisions are not split off
         Map<Revision, String> valueMap = getLocalRevisions();
-        SortedMap<Revision, Revision> revisions =
-                new TreeMap<Revision, Revision>(context.getRevisionComparator());
+        UpdateOp op = new UpdateOp(getId(), false);
+        int purgeCount = 0;
         for (Map.Entry<Revision, String> commit : valueMap.entrySet()) {
             if (!Utils.isCommitted(commit.getValue())) {
                 Revision r = commit.getKey();
                 if (r.getClusterId() == context.getClusterId()) {
-                    Revision b = Revision.fromString(commit.getValue());
-                    revisions.put(r, b);
+                    purgeCount++;
+                    op.removeMapEntry(REVISIONS, r);
                 }
             }
         }
-        return revisions;
+
+        if (op.hasChanges()) {
+            store.findAndUpdate(Collection.NODES, op);
+        }
+        return purgeCount;
     }
 
     /**
@@ -369,12 +615,7 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
     public String getCommitRootPath(Revision revision) {
         String depth = getCommitRootDepth(revision);
         if (depth != null) {
-            if (depth.equals("0")) {
-                return "/";
-            }
-            String p = getPath();
-            return PathUtils.getAncestorPath(p,
-                    PathUtils.getDepth(p) - Integer.parseInt(depth));
+            return getPathAtDepth(depth);
         }
         return null;
     }
@@ -389,34 +630,60 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
      * @return the revision, or null if deleted
      */
     @CheckForNull
-    public Revision getNewestRevision(RevisionContext context,
-                                      Revision changeRev,
-                                      CollisionHandler handler) {
-        // no need to look at all commits. the primary document
-        // always contains at least one commit, including all
-        // branch commits which are not yet merged
+    public Revision getNewestRevision(final RevisionContext context,
+                                      final Revision changeRev,
+                                      final CollisionHandler handler) {
+        final Map<Revision, String> validRevisions = Maps.newHashMap();
+        Predicate<Revision> predicate = new Predicate<Revision>() {
+            @Override
+            public boolean apply(Revision input) {
+                if (input.equals(changeRev)) {
+                    return false;
+                }
+                if (isValidRevision(context, input, null, changeRev, validRevisions)) {
+                    return true;
+                }
+                handler.concurrentModification(input);
+                return false;
+            }
+        };
+
+        Revision newestRev = null;
+        // check local commits first
         SortedMap<Revision, String> revisions = getLocalRevisions();
         SortedMap<Revision, String> commitRoots = getLocalCommitRoot();
-        Revision newestRev = null;
-        for (Revision r : Iterables.mergeSorted(
-                Arrays.asList(revisions.keySet(), commitRoots.keySet()),
-                revisions.comparator())) {
-            if (!r.equals(changeRev)) {
-                if (isValidRevision(context, r, null, changeRev, new HashSet<Revision>())) {
-                    newestRev = r;
-                    // found newest revision, no need to check more revisions
-                    // revisions are sorted newest first
-                    break;
-                } else {
-                    handler.concurrentModification(r);
-                }
+        Iterator<Revision> it = filter(Iterables.mergeSorted(
+                ImmutableList.of(revisions.keySet(), commitRoots.keySet()),
+                revisions.comparator()), predicate).iterator();
+        if (it.hasNext()) {
+            newestRev = it.next();
+        } else {
+            // check full history (only needed in rare cases)
+            it = filter(Iterables.mergeSorted(
+                    ImmutableList.of(getValueMap(REVISIONS).keySet(), getValueMap(COMMIT_ROOT).keySet()),
+                    revisions.comparator()), predicate).iterator();
+            if (it.hasNext()) {
+                newestRev = it.next();
             }
         }
+
         if (newestRev == null) {
             return null;
         }
 
-        String value = getDeleted().get(newestRev);
+        // the local deleted map contains the most recent revisions
+        SortedMap<Revision, String> deleted = getLocalDeleted();
+        String value = deleted.get(newestRev);
+        if (value == null && deleted.headMap(newestRev).isEmpty()) {
+            // newestRev is newer than most recent entry in local deleted
+            // no need to check previous docs
+            return newestRev;
+        }
+
+        if (value == null) {
+            // get from complete map
+            value = getDeleted().get(newestRev);
+        }
         if ("true".equals(value)) {
             // deleted in the newest revision
             return null;
@@ -439,8 +706,9 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
      * @param commitValue the commit value of the revision to check or
      *                    <code>null</code> if unknown.
      * @param readRevision the read revision of the client.
-     * @param validRevisions set of revisions already checked against
-     *                       <code>readRevision</code> and considered valid.
+     * @param validRevisions map of revisions to commit value already checked
+     *                       against <code>readRevision</code> and considered
+     *                       valid.
      * @return <code>true</code> if the revision is valid; <code>false</code>
      *         otherwise.
      */
@@ -448,8 +716,8 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
                             @Nonnull Revision rev,
                             @Nullable String commitValue,
                             @Nonnull Revision readRevision,
-                            @Nonnull Set<Revision> validRevisions) {
-        if (validRevisions.contains(rev)) {
+                            @Nonnull Map<Revision, String> validRevisions) {
+        if (validRevisions.containsKey(rev)) {
             return true;
         }
         NodeDocument doc = getCommitRoot(rev);
@@ -457,7 +725,7 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
             return false;
         }
         if (doc.isCommitted(context, rev, commitValue, readRevision)) {
-            validRevisions.add(rev);
+            validRevisions.put(rev, commitValue);
             return true;
         }
         return false;
@@ -480,7 +748,7 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
     public DocumentNodeState getNodeAtRevision(@Nonnull DocumentNodeStore nodeStore,
                                                @Nonnull Revision readRevision,
                                                @Nullable Revision lastModified) {
-        Set<Revision> validRevisions = new HashSet<Revision>();
+        Map<Revision, String> validRevisions = Maps.newHashMap();
         Revision min = getLiveRevision(nodeStore, readRevision, validRevisions);
         if (min == null) {
             // deleted
@@ -496,6 +764,22 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
             // first check local map, which contains most recent values
             Value value = getLatestValue(nodeStore, getLocalMap(key),
                     min, readRevision, validRevisions);
+
+            // check if there may be more recent values in a previous document
+            if (value != null && !getPreviousRanges().isEmpty()) {
+                Revision newest = getLocalMap(key).firstKey();
+                if (!value.revision.equals(newest)) {
+                    // not reading the most recent value, we may need to
+                    // consider previous documents as well
+                    Revision newestPrev = getPreviousRanges().firstKey();
+                    if (isRevisionNewer(nodeStore, newestPrev, value.revision)) {
+                        // a previous document has more recent changes
+                        // than value.revision
+                        value = null;
+                    }
+                }
+            }
+
             if (value == null && !getPreviousRanges().isEmpty()) {
                 // check complete revision history
                 value = getLatestValue(nodeStore, getValueMap(key),
@@ -544,7 +828,11 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
                 // changes is the base of the branch
                 r = branchBase;
             }
-            if (isRevisionNewer(nodeStore, r, lastRevision)) {
+            if (revisionAreAmbiguous(nodeStore, r, lastRevision)) {
+                // _lastRev entries from multiple cluster nodes are ambiguous
+                // use readRevision to make sure read is consistent
+                lastRevision = readRevision;
+            } else if (isRevisionNewer(nodeStore, r, lastRevision)) {
                 lastRevision = r;
             }
         }
@@ -563,17 +851,17 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
     /**
      * Get the earliest (oldest) revision where the node was alive at or before
      * the provided revision, if the node was alive at the given revision.
-     * 
+     *
      * @param context the revision context
      * @param maxRev the maximum revision to return
-     * @param validRevisions the set of revisions already checked against maxRev
-     *            and considered valid.
+     * @param validRevisions the map of revisions to commit value already
+     *                       checked against maxRev and considered valid.
      * @return the earliest revision, or null if the node is deleted at the
      *         given revision
      */
     @CheckForNull
     public Revision getLiveRevision(RevisionContext context, Revision maxRev,
-                                    Set<Revision> validRevisions) {
+                                    Map<Revision, String> validRevisions) {
         // check local deleted map first
         Value value = getLatestValue(context, getLocalDeleted(),
                 null, maxRev, validRevisions);
@@ -582,7 +870,8 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
             value = getLatestValue(context, getDeleted(),
                     null, maxRev, validRevisions);
         }
-        return value != null && value.value.equals("false") ? value.revision : null;
+
+        return value != null && "false".equals(value.value) ? value.revision : null;
     }
 
     /**
@@ -591,15 +880,22 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
      *
      * @param op the update operation.
      * @param baseRevision the base revision for the update operation.
+     * @param commitRevision the commit revision of the update operation.
      * @param context the revision context.
      * @return <code>true</code> if conflicting, <code>false</code> otherwise.
      */
-    public boolean isConflicting(@Nonnull UpdateOp op,
+    boolean isConflicting(@Nonnull UpdateOp op,
                                  @Nonnull Revision baseRevision,
+                                 @Nonnull Revision commitRevision,
                                  @Nonnull RevisionContext context) {
         // did existence of node change after baseRevision?
-        Map<Revision, String> deleted = getDeleted();
+        // only check local deleted map, which contains the most
+        // recent values
+        Map<Revision, String> deleted = getLocalDeleted();
         for (Map.Entry<Revision, String> entry : deleted.entrySet()) {
+            if (entry.getKey().equals(commitRevision)) {
+                continue;
+            }
             if (isRevisionNewer(context, entry.getKey(), baseRevision)) {
                 return true;
             }
@@ -620,6 +916,9 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
             }
             // was this property touched after baseRevision?
             for (Revision rev : getValueMap(name).keySet()) {
+                if (rev.equals(commitRevision)) {
+                    continue;
+                }
                 if (isRevisionNewer(context, rev, baseRevision)) {
                     return true;
                 }
@@ -637,103 +936,7 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
      */
     @Nonnull
     public Iterable<UpdateOp> split(@Nonnull RevisionContext context) {
-        // only consider if there are enough commits,
-        // unless document is really big
-        if (getLocalRevisions().size() + getLocalCommitRoot().size() <= NUM_REVS_THRESHOLD
-                && getMemory() < DOC_SIZE_THRESHOLD) {
-            return Collections.emptyList();
-        }
-        String id = getId();
-        SortedMap<Revision, Range> previous = getPreviousRanges();
-        // what's the most recent previous revision?
-        Revision recentPrevious = null;
-        for (Revision rev : previous.keySet()) {
-            if (rev.getClusterId() != context.getClusterId()) {
-                continue;
-            }
-            if (recentPrevious == null
-                    || isRevisionNewer(context, rev, recentPrevious)) {
-                recentPrevious = rev;
-            }
-        }
-        Map<String, NavigableMap<Revision, String>> splitValues
-                = new HashMap<String, NavigableMap<Revision, String>>();
-        for (String property : data.keySet()) {
-            if (IGNORE_ON_SPLIT.contains(property)) {
-                continue;
-            }
-            NavigableMap<Revision, String> splitMap
-                    = new TreeMap<Revision, String>(context.getRevisionComparator());
-            splitValues.put(property, splitMap);
-            Map<Revision, String> valueMap = getLocalMap(property);
-            // collect committed changes of this cluster node after the
-            // most recent previous split revision
-            for (Map.Entry<Revision, String> entry : valueMap.entrySet()) {
-                Revision rev = entry.getKey();
-                if (rev.getClusterId() != context.getClusterId()) {
-                    continue;
-                }
-                if (recentPrevious == null
-                        || isRevisionNewer(context, rev, recentPrevious)) {
-                    if (isCommitted(rev)) {
-                        splitMap.put(rev, entry.getValue());
-                    }
-                }
-            }
-        }
-
-        List<UpdateOp> splitOps = Collections.emptyList();
-        int numValues = 0;
-        Revision high = null;
-        Revision low = null;
-        for (NavigableMap<Revision, String> splitMap : splitValues.values()) {
-            // keep the most recent in the main document
-            if (!splitMap.isEmpty()) {
-                splitMap.remove(splitMap.lastKey());
-            }
-            if (splitMap.isEmpty()) {
-                continue;
-            }
-            // remember highest / lowest revision
-            if (high == null || isRevisionNewer(context, splitMap.lastKey(), high)) {
-                high = splitMap.lastKey();
-            }
-            if (low == null || isRevisionNewer(context, low, splitMap.firstKey())) {
-                low = splitMap.firstKey();
-            }
-            numValues += splitMap.size();
-        }
-        if (high != null && low != null
-                && (numValues >= NUM_REVS_THRESHOLD
-                    || getMemory() > DOC_SIZE_THRESHOLD)) {
-            // enough revisions to split off
-            splitOps = new ArrayList<UpdateOp>(2);
-            // move to another document
-            UpdateOp main = new UpdateOp(id, false);
-            setPrevious(main, high, low);
-            UpdateOp old = new UpdateOp(Utils.getPreviousIdFor(id, high), true);
-            if (get(PATH) != null) {
-                old.set(PATH, get(PATH));
-            }
-            old.set(ID, old.getId());
-            for (String property : splitValues.keySet()) {
-                NavigableMap<Revision, String> splitMap = splitValues.get(property);
-                for (Map.Entry<Revision, String> entry : splitMap.entrySet()) {
-                    Revision r = entry.getKey();
-                    main.removeMapEntry(property, r);
-                    old.setMapEntry(property, r, entry.getValue());
-                }
-            }
-            // check size of old document
-            NodeDocument oldDoc = new NodeDocument(store);
-            UpdateUtils.applyChanges(oldDoc, old, context.getRevisionComparator());
-            // only split if half of the data can be moved to old document
-            if (oldDoc.getMemory() > getMemory() * SPLIT_RATIO) {
-                splitOps.add(old);
-                splitOps.add(main);
-            }
-        }
-        return splitOps;
+        return SplitOperations.forDocument(this, context);
     }
 
     /**
@@ -752,9 +955,8 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
                 NavigableMap<Revision, Range> transformed = new TreeMap<Revision, Range>(
                         StableRevisionComparator.REVERSE);
                 for (Map.Entry<Revision, String> entry : map.entrySet()) {
-                    Revision high = entry.getKey();
-                    Revision low = Revision.fromString(entry.getValue());
-                    transformed.put(high, new Range(high, low));
+                    Range r = Range.fromEntry(entry.getKey(), entry.getValue());
+                    transformed.put(r.high, r);
                 }
                 previous = Maps.unmodifiableNavigableMap(transformed);
             }
@@ -780,13 +982,16 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
             return Collections.emptyList();
         }
         if (revision == null) {
-            return new PropertyHistory(store, this, property);
+            return new PropertyHistory(this, property);
         } else {
+            final String mainPath = getMainPath();
             // first try to lookup revision directly
-            Revision r = getPreviousRanges().floorKey(revision);
-            if (r != null) {
-                String prevId = Utils.getPreviousIdFor(getId(), r);
-                NodeDocument prev = store.find(Collection.NODES, prevId);
+            Map.Entry<Revision, Range> entry = getPreviousRanges().floorEntry(revision);
+            if (entry != null) {
+                Revision r = entry.getKey();
+                int h = entry.getValue().height;
+                String prevId = Utils.getPreviousIdFor(mainPath, r, h);
+                NodeDocument prev = getPreviousDocument(prevId);
                 if (prev != null) {
                     if (prev.getValueMap(property).containsKey(revision)) {
                         return Collections.singleton(prev);
@@ -802,14 +1007,7 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
                 @Override
                 public NodeDocument apply(Map.Entry<Revision, Range> input) {
                     if (input.getValue().includes(revision)) {
-                        Revision r = input.getKey();
-                        String prevId = Utils.getPreviousIdFor(getId(), r);
-                        NodeDocument prev = store.find(Collection.NODES, prevId);
-                        if (prev != null) {
-                            return prev;
-                        } else {
-                            LOG.warn("Document with previous revisions not found: " + prevId);
-                        }
+                       return getPreviousDoc(input.getKey(), input.getValue());
                     }
                     return null;
                 }
@@ -820,6 +1018,50 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
                 }
             });
         }
+    }
+
+    NodeDocument getPreviousDocument(String prevId){
+        //Use the maxAge variant such that in case of Mongo call for
+        //previous doc are directed towards replicas first
+        return store.find(Collection.NODES, prevId, Integer.MAX_VALUE);
+    }
+
+    @Nonnull
+    Iterator<NodeDocument> getAllPreviousDocs() {
+        if (getPreviousRanges().isEmpty()) {
+            return Iterators.emptyIterator();
+        }
+        //Currently this method would fire one query per previous doc
+        //If that poses a problem we can try to find all prev doc by relying
+        //on property that all prevDoc id would starts <depth+2>:p/path/to/node
+        return new AbstractIterator<NodeDocument>(){
+            private Queue<Map.Entry<Revision, Range>> previousRanges =
+                    Queues.newArrayDeque(getPreviousRanges().entrySet());
+            @Override
+            protected NodeDocument computeNext() {
+                if(!previousRanges.isEmpty()){
+                    Map.Entry<Revision, Range> e = previousRanges.remove();
+                    NodeDocument prev = getPreviousDoc(e.getKey(), e.getValue());
+                    if(prev != null){
+                        previousRanges.addAll(prev.getPreviousRanges().entrySet());
+                        return prev;
+                    }
+                }
+                return endOfData();
+            }
+        };
+    }
+
+    private NodeDocument getPreviousDoc(Revision rev, Range range){
+        int h = range.height;
+        String prevId = Utils.getPreviousIdFor(getMainPath(), rev, h);
+        NodeDocument prev = getPreviousDocument(prevId);
+        if (prev != null) {
+            return prev;
+        } else {
+            LOG.warn("Document with previous revisions not found: " + prevId);
+        }
+        return null;
     }
 
     /**
@@ -860,12 +1102,12 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
 
     public static void setChildrenFlag(@Nonnull UpdateOp op,
                                        boolean hasChildNode) {
-        checkNotNull(op).set(CHILDREN_FLAG, Boolean.valueOf(hasChildNode));
+        checkNotNull(op).set(CHILDREN_FLAG, hasChildNode);
     }
 
     public static void setModified(@Nonnull UpdateOp op,
                                    @Nonnull Revision revision) {
-        checkNotNull(op).set(MODIFIED, Commit.getModified(checkNotNull(revision).getTimestamp()));
+        checkNotNull(op).max(MODIFIED_IN_SECS, getModifiedInSecs(checkNotNull(revision).getTimestamp()));
     }
 
     public static void setRevision(@Nonnull UpdateOp op,
@@ -884,9 +1126,19 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
         return REVISIONS.equals(name);
     }
 
+    public static boolean isCommitRootEntry(String name) {
+        return COMMIT_ROOT.equals(name);
+    }
+
     public static void removeRevision(@Nonnull UpdateOp op,
                                       @Nonnull Revision revision) {
         checkNotNull(op).removeMapEntry(REVISIONS, checkNotNull(revision));
+    }
+
+    public static void addCollision(@Nonnull UpdateOp op,
+                                    @Nonnull Revision revision) {
+        checkNotNull(op).setMapEntry(COLLISIONS, checkNotNull(revision),
+                String.valueOf(true));
     }
 
     public static void removeCollision(@Nonnull UpdateOp op,
@@ -926,6 +1178,11 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
     public static void setDeleted(@Nonnull UpdateOp op,
                                   @Nonnull Revision revision,
                                   boolean deleted) {
+        if(deleted) {
+            //DELETED_ONCE would be set upon every delete.
+            //possibly we can avoid that
+            checkNotNull(op).set(DELETED_ONCE, Boolean.TRUE);
+        }
         checkNotNull(op).setMapEntry(DELETED, checkNotNull(revision),
                 String.valueOf(deleted));
     }
@@ -936,13 +1193,49 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
     }
 
     public static void setPrevious(@Nonnull UpdateOp op,
-                                   @Nonnull Revision high,
-                                   @Nonnull Revision low) {
-        checkNotNull(op).setMapEntry(PREVIOUS, checkNotNull(high),
-                checkNotNull(low).toString());
+                                   @Nonnull Range range) {
+        checkNotNull(op).setMapEntry(PREVIOUS, checkNotNull(range).high,
+                range.getLowValue());
+    }
+
+    public static void removePrevious(@Nonnull UpdateOp op,
+                                      @Nonnull Range range) {
+        checkNotNull(op).removeMapEntry(PREVIOUS, checkNotNull(range).high);
+    }
+
+    public static void setHasBinary(@Nonnull UpdateOp op) {
+        checkNotNull(op).set(HAS_BINARY_FLAG, HAS_BINARY_VAL);
     }
 
     //----------------------------< internal >----------------------------------
+
+    /**
+     * Returns {@code true} if the two revisions are ambiguous. That is, they
+     * are from different cluster nodes and the comparison of the two revision
+     * depends on the seen at revision and is different when just comparing the
+     * timestamps of the revisions.
+     *
+     * @param context the revision context.
+     * @param r1 the first revision.
+     * @param r2 the second revision.
+     * @return {@code true} if ambiguous, {@code false} otherwise.
+     */
+    static boolean revisionAreAmbiguous(@Nonnull RevisionContext context,
+                                        @Nonnull Revision r1,
+                                        @Nonnull Revision r2) {
+        if (r1.getClusterId() == r2.getClusterId()) {
+            return false;
+        }
+        int c1 = context.getRevisionComparator().compare(r1, r2);
+        int c2 = r1.compareTo(r2);
+        if (c1 == 0) {
+            return c2 == 0;
+        } else if (c1 < 0) {
+            return c2 >= 0;
+        } else {
+            return c2 <= 0;
+        }
+    }
 
     /**
      * Returns the commit root document for the given revision. This may either
@@ -953,17 +1246,46 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
      */
     @CheckForNull
     private NodeDocument getCommitRoot(@Nonnull Revision rev) {
-        if (containsRevision(rev)) {
+        // check local revisions and commitRoot first
+        if (getLocalRevisions().containsKey(rev)) {
             return this;
         }
-        String commitRootPath = getCommitRootPath(rev);
-        if (commitRootPath == null) {
-            // may happen for a commit root document, which hasn't been
-            // updated with the commit revision yet
-            return null;
+        String commitRootPath;
+        String depth = getLocalCommitRoot().get(rev);
+        if (depth != null) {
+            commitRootPath = getPathAtDepth(depth);
+        } else {
+            // fall back to complete check, including previous documents
+            if (containsRevision(rev)) {
+                return this;
+            }
+            commitRootPath = getCommitRootPath(rev);
+            if (commitRootPath == null) {
+                // may happen for a commit root document, which hasn't been
+                // updated with the commit revision yet
+                return null;
+            }
         }
         // get root of commit
         return store.find(Collection.NODES, Utils.getIdFromPath(commitRootPath));
+    }
+
+    /**
+     * Returns the path at the given {@code depth} based on the path of this
+     * document.
+     *
+     * @param depth the depth as a string.
+     * @return the path.
+     * @throws NumberFormatException if {@code depth} cannot be parsed as an
+     *              integer.
+     */
+    @Nonnull
+    private String getPathAtDepth(@Nonnull String depth) {
+        if (checkNotNull(depth).equals("0")) {
+            return "/";
+        }
+        String p = getPath();
+        return PathUtils.getAncestorPath(p, PathUtils.getDepth(p) - Integer.parseInt(depth));
     }
 
     /**
@@ -992,19 +1314,6 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
     }
 
     /**
-     * Checks that revision x is newer than another revision.
-     *
-     * @param x the revision to check
-     * @param previous the presumed earlier revision
-     * @return true if x is newer
-     */
-    private static boolean isRevisionNewer(@Nonnull RevisionContext context,
-                                           @Nonnull Revision x,
-                                           @Nonnull Revision previous) {
-        return context.getRevisionComparator().compare(x, previous) > 0;
-    }
-
-    /**
      * Returns <code>true</code> if the given revision
      * {@link Utils#isCommitted(String)} in the revisions map (including
      * revisions split off to previous documents) and is visible from the
@@ -1021,9 +1330,6 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
                                 @Nonnull Revision revision,
                                 @Nullable String commitValue,
                                 @Nonnull Revision readRevision) {
-        if (revision.equalsIgnoreBranch(readRevision)) {
-            return true;
-        }
         if (commitValue == null) {
             commitValue = getCommitValue(revision);
         }
@@ -1106,13 +1412,16 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
 
     /**
      * Get the latest property value that is larger or equal the min revision,
-     * and smaller or equal the readRevision revision.
+     * and smaller or equal the readRevision revision. A {@code null} return
+     * value indicates that the property was not set or removed within the given
+     * range. A non-null value means the the property was either set or removed
+     * depending on {@link Value#value}.
      *
      * @param valueMap the sorted revision-value map
      * @param min the minimum revision (null meaning unlimited)
      * @param readRevision the maximum revision
-     * @param validRevisions set of revision considered valid against the given
-     *                       readRevision.
+     * @param validRevisions map of revision to commit value considered valid
+     *                       against the given readRevision.
      * @return the value, or null if not found
      */
     @CheckForNull
@@ -1120,9 +1429,7 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
                                  @Nonnull Map<Revision, String> valueMap,
                                  @Nullable Revision min,
                                  @Nonnull Revision readRevision,
-                                 @Nonnull Set<Revision> validRevisions) {
-        String value = null;
-        Revision latestRev = null;
+                                 @Nonnull Map<Revision, String> validRevisions) {
         for (Map.Entry<Revision, String> entry : valueMap.entrySet()) {
             Revision propRev = entry.getKey();
             // ignore revisions newer than readRevision
@@ -1130,14 +1437,17 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
             if (isRevisionNewer(context, propRev, readRevision)) {
                 continue;
             }
-            // resolve revision
-            NodeDocument commitRoot = getCommitRoot(propRev);
-            if (commitRoot == null) {
-                continue;
-            }
-            String commitValue = commitRoot.getCommitValue(propRev);
+            String commitValue = validRevisions.get(propRev);
             if (commitValue == null) {
-                continue;
+                // resolve revision
+                NodeDocument commitRoot = getCommitRoot(propRev);
+                if (commitRoot == null) {
+                    continue;
+                }
+                commitValue = commitRoot.getCommitValue(propRev);
+                if (commitValue == null) {
+                    continue;
+                }
             }
             if (min != null && isRevisionNewer(context, min,
                     Utils.resolveCommitRevision(propRev, commitValue))) {
@@ -1145,14 +1455,14 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
             }
             if (isValidRevision(context, propRev, commitValue, readRevision, validRevisions)) {
                 // TODO: need to check older revisions as well?
-                latestRev = Utils.resolveCommitRevision(propRev, commitValue);
-                value = entry.getValue();
-                break;
+                return new Value(
+                        Utils.resolveCommitRevision(propRev, commitValue),
+                        entry.getValue());
             }
         }
-        return value != null ? new Value(value, latestRev) : null;
+        return null;
     }
-    
+
     @Override
     public String getPath() {
         String p = (String) get(PATH);
@@ -1166,23 +1476,95 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
     private Map<Revision, String> getDeleted() {
         return ValueMap.create(this, DELETED);
     }
-
-    @Nonnull
-    private Map<Revision, String> getCommitRoot() {
-        return ValueMap.create(this, COMMIT_ROOT);
+    
+    public String asString() {
+        JsopWriter json = new JsopBuilder();
+        toJson(json, data);
+        return json.toString();
+    }
+    
+    @SuppressWarnings("unchecked")
+    private static void toJson(JsopWriter json, Map<? extends Object, Object> map) {
+        for (Entry<? extends Object, Object>e : map.entrySet()) {
+            json.key(e.getKey().toString());
+            Object value = e.getValue();
+            if (value == null) {
+                json.value(null);
+            } else if (value instanceof Boolean) {
+                json.value((Boolean) value);
+            } else if (value instanceof Long) {
+                json.value((Long) value);
+            } else if (value instanceof Integer) {
+                json.value((Integer) value);
+            } else if (value instanceof Map) {
+                json.object();
+                toJson(json, (Map<Object, Object>) value);
+                json.endObject();
+            } else if (value instanceof Revision) {
+                json.value(value.toString());
+            } else {
+                json.value((String) value);
+            }        
+        }
+    }
+    
+    public static NodeDocument fromString(DocumentStore store, String s) {
+        JsopTokenizer json = new JsopTokenizer(s);
+        NodeDocument doc = new NodeDocument(store);
+        while (true) {
+            if (json.matches(JsopReader.END)) {
+                break;
+            }
+            String k = json.readString();
+            json.read(':');
+            if (json.matches(JsopReader.END)) {
+                break;
+            }
+            doc.put(k, fromJson(json));
+            json.matches(',');
+        }
+        return doc;
+    }
+    
+    private static Object fromJson(JsopTokenizer json) {
+        switch (json.read()) {
+        case JsopReader.NULL:
+            return null;
+        case JsopReader.TRUE:
+            return true;
+        case JsopReader.FALSE:
+            return false;
+        case JsopReader.NUMBER:
+            return Long.parseLong(json.getToken());
+        case JsopReader.STRING:
+            return json.getToken();
+        case '{':
+            TreeMap<Revision, Object> map = new TreeMap<Revision, Object>(StableRevisionComparator.REVERSE);
+            while (true) {
+                if (json.matches('}')) {
+                    break;
+                }
+                String k = json.readString();
+                json.read(':');
+                map.put(Revision.fromString(k), fromJson(json));
+                json.matches(',');
+            }
+            return map;
+        }
+        throw new IllegalArgumentException(json.readRawValue());
     }
     
     /**
      * The list of children for a node. The list might be complete or not, in
      * which case it only represents a block of children.
      */
-    static final class Children implements CacheValue, Cloneable {
+    public static final class Children implements CacheValue, Cloneable {
 
         /**
          * The child node names, ordered as stored in DocumentStore.
          */
         ArrayList<String> childNames = new ArrayList<String>();
-        
+
         /**
          * Whether the list is complete (in which case there are no other
          * children) or not.
@@ -1209,6 +1591,52 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
                 throw new RuntimeException();
             }
         }
+
+        public String asString() {
+            JsopWriter json = new JsopBuilder();
+            if (isComplete) {
+                json.key("isComplete").value(true);
+            }
+            if (childNames.size() > 0) {
+                json.key("children").array();
+                for (String c : childNames) {
+                    json.value(c);
+                }
+                json.endArray();
+            }
+            return json.toString();            
+        }
+        
+        public static Children fromString(String s) {
+            JsopTokenizer json = new JsopTokenizer(s);
+            Children children = new Children();
+            while (true) {
+                if (json.matches(JsopReader.END)) {
+                    break;
+                }
+                String k = json.readString();
+                json.read(':');
+                if ("isComplete".equals(k)) {
+                    children.isComplete = json.read() == JsopReader.TRUE;
+                } else if ("children".equals(k)) {
+                    json.read('[');
+                    while (true) {
+                        if (json.matches(']')) {
+                            break;
+                        }
+                        String value = json.readString();
+                        children.childNames.add(value);
+                        json.matches(',');
+                    }
+                }
+                if (json.matches(JsopReader.END)) {
+                    break;
+                }
+                json.read(',');
+            }
+            return children;            
+        }
+        
     }
 
     /**
@@ -1216,12 +1644,16 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
      */
     private static final class Value {
 
-        final String value;
         final Revision revision;
+        /**
+         * The value of a property at the given revision. A {@code null} value
+         * indicates the property was removed.
+         */
+        final String value;
 
-        Value(@Nonnull String value, @Nonnull Revision revision) {
-            this.value = checkNotNull(value);
+        Value(@Nonnull Revision revision, @Nullable String value) {
             this.revision = checkNotNull(revision);
+            this.value = value;
         }
     }
 }

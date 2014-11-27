@@ -62,12 +62,12 @@ public class PropertyIndexLookup {
     /**
      * The cost overhead to use the index in number of read operations.
      */
-    private static final int COST_OVERHEAD = 2;
+    private static final double COST_OVERHEAD = 2;
     
     /**
      * The maximum cost when the index can be used.
      */
-    private static final int MAX_COST = 100;
+    static final int MAX_COST = 100;
 
     /** Index storage strategy */
     private static final IndexStoreStrategy MIRROR =
@@ -129,7 +129,7 @@ public class PropertyIndexLookup {
             return Double.POSITIVE_INFINITY;
         }
         return COST_OVERHEAD +
-                getStrategy(indexMeta).count(indexMeta, encode(value), MAX_COST);
+                getStrategy(indexMeta).count(filter, indexMeta, encode(value), MAX_COST);
     }
 
     /**
@@ -144,7 +144,7 @@ public class PropertyIndexLookup {
      *         node was found
      */
     @Nullable
-    private NodeState getIndexNode(NodeState node, String propertyName, Filter filter) {
+    NodeState getIndexNode(NodeState node, String propertyName, Filter filter) {
         // keep a fallback to a matching index def that has *no* node type constraints
         // (initially, there is no fallback)
         NodeState fallback = null;

@@ -16,22 +16,73 @@
  */
 package org.apache.jackrabbit.oak.plugins.segment.file;
 
-import java.io.IOException;
-import java.nio.ByteBuffer;
+import java.util.Comparator;
 
+/**
+ * A file entry location in a tar file. This is used for the index with a tar
+ * file.
+ */
 class TarEntry {
+
+    static final Comparator<TarEntry> OFFSET_ORDER = new Comparator<TarEntry>() {
+        @Override
+        public int compare(TarEntry a, TarEntry b) {
+            if (a.offset > b.offset) {
+                return 1;
+            } else if (a.offset < b.offset) {
+                return -1;
+            } else {
+                return 0;
+            }
+        }
+    };
+
+    static final Comparator<TarEntry> IDENTIFIER_ORDER = new Comparator<TarEntry>() {
+        @Override
+        public int compare(TarEntry a, TarEntry b) {
+            if (a.msb > b.msb) {
+                return 1;
+            } else if (a.msb < b.msb) {
+                return -1;
+            } else if (a.lsb > b.lsb) {
+                return 1;
+            } else if (a.lsb < b.lsb) {
+                return -1;
+            } else {
+                return 0;
+            }
+        }
+    };
+
+    private final long msb;
+
+    private final long lsb;
 
     private final int offset;
 
     private final int size;
 
-    TarEntry(int offset, int size) {
+    TarEntry(long msb, long lsb, int offset, int size) {
+        this.msb = msb;
+        this.lsb = lsb;
         this.offset = offset;
         this.size = size;
     }
 
-    ByteBuffer read(FileAccess access) throws IOException {
-        return access.read(offset, size);
+    long msb() {
+        return msb;
+    }
+
+    long lsb() {
+        return lsb;
+    }
+
+    int offset() {
+        return offset;
+    }
+
+    int size() {
+        return size;
     }
 
 }

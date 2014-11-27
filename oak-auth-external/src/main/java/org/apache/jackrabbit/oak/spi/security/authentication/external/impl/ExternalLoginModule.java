@@ -18,23 +18,28 @@ package org.apache.jackrabbit.oak.spi.security.authentication.external.impl;
 
 import java.security.Principal;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 
 import javax.annotation.Nonnull;
 import javax.jcr.Credentials;
-import javax.jcr.RepositoryException;
 import javax.jcr.SimpleCredentials;
 import javax.security.auth.Subject;
 import javax.security.auth.callback.CallbackHandler;
 import javax.security.auth.login.LoginException;
 
 import org.apache.jackrabbit.api.security.user.UserManager;
+import org.apache.jackrabbit.oak.api.AuthInfo;
 import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.api.Root;
+import org.apache.jackrabbit.oak.namepath.NamePathMapper;
+import org.apache.jackrabbit.oak.plugins.value.ValueFactoryImpl;
 import org.apache.jackrabbit.oak.spi.security.ConfigurationParameters;
 import org.apache.jackrabbit.oak.spi.security.authentication.AbstractLoginModule;
 import org.apache.jackrabbit.oak.spi.security.authentication.AuthInfoImpl;
+import org.apache.jackrabbit.oak.spi.security.authentication.ImpersonationCredentials;
+import org.apache.jackrabbit.oak.spi.security.authentication.PreAuthenticatedLogin;
 import org.apache.jackrabbit.oak.spi.security.authentication.external.ExternalIdentityException;
 import org.apache.jackrabbit.oak.spi.security.authentication.external.ExternalIdentityProvider;
 import org.apache.jackrabbit.oak.spi.security.authentication.external.ExternalIdentityProviderManager;
@@ -55,6 +60,9 @@ import org.slf4j.LoggerFactory;
 public class ExternalLoginModule extends AbstractLoginModule {
 
     private static final Logger log = LoggerFactory.getLogger(ExternalLoginModule.class);
+
+    // todo: make configurable
+    private static final int MAX_SYNC_ATTEMPTS = 50;
 
     /**
      * Name of the parameter that configures the name of the external identity provider.
@@ -158,15 +166,21 @@ public class ExternalLoginModule extends AbstractLoginModule {
         if (idp == null || syncHandler == null) {
             return false;
         }
-
         credentials = getCredentials();
-        if (credentials == null) {
+
+        // check if we have a pre authenticated login from a previous login module
+        final String userId;
+        final PreAuthenticatedLogin preAuthLogin = getSharedPreAuthLogin();
+        if (preAuthLogin != null) {
+            userId = preAuthLogin.getUserId();
+        } else {
+            userId = credentials instanceof SimpleCredentials ? ((SimpleCredentials) credentials).getUserID() : null;
+        }
+        if (userId == null && credentials == null) {
             log.debug("No credentials found for external login module. ignoring.");
             return false;
         }
 
-        // remember userID as we need this so often
-        final String userId = credentials instanceof SimpleCredentials ? ((SimpleCredentials) credentials).getUserID() : null;
         try {
             SyncedIdentity sId = null;
             if (userId != null) {
@@ -187,12 +201,19 @@ public class ExternalLoginModule extends AbstractLoginModule {
                 }
             }
 
-            externalUser = idp.authenticate(credentials);
+            if (preAuthLogin != null) {
+                externalUser = idp.getUser(preAuthLogin.getUserId());
+            } else {
+                externalUser = idp.authenticate(credentials);
+            }
+
             if (externalUser != null) {
                 log.debug("IDP {} returned valid user {}", idp.getName(), externalUser);
 
-                //noinspection unchecked
-                sharedState.put(SHARED_KEY_CREDENTIALS, credentials);
+                if (credentials != null) {
+                    //noinspection unchecked
+                    sharedState.put(SHARED_KEY_CREDENTIALS, credentials);
+                }
 
                 //noinspection unchecked
                 sharedState.put(SHARED_KEY_LOGIN_NAME, externalUser.getId());
@@ -217,19 +238,16 @@ public class ExternalLoginModule extends AbstractLoginModule {
                 return false;
             }
         } catch (ExternalIdentityException e) {
-            log.error("Error while authenticating '{}' with {}", new Object[]{
-                    userId == null ? credentials : userId, idp.getName(), e
-            });
+            log.error("Error while authenticating '{}' with {}",
+                    userId == null ? credentials : userId, idp.getName(), e);
             return false;
         } catch (LoginException e) {
-            log.debug("IDP {} throws login exception for '{}': {}", new Object[] {
-                    idp.getName(), userId == null ? credentials : userId, e.getMessage()
-            });
+            log.debug("IDP {} throws login exception for '{}': {}",
+                    idp.getName(), userId == null ? credentials : userId, e.getMessage());
             throw e;
         } catch (Exception e) {
-            log.debug("SyncHandler {} throws sync exception for '{}'", new Object[] {
-                    syncHandler.getName(), userId == null ? credentials : userId, e
-            });
+            log.debug("SyncHandler {} throws sync exception for '{}'",
+                    syncHandler.getName(), userId == null ? credentials : userId, e);
             LoginException le = new LoginException("Error while syncing user.");
             le.initCause(e);
             throw le;
@@ -245,8 +263,10 @@ public class ExternalLoginModule extends AbstractLoginModule {
         if (!principals.isEmpty()) {
             if (!subject.isReadOnly()) {
                 subject.getPrincipals().addAll(principals);
-                subject.getPublicCredentials().add(credentials);
-                setAuthInfo(new AuthInfoImpl(externalUser.getId(), null, principals), subject);
+                if (credentials != null) {
+                    subject.getPublicCredentials().add(credentials);
+                }
+                setAuthInfo(createAuthInfo(externalUser.getId(), principals), subject);
             } else {
                 log.debug("Could not add information to read only subject {}", subject);
             }
@@ -268,32 +288,39 @@ public class ExternalLoginModule extends AbstractLoginModule {
      * @throws SyncException if an error occurs
      */
     private void syncUser(@Nonnull ExternalUser user) throws SyncException {
-        SyncContext context = null;
-        try {
-            Root root = getRoot();
-            if (root == null) {
-                throw new SyncException("Cannot synchronize user. root == null");
-            }
-            UserManager userManager = getUserManager();
-            if (userManager == null) {
-                throw new SyncException("Cannot synchronize user. userManager == null");
-            }
-            DebugTimer timer = new DebugTimer();
-            context = syncHandler.createContext(idp, userManager, root);
-            context.sync(user);
-            timer.mark("sync");
-            root.commit();
-            timer.mark("commit");
-            if (log.isDebugEnabled()) {
-                log.debug("syncUser({}) {}", user.getId(), timer.getString());
-            }
-        } catch (CommitFailedException e) {
-            throw new SyncException("User synchronization failed during commit.", e);
-        } finally {
-            if (context != null) {
-                context.close();
+        Root root = getRoot();
+        if (root == null) {
+            throw new SyncException("Cannot synchronize user. root == null");
+        }
+        UserManager userManager = getUserManager();
+        if (userManager == null) {
+            throw new SyncException("Cannot synchronize user. userManager == null");
+        }
+
+        int numAttempt = 0;
+        while (numAttempt++ < MAX_SYNC_ATTEMPTS) {
+            SyncContext context = null;
+            try {
+                DebugTimer timer = new DebugTimer();
+                context = syncHandler.createContext(idp, userManager, new ValueFactoryImpl(root, NamePathMapper.DEFAULT));
+                context.sync(user);
+                timer.mark("sync");
+                root.commit();
+                timer.mark("commit");
+                if (log.isDebugEnabled()) {
+                    log.debug("syncUser({}) {}", user.getId(), timer.getString());
+                }
+                return;
+            } catch (CommitFailedException e) {
+                log.warn("User synchronization failed during commit: {}. (attempt {}/{})", e.toString(), numAttempt, MAX_SYNC_ATTEMPTS);
+                root.refresh();
+            } finally {
+                if (context != null) {
+                    context.close();
+                }
             }
         }
+        throw new SyncException("User synchronization failed during commit after " + MAX_SYNC_ATTEMPTS + " attempts");
     }
 
     /**
@@ -312,7 +339,7 @@ public class ExternalLoginModule extends AbstractLoginModule {
                 throw new SyncException("Cannot synchronize user. userManager == null");
             }
             DebugTimer timer = new DebugTimer();
-            context = syncHandler.createContext(idp, userManager, root);
+            context = syncHandler.createContext(idp, userManager, new ValueFactoryImpl(root, NamePathMapper.DEFAULT));
             context.sync(id);
             timer.mark("sync");
             root.commit();
@@ -329,6 +356,29 @@ public class ExternalLoginModule extends AbstractLoginModule {
         }
 
     }
+
+    private AuthInfo createAuthInfo(String userId, Set<? extends Principal> principals) {
+        Credentials creds;
+        if (credentials instanceof ImpersonationCredentials) {
+            creds = ((ImpersonationCredentials) credentials).getBaseCredentials();
+        } else {
+            creds = credentials;
+        }
+        Map<String, Object> attributes = new HashMap<String, Object>();
+        Object shared = sharedState.get(SHARED_KEY_ATTRIBUTES);
+        if (shared instanceof Map) {
+            for (Object key : ((Map) shared).keySet()) {
+                attributes.put(key.toString(), ((Map) shared).get(key));
+            }
+        } else if (creds instanceof SimpleCredentials) {
+            SimpleCredentials sc = (SimpleCredentials) creds;
+            for (String attrName : sc.getAttributeNames()) {
+                attributes.put(attrName, sc.getAttribute(attrName));
+            }
+        }
+        return new AuthInfoImpl(userId, attributes, principals);
+    }
+
     //------------------------------------------------< AbstractLoginModule >---
 
     @Override

@@ -17,6 +17,7 @@
 package org.apache.jackrabbit.oak.plugins.document;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -26,29 +27,52 @@ import java.util.TreeSet;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
 
-import org.apache.jackrabbit.mk.api.MicroKernelException;
+import org.apache.jackrabbit.oak.api.CommitFailedException;
+import org.apache.jackrabbit.oak.api.PropertyState;
+import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.kernel.KernelNodeState;
 import org.apache.jackrabbit.oak.plugins.document.memory.MemoryDocumentStore;
 import org.apache.jackrabbit.oak.plugins.document.util.TimingDocumentStoreWrapper;
 import org.apache.jackrabbit.oak.plugins.document.util.Utils;
+import org.apache.jackrabbit.oak.spi.commit.CommitHook;
 import org.apache.jackrabbit.oak.spi.commit.CommitInfo;
+import org.apache.jackrabbit.oak.spi.commit.CompositeHook;
+import org.apache.jackrabbit.oak.spi.commit.DefaultEditor;
+import org.apache.jackrabbit.oak.spi.commit.Editor;
+import org.apache.jackrabbit.oak.spi.commit.EditorHook;
+import org.apache.jackrabbit.oak.spi.commit.EditorProvider;
 import org.apache.jackrabbit.oak.spi.commit.EmptyHook;
 import org.apache.jackrabbit.oak.spi.state.ChildNodeEntry;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
-import org.junit.Ignore;
+import org.apache.jackrabbit.oak.spi.state.NodeStore;
+import org.apache.jackrabbit.oak.stats.Clock;
+import org.junit.After;
 import org.junit.Test;
 
 import com.google.common.collect.Iterables;
 
+import static java.util.concurrent.TimeUnit.SECONDS;
+import static org.apache.jackrabbit.oak.api.CommitFailedException.CONSTRAINT;
+import static org.apache.jackrabbit.oak.plugins.document.Collection.NODES;
+import static org.apache.jackrabbit.oak.plugins.document.NodeDocument.MODIFIED_IN_SECS;
+import static org.apache.jackrabbit.oak.plugins.document.NodeDocument.MODIFIED_IN_SECS_RESOLUTION;
+import static org.apache.jackrabbit.oak.plugins.document.NodeDocument.NUM_REVS_THRESHOLD;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 public class DocumentNodeStoreTest {
+
+    @After
+    public void tearDown() {
+        Revision.resetClockToDefault();
+    }
 
     // OAK-1254
     @Test
@@ -204,7 +228,7 @@ public class DocumentNodeStoreTest {
                     c.addNode(new DocumentNodeState(store, "/foo/node", r));
                     c.addNode(new DocumentNodeState(store, "/bar/node", r));
                     c.apply();
-                } catch (MicroKernelException e) {
+                } catch (DocumentStoreException e) {
                     exceptions.add(e);
                 }
             }
@@ -236,5 +260,478 @@ public class DocumentNodeStoreTest {
         assertTrue(!doc.getLastRev().isEmpty());
 
         mk.dispose();
+    }
+
+    // OAK-1662
+    @Test
+    public void getNewestRevision() throws Exception {
+        DocumentStore docStore = new MemoryDocumentStore();
+        DocumentNodeStore ns1 = new DocumentMK.Builder()
+                .setDocumentStore(docStore).setAsyncDelay(0)
+                .setClusterId(1).getNodeStore();
+        ns1.getRoot();
+        ns1.runBackgroundOperations();
+        DocumentNodeStore ns2 = new DocumentMK.Builder()
+                .setDocumentStore(docStore).setAsyncDelay(0)
+                .setClusterId(2).getNodeStore();
+        ns2.getRoot();
+
+        NodeBuilder b1 = ns1.getRoot().builder();
+        for (int i = 0; i < NodeDocument.NUM_REVS_THRESHOLD; i++) {
+            b1.setProperty("p", String.valueOf(i));
+            ns1.merge(b1, EmptyHook.INSTANCE, CommitInfo.EMPTY);
+        }
+        ns1.runBackgroundOperations();
+
+        NodeBuilder b2 = ns2.getRoot().builder();
+        b2.setProperty("q", "value");
+        ns2.merge(b2, EmptyHook.INSTANCE, CommitInfo.EMPTY);
+
+        ns1.dispose();
+        ns2.dispose();
+    }
+
+    @Test
+    public void commitHookChangesOnBranch() throws Exception {
+        final int NUM_NODES = DocumentRootBuilder.UPDATE_LIMIT / 2;
+        final int NUM_PROPS = 10;
+        DocumentNodeStore ns = new DocumentMK.Builder().getNodeStore();
+        NodeBuilder builder = ns.getRoot().builder();
+        for (int i = 0; i < NUM_NODES; i++) {
+            NodeBuilder c = builder.child("n" + i);
+            for (int j = 0; j < NUM_PROPS; j++) {
+                c.setProperty("q" + j, "value");
+                c.setProperty("p" + j, "value");
+            }
+        }
+        try {
+            ns.merge(builder, CompositeHook.compose(
+                    Arrays.asList(new TestHook("p"), new TestHook("q"), FAILING_HOOK)),
+                    CommitInfo.EMPTY);
+            fail("merge must fail and reset changes done by commit hooks");
+        } catch (CommitFailedException e) {
+            // expected
+        }
+        for (int i = 0; i < NUM_NODES; i++) {
+            NodeBuilder c = builder.getChildNode("n" + i);
+            assertTrue(c.exists());
+            for (int j = 0; j < NUM_PROPS; j++) {
+                PropertyState p = c.getProperty("p" + j);
+                assertNotNull(p);
+                // must still see initial values before failed merge
+                assertEquals("value", p.getValue(Type.STRING));
+                // same for property 'qX'
+                p = c.getProperty("q" + j);
+                assertNotNull(p);
+                // must still see initial values before failed merge
+                assertEquals("value", p.getValue(Type.STRING));
+            }
+        }
+        ns.merge(builder, CompositeHook.compose(
+                Arrays.<CommitHook>asList(new TestHook("p"), new TestHook("q"))),
+                CommitInfo.EMPTY);
+
+        builder = ns.getRoot().builder();
+        // must see properties changed by commit hook
+        for (int i = 0; i < NUM_NODES; i++) {
+            NodeBuilder c = builder.getChildNode("n" + i);
+            assertTrue(c.exists());
+            for (int j = 0; j < NUM_PROPS; j++) {
+                PropertyState p = c.getProperty("p" + j);
+                assertNotNull(p);
+                assertEquals("test", p.getValue(Type.STRING));
+                p = c.getProperty("q" + j);
+                assertNotNull(p);
+                assertEquals("test", p.getValue(Type.STRING));
+            }
+        }
+
+        ns.dispose();
+    }
+
+    // OAK-1814
+    @Test
+    public void visibilityAfterRevisionComparatorPurge() throws Exception {
+        Clock clock = new Clock.Virtual();
+        clock.waitUntil(System.currentTimeMillis());
+        Revision.setClock(clock);
+        MemoryDocumentStore docStore = new MemoryDocumentStore();
+        DocumentNodeStore nodeStore1 = new DocumentMK.Builder()
+                .setDocumentStore(docStore).setClusterId(1)
+                .setAsyncDelay(0).clock(clock).getNodeStore();
+        nodeStore1.runBackgroundOperations();
+        DocumentNodeStore nodeStore2 = new DocumentMK.Builder()
+                .setDocumentStore(docStore).setClusterId(2)
+                .setAsyncDelay(0).clock(clock).getNodeStore();
+        DocumentNodeStore nodeStore3 = new DocumentMK.Builder()
+                .setDocumentStore(docStore).setClusterId(3)
+                .setAsyncDelay(0).clock(clock).getNodeStore();
+
+        NodeDocument doc = docStore.find(NODES, Utils.getIdFromPath("/"));
+        assertNotNull(doc);
+        Revision created = doc.getLocalDeleted().firstKey();
+        assertEquals(1, created.getClusterId());
+
+        clock.waitUntil(System.currentTimeMillis() +
+                DocumentNodeStore.REMEMBER_REVISION_ORDER_MILLIS / 2);
+
+        NodeBuilder builder = nodeStore2.getRoot().builder();
+        builder.setProperty("prop", "value");
+        nodeStore2.merge(builder, EmptyHook.INSTANCE, CommitInfo.EMPTY);
+        nodeStore2.runBackgroundOperations();
+
+        clock.waitUntil(System.currentTimeMillis() +
+                DocumentNodeStore.REMEMBER_REVISION_ORDER_MILLIS + 1000);
+        nodeStore3.runBackgroundOperations();
+
+        doc = docStore.find(NODES, Utils.getIdFromPath("/"));
+        assertNotNull(doc);
+        NodeState state = doc.getNodeAtRevision(nodeStore3,
+                nodeStore3.getHeadRevision(), null);
+        assertNotNull(state);
+
+        nodeStore1.dispose();
+        nodeStore2.dispose();
+        nodeStore3.dispose();
+    }
+
+    // OAK-1820
+    @Test
+    public void setLastRevOnCommitForNewNode() throws Exception {
+        DocumentNodeStore ns = new DocumentMK.Builder()
+                .setAsyncDelay(0).getNodeStore();
+        // add a first child node. this will set the children flag on root
+        // and move the commit root to the root
+        NodeBuilder builder = ns.getRoot().builder();
+        builder.child("foo");
+        ns.merge(builder, EmptyHook.INSTANCE, CommitInfo.EMPTY);
+
+        // the second time, the added node is also the commit root, this
+        // is the case we are interested in
+        builder = ns.getRoot().builder();
+        builder.child("bar");
+        ns.merge(builder, EmptyHook.INSTANCE, CommitInfo.EMPTY);
+
+        NodeDocument doc = ns.getDocumentStore().find(NODES,
+                Utils.getIdFromPath("/bar"));
+        assertEquals(1, doc.getLastRev().size());
+
+        ns.dispose();
+    }
+
+    @Test
+    public void modifiedReset() throws Exception {
+        Clock clock = new Clock.Virtual();
+        clock.waitUntil(System.currentTimeMillis());
+        Revision.setClock(clock);
+        MemoryDocumentStore docStore = new MemoryDocumentStore();
+        DocumentNodeStore ns1 = new DocumentMK.Builder()
+                .setDocumentStore(docStore).setClusterId(1)
+                .setAsyncDelay(0).clock(clock).getNodeStore();
+        NodeBuilder builder1 = ns1.getRoot().builder();
+        builder1.child("node");
+        ns1.merge(builder1, EmptyHook.INSTANCE, CommitInfo.EMPTY);
+        ns1.runBackgroundOperations();
+
+        DocumentNodeStore ns2 = new DocumentMK.Builder()
+                .setDocumentStore(docStore).setClusterId(2)
+                .setAsyncDelay(0).clock(clock).getNodeStore();
+
+        NodeBuilder builder2 = ns2.getRoot().builder();
+        builder2.child("node").child("child-2");
+        ns2.merge(builder2, EmptyHook.INSTANCE, CommitInfo.EMPTY);
+
+        // wait at least _modified resolution. in reality the wait may
+        // not be necessary. e.g. when the clock passes the resolution boundary
+        // exactly at this time
+        clock.waitUntil(System.currentTimeMillis() +
+                SECONDS.toMillis(MODIFIED_IN_SECS_RESOLUTION + 1));
+
+        builder1 = ns1.getRoot().builder();
+        builder1.child("node").child("child-1");
+        ns1.merge(builder1, EmptyHook.INSTANCE, CommitInfo.EMPTY);
+
+        ns1.runBackgroundOperations();
+
+        // get current _modified timestamp on /node
+        NodeDocument doc = docStore.find(NODES, Utils.getIdFromPath("/node"));
+        Long mod1 = (Long) doc.get(MODIFIED_IN_SECS);
+        assertNotNull(mod1);
+
+        ns2.runBackgroundOperations();
+
+        doc = docStore.find(NODES, Utils.getIdFromPath("/node"));
+        Long mod2 = (Long) doc.get(MODIFIED_IN_SECS);
+        assertTrue("" + mod2 + " < " + mod1, mod2 >= mod1);
+
+        ns1.dispose();
+        ns2.dispose();
+    }
+
+    // OAK-1861
+    @Test
+    public void readChildrenWithDeletedSiblings() throws Exception {
+        final AtomicInteger maxLimit = new AtomicInteger(0);
+        DocumentStore docStore = new MemoryDocumentStore() {
+            @Nonnull
+            @Override
+            public <T extends Document> List<T> query(Collection<T> collection,
+                                                      String fromKey,
+                                                      String toKey,
+                                                      int limit) {
+                if (collection == Collection.NODES) {
+                    maxLimit.set(Math.max(limit, maxLimit.get()));
+                }
+                return super.query(collection, fromKey, toKey, limit);
+            }
+        };
+        DocumentNodeStore ns = new DocumentMK.Builder()
+                .setDocumentStore(docStore)
+                .setAsyncDelay(0).getNodeStore();
+        NodeBuilder builder = ns.getRoot().builder();
+        for (int i = 0; i < 1000; i++) {
+            builder.child("node-" + i);
+        }
+        ns.merge(builder, EmptyHook.INSTANCE, CommitInfo.EMPTY);
+
+        // now remove all except the last one
+        for (int i = 0; i < 999; i++) {
+            builder = ns.getRoot().builder();
+            builder.getChildNode("node-" + i).remove();
+            ns.merge(builder, EmptyHook.INSTANCE, CommitInfo.EMPTY);
+        }
+
+        for (ChildNodeEntry entry : ns.getRoot().getChildNodeEntries()) {
+            entry.getName();
+        }
+        // must not read more than DocumentNodeState.INITIAL_FETCH_SIZE + 1
+        assertTrue(maxLimit.get() + " > " + (DocumentNodeState.INITIAL_FETCH_SIZE + 1),
+                maxLimit.get() <= DocumentNodeState.INITIAL_FETCH_SIZE + 1);
+    }
+
+    // OAK-1972
+    @Test
+    public void readFromPreviousDoc() throws CommitFailedException {
+        DocumentStore docStore = new MemoryDocumentStore();
+        DocumentNodeStore ns = new DocumentMK.Builder()
+                .setDocumentStore(docStore).getNodeStore();
+        NodeBuilder builder = ns.getRoot().builder();
+        builder.child("test").setProperty("prop", "initial");
+        ns.merge(builder, EmptyHook.INSTANCE, CommitInfo.EMPTY);
+        ns.dispose();
+
+        ns = new DocumentMK.Builder().setClusterId(2).setAsyncDelay(0)
+                .setDocumentStore(docStore).getNodeStore();
+        builder = ns.getRoot().builder();
+        builder.child("test").setProperty("prop", "value");
+        ns.merge(builder, EmptyHook.INSTANCE, CommitInfo.EMPTY);
+
+        Revision rev = ns.getHeadRevision();
+        NodeDocument doc = docStore.find(Collection.NODES, Utils.getIdFromPath("/test"));
+        assertNotNull(doc);
+        DocumentNodeState state = doc.getNodeAtRevision(ns, rev, null);
+        assertNotNull(state);
+        assertTrue(state.hasProperty("prop"));
+        assertEquals("value", state.getProperty("prop").getValue(Type.STRING));
+
+        for (int i = 0; i < NUM_REVS_THRESHOLD; i++) {
+            builder = ns.getRoot().builder();
+            builder.child("test").setProperty("prop", "v-" + i);
+            ns.merge(builder, EmptyHook.INSTANCE, CommitInfo.EMPTY);
+        }
+        ns.runBackgroundOperations();
+
+        // must still return the same value as before the split
+        doc = docStore.find(Collection.NODES, Utils.getIdFromPath("/test"));
+        assertNotNull(doc);
+        state = doc.getNodeAtRevision(ns, rev, null);
+        assertNotNull(state);
+        assertTrue(state.hasProperty("prop"));
+        assertEquals("value", state.getProperty("prop").getValue(Type.STRING));
+    }
+
+    // OAK-2232
+    @Test
+    public void diffExternalChanges() throws Exception {
+        long modifiedResMillis = SECONDS.toMillis(MODIFIED_IN_SECS_RESOLUTION);
+        Clock clock = new Clock.Virtual();
+        clock.waitUntil(System.currentTimeMillis());
+        Revision.setClock(clock);
+
+        DocumentStore docStore = new MemoryDocumentStore();
+        DocumentNodeStore ns1 = new DocumentMK.Builder().setAsyncDelay(0)
+                .clock(clock).setDocumentStore(docStore).setClusterId(1)
+                .getNodeStore();
+        DocumentNodeStore ns2 = new DocumentMK.Builder().setAsyncDelay(0)
+                .clock(clock).setDocumentStore(docStore).setClusterId(2)
+                .getNodeStore();
+
+        NodeBuilder builder = ns1.getRoot().builder();
+        NodeBuilder test = builder.child("test");
+        for (int i = 0; i < DocumentMK.MANY_CHILDREN_THRESHOLD * 2; i++) {
+            test.child("node-" + i);
+        }
+        ns1.merge(builder, EmptyHook.INSTANCE, CommitInfo.EMPTY);
+
+        ns1.runBackgroundOperations();
+        ns2.runBackgroundOperations();
+
+        // make sure next change has a different _modified value
+        clock.waitUntil(clock.getTime() + modifiedResMillis * 2);
+
+        builder = ns2.getRoot().builder();
+        builder.child("test").child("foo");
+        ns2.merge(builder, EmptyHook.INSTANCE, CommitInfo.EMPTY);
+
+        // 'wait' again for a different _modified value
+        clock.waitUntil(clock.getTime() + modifiedResMillis * 2);
+
+        builder = ns1.getRoot().builder();
+        builder.child("test").child("bar");
+        ns1.merge(builder, EmptyHook.INSTANCE, CommitInfo.EMPTY);
+
+        // remember current root for diff
+        NodeState r1 = ns1.getRoot();
+
+        ns2.runBackgroundOperations();
+        ns1.runBackgroundOperations();
+
+        NodeState r2 = ns1.getRoot();
+
+        // are we able to see foo?
+        boolean found = false;
+        for (ChildNodeEntry entry : r2.getChildNode("test").getChildNodeEntries()) {
+            if (entry.getName().equals("foo")) {
+                found = true;
+                break;
+            }
+        }
+        assertTrue(found);
+
+        // diff must report '/test' modified and '/test/foo' added
+        ClusterTest.TrackingDiff diff = new ClusterTest.TrackingDiff();
+        r2.compareAgainstBaseState(r1, diff);
+        assertEquals(1, diff.modified.size());
+        assertTrue(diff.modified.contains("/test"));
+        assertEquals(1, diff.added.size());
+        assertTrue(diff.added.contains("/test/foo"));
+
+        ns1.dispose();
+        ns2.dispose();
+    }
+
+    @Test
+    public void updateClusterState() {
+        DocumentStore docStore = new MemoryDocumentStore();
+        DocumentNodeStore ns1 = new DocumentMK.Builder().setAsyncDelay(0)
+                .setDocumentStore(docStore).getNodeStore();
+        DocumentNodeStore ns2 = new DocumentMK.Builder().setAsyncDelay(0)
+                .setDocumentStore(docStore).getNodeStore();
+
+        assertEquals(0, ns1.getInactiveClusterNodes().size());
+        assertEquals(0, ns2.getInactiveClusterNodes().size());
+
+        ns1.dispose();
+
+        ns2.updateClusterState();
+
+        Map<Integer, Long> inactive = ns2.getInactiveClusterNodes();
+        assertEquals(1, inactive.size());
+        assertEquals(1, (int) inactive.keySet().iterator().next());
+
+        ns2.dispose();
+    }
+
+    // OAK-2288
+    @Test
+    public void mergedBranchVisibility() throws Exception {
+        final DocumentNodeStore store = new DocumentMK.Builder()
+                .setAsyncDelay(0).getNodeStore();
+        DocumentStore docStore = store.getDocumentStore();
+
+        NodeBuilder builder1 = store.getRoot().builder();
+        builder1.child("test");
+        merge(store, builder1);
+
+        builder1 = store.getRoot().builder();
+        NodeBuilder node = builder1.getChildNode("test").child("node");
+        String id = Utils.getIdFromPath("/test/node");
+        int i = 0;
+        // force creation of a branch
+        while (docStore.find(NODES, id) == null) {
+            node.setProperty("foo", i++);
+        }
+
+        NodeDocument doc = docStore.find(NODES, id);
+        assertNotNull(doc);
+        Revision rev = doc.getLocalDeleted().firstKey();
+
+        merge(store, builder1);
+
+        // must not be visible at the revision of the branch commit
+        assertFalse(store.getRoot(rev).getChildNode("test").getChildNode("node").exists());
+
+        // must be visible at the revision of the merged branch
+        assertTrue(store.getRoot().getChildNode("test").getChildNode("node").exists());
+
+        store.dispose();
+    }
+
+    private static void merge(NodeStore store, NodeBuilder root)
+            throws CommitFailedException {
+        store.merge(root, EmptyHook.INSTANCE, CommitInfo.EMPTY);
+    }
+
+    private static class TestHook extends EditorHook {
+
+        TestHook(final String prefix) {
+            super(new EditorProvider() {
+                @CheckForNull
+                @Override
+                public Editor getRootEditor(NodeState before,
+                                            NodeState after,
+                                            NodeBuilder builder,
+                                            CommitInfo info)
+                        throws CommitFailedException {
+                    return new TestEditor(builder, prefix);
+                }
+            });
+        }
+    }
+
+    private static final CommitHook FAILING_HOOK = new CommitHook() {
+        @Nonnull
+        @Override
+        public NodeState processCommit(NodeState before,
+                                       NodeState after,
+                                       CommitInfo info)
+                throws CommitFailedException {
+            throw new CommitFailedException(CONSTRAINT, 0, "fail");
+        }
+    };
+
+    private static class TestEditor extends DefaultEditor {
+
+        private final NodeBuilder builder;
+        private final String prefix;
+
+        TestEditor(NodeBuilder builder, String prefix) {
+            this.builder = builder;
+            this.prefix = prefix;
+        }
+
+        @Override
+        public Editor childNodeAdded(String name, NodeState after)
+                throws CommitFailedException {
+            return new TestEditor(builder.child(name), prefix);
+        }
+
+        @Override
+        public void propertyAdded(PropertyState after)
+                throws CommitFailedException {
+            if (after.getName().startsWith(prefix)) {
+                builder.setProperty(after.getName(), "test");
+            }
+        }
     }
 }

@@ -16,12 +16,28 @@
  */
 package org.apache.jackrabbit.oak.plugins.document;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
+import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
+import com.google.common.collect.Queues;
+import com.google.common.collect.Sets;
+import com.google.common.util.concurrent.Uninterruptibles;
 import org.apache.jackrabbit.oak.plugins.document.Revision.RevisionComparator;
 import org.junit.Test;
 
@@ -41,7 +57,7 @@ public class RevisionTest {
             assertTrue(r.equals(r2));
         }
     }
-    
+
     @Test
     public void difference() throws InterruptedException {
         long t0 = Revision.getCurrentTimestamp();
@@ -59,7 +75,7 @@ public class RevisionTest {
         Revision r2 = Revision.newRevision(0);
         assertTrue(Revision.getTimestampDifference(r2, r1) > 0);
     }
-    
+
     @Test
     public void equalsHashCode() {
         Revision a = Revision.newRevision(0);
@@ -89,7 +105,7 @@ public class RevisionTest {
         assertFalse(x3.equals(a));
         assertFalse(a.hashCode() == x3.hashCode());
     }
-    
+
     @Test
     public void compare() throws InterruptedException {
         Revision last = Revision.newRevision(0);
@@ -111,7 +127,7 @@ public class RevisionTest {
             }
         }
     }
-    
+
     @Test
     public void revisionComparatorSimple() {
         RevisionComparator comp = new RevisionComparator(0);
@@ -129,7 +145,7 @@ public class RevisionTest {
 
         Revision r0c1 = new Revision(0x010, 0, 1);
         Revision r0c2 = new Revision(0x010, 0, 2);
-        
+
         Revision r1c1 = new Revision(0x110, 0, 1);
         Revision r2c1 = new Revision(0x120, 0, 1);
         Revision r3c1 = new Revision(0x130, 0, 1);
@@ -150,7 +166,8 @@ public class RevisionTest {
                 "1:\n r120-0-1:r20-0-0\n" +
                 "2:\n r200-0-2:r10-0-0\n", comp.toString());
 
-        assertEquals(-1, comp.compare(r0c1, r0c2));
+        // r0c2 happens before r0c1 because r2c2 is declared before r2c1
+        assertEquals(1, comp.compare(r0c1, r0c2));
 
         assertEquals(1, comp.compare(r1c1, r1c2));
         assertEquals(1, comp.compare(r2c1, r2c2));
@@ -205,25 +222,56 @@ public class RevisionTest {
         Revision r1c2 = new Revision(0x20, 0, 2);
         Revision r2c1 = new Revision(0x30, 0, 1);
         Revision r2c2 = new Revision(0x40, 0, 2);
-        
+
         comp.add(r1c1, new Revision(0x10, 0, 0));
-        comp.add(r2c1, new Revision(0x20, 0, 0));
+        comp.add(r2c1, new Revision(0x30, 0, 0));
 
         // there's no range for c2, and therefore this
         // revision must be considered to be in the future
         assertTrue(comp.compare(r1c2, r2c1) > 0);
-        
-        // add a range for r2r2
-        comp.add(r2c2, new Revision(0x30, 0, 0));
 
-        // now there is a range for c2, but the revision is old,
-        // so it must be considered to be in the past
+        // add a range for r2r2
+        comp.add(r2c2, new Revision(0x40, 0, 0));
+        comp.purge(0x20);
+
+        // now there is a range for c2, but the revision is old (before purge
+        // time, so it must be considered to be in the past
         assertTrue(comp.compare(r1c2, r2c1) < 0);
+    }
+
+    // OAK-1727
+    @Test
+    public void clusterCompare2() {
+        RevisionComparator comp = new RevisionComparator(1);
+
+        comp.add(Revision.fromString("r3-0-1"), Revision.fromString("r1-1-0"));
+
+        Revision r1 = Revision.fromString("r1-0-2");
+        Revision r2 = Revision.fromString("r4-0-2");
+
+        // cluster sync
+        Revision c1sync = Revision.fromString("r5-0-1");
+        comp.add(c1sync,  Revision.fromString("r2-0-0"));
+        Revision c2sync = Revision.fromString("r4-1-2");
+        comp.add(c2sync,  Revision.fromString("r2-1-0"));
+        Revision c3sync = Revision.fromString("r2-0-3");
+        comp.add(c3sync, Revision.fromString("r2-1-0"));
+
+        assertTrue(comp.compare(r1, r2) < 0);
+        assertTrue(comp.compare(r2, c2sync) < 0);
+        // same seen-at revision, but clusterId 2 < 3
+        assertTrue(comp.compare(c2sync, c3sync) < 0);
+
+        // this means, c3sync must be after r1 and r2
+        // because: r1 < r2 < c2sync < c3sync
+        assertTrue(comp.compare(r1, c3sync) < 0);
+        assertTrue(comp.compare(r2, c3sync) < 0);
     }
 
     @Test
     public void revisionSeen() {
         RevisionComparator comp = new RevisionComparator(1);
+        comp.purge(0);
 
         Revision r0 = new Revision(0x01, 0, 1);
         Revision r1 = new Revision(0x10, 0, 1);
@@ -238,8 +286,9 @@ public class RevisionTest {
         comp.add(r3, new Revision(0x30, 0, 0));
         comp.add(r4, new Revision(0x40, 0, 0));
 
-        // older than first range -> must return null
-        assertNull(comp.getRevisionSeen(r0));
+        // older than first range, but after purge timestamp
+        // -> must return seen-at of first range
+        assertEquals(new Revision(0x10, 0, 0), comp.getRevisionSeen(r0));
 
         // exact range start matches
         assertEquals(new Revision(0x10, 0, 0), comp.getRevisionSeen(r1));
@@ -253,5 +302,198 @@ public class RevisionTest {
         // within a range -> must return lower bound of next higher range
         assertEquals(new Revision(0x30, 0, 0), comp.getRevisionSeen(r21));
     }
-    
+
+    // OAK-1814
+    @Test
+    public void seenAtAfterPurge() throws Exception {
+        RevisionComparator comp = new RevisionComparator(1);
+
+        // some revisions from another cluster node
+        Revision r1 = new Revision(0x01, 0, 2);
+        Revision r2 = new Revision(0x02, 0, 2);
+
+        // make them visible
+        comp.add(r1, new Revision(0x01, 0, 0));
+        comp.add(r2, new Revision(0x02, 0, 0));
+
+        comp.purge(0x01);
+
+        // null indicates older than earliest range
+        assertNull(comp.getRevisionSeen(r1));
+        // r2 is still seen at 0x02
+        assertEquals(new Revision(0x02, 0, 0), comp.getRevisionSeen(r2));
+
+        comp.purge(0x02);
+
+        // now also r2 is considered old
+        assertNull(comp.getRevisionSeen(r2));
+    }
+
+    // OAK-1822
+    @Test
+    public void seenAtBeforeFirstRangeAfterPurge() {
+        RevisionComparator comp = new RevisionComparator(1);
+        comp.purge(0);
+
+        Revision r1 = new Revision(1, 0, 1);
+        Revision r2 = new Revision(2, 0, 1);
+        Revision r3 = new Revision(3, 0, 1);
+
+        Revision r3seen = new Revision(3, 0, 0);
+
+        comp.add(r3, r3seen);
+
+        assertEquals(r3seen, comp.getRevisionSeen(r1));
+        assertEquals(r3seen, comp.getRevisionSeen(r2));
+
+        comp.purge(1);
+
+        assertEquals(null, comp.getRevisionSeen(r1));
+        assertEquals(r3seen, comp.getRevisionSeen(r2));
+    }
+
+    @Test
+    public void uniqueRevision2() throws Exception {
+        List<Thread> threads = new ArrayList<Thread>();
+        final AtomicBoolean stop = new AtomicBoolean();
+        final Set<Revision> set = Collections
+                .synchronizedSet(new HashSet<Revision>());
+        final Revision[] duplicate = new Revision[1];
+        for (int i = 0; i < 20; i++) {
+            Thread thread = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    Revision[] last = new Revision[1024];
+                    while (!stop.get()) {
+                        for (Revision r : last) {
+                            set.remove(r);
+                        }
+                        for (int i = 0; i < last.length; i++) {
+                            last[i] = Revision.newRevision(1);
+                        }
+                        for (Revision r : last) {
+                            if (!set.add(r)) {
+                                duplicate[0] = r;
+                            }
+                        }
+                    }
+                }
+            });
+            thread.start();
+            threads.add(thread);
+        }
+        Thread.sleep(200);
+        stop.set(true);
+        for (Thread t : threads) {
+            t.join();
+        }
+        assertNull("Duplicate revision", duplicate[0]);
+    }
+
+    @Test
+    public void uniqueRevision() throws Exception {
+        //Revision.setClock(new Clock.Virtual());
+        final BlockingQueue<Revision> revisionQueue = Queues.newLinkedBlockingQueue();
+        int noOfThreads = 60;
+        final int noOfLoops = 1000;
+        List<Thread> workers = new ArrayList<Thread>();
+        final AtomicBoolean stop = new AtomicBoolean();
+        final CountDownLatch startLatch = new CountDownLatch(1);
+        final CountDownLatch stopLatch = new CountDownLatch(noOfThreads);
+        for (int i = 0; i < noOfThreads; i++) {
+            workers.add(new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    Uninterruptibles.awaitUninterruptibly(startLatch);
+                    for (int j = 0; j < noOfLoops && !stop.get(); j++) {
+                        revisionQueue.add(Revision.newRevision(1));
+                    }
+                    stopLatch.countDown();
+                }
+            }));
+        }
+
+        final List<Revision> duplicates = Lists.newArrayList();
+        final Set<Revision> seenRevs = Sets.newHashSet();
+        workers.add(new Thread(new Runnable() {
+            @Override
+            public void run() {
+                startLatch.countDown();
+
+                while (!stop.get()) {
+                    List<Revision> revs = Lists.newArrayList();
+                    Queues.drainUninterruptibly(revisionQueue, revs, 5, 100, TimeUnit.MILLISECONDS);
+                    record(revs);
+                }
+
+                List<Revision> revs = Lists.newArrayList();
+                revisionQueue.drainTo(revs);
+                record(revs);
+            }
+
+            private void record(List<Revision> revs) {
+                for (Revision rev : revs) {
+                    if (!seenRevs.add(rev)) {
+                        duplicates.add(rev);
+                    }
+                }
+
+                if (!duplicates.isEmpty()) {
+                    stop.set(true);
+                }
+            }
+        }));
+
+        for (Thread t : workers) {
+            t.start();
+        }
+
+        stopLatch.await();
+        stop.set(true);
+
+        for (Thread t : workers) {
+            t.join();
+        }
+        assertTrue(String.format("Duplicate rev seen %s %n Seen %s", duplicates, seenRevs), duplicates.isEmpty());
+    }
+
+    @Test
+    public void getMinimumTimestamp() {
+        Map<Integer, Long> inactive = Maps.newHashMap();
+        RevisionComparator comp = new RevisionComparator(1);
+
+        Revision r11 = new Revision(1, 0, 1);
+        comp.add(r11, new Revision(1, 0, 0));
+
+        assertEquals(1, comp.getMinimumTimestamp(r11, inactive));
+
+        Revision r21 = new Revision(1, 0, 2);
+        comp.add(r21, new Revision(2, 0, 0));
+
+        assertEquals(1, comp.getMinimumTimestamp(r21, inactive));
+
+        Revision r13 = new Revision(3, 0, 1);
+        comp.add(r13, new Revision(3, 0, 0));
+
+        assertEquals(1, comp.getMinimumTimestamp(r13, inactive));
+
+        Revision r24 = new Revision(4, 0, 2);
+        comp.add(r24, new Revision(4, 0, 0));
+
+        assertEquals(3, comp.getMinimumTimestamp(r24, inactive));
+
+        Revision r15 = new Revision(5, 0, 1);
+        comp.add(r15, new Revision(5, 0, 0));
+
+        assertEquals(4, comp.getMinimumTimestamp(r15, inactive));
+
+        // simulate cluster node 2 is stopped
+        inactive.put(2, 6L);
+
+        Revision r17 = new Revision(7, 0, 1);
+        comp.add(r17, new Revision(7, 0, 0));
+
+        assertEquals(7, comp.getMinimumTimestamp(r17, inactive));
+    }
+
 }

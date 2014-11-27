@@ -19,12 +19,12 @@
 package org.apache.jackrabbit.oak.query.ast;
 
 import java.util.Collections;
-import java.util.Map;
 import java.util.Set;
 
 import org.apache.jackrabbit.oak.api.PropertyValue;
 import org.apache.jackrabbit.oak.query.index.FilterImpl;
-import org.apache.jackrabbit.oak.spi.query.QueryIndex.FulltextQueryIndex;
+
+import static org.apache.jackrabbit.oak.spi.query.QueryIndex.NativeQueryIndex;
 
 /**
  * A native function condition.
@@ -62,7 +62,7 @@ public class NativeFunctionImpl extends ConstraintImpl {
         // disable evaluation if a fulltext index is used,
         // and because we don't know how to process native
         // conditions
-        if (!(selector.getIndex() instanceof FulltextQueryIndex)) {
+        if (!(selector.getIndex() instanceof NativeQueryIndex)) {
             throw new IllegalArgumentException("No full-text index was found that can process the condition " + toString());
         }
         // we assume the index only returns the requested entries
@@ -72,11 +72,6 @@ public class NativeFunctionImpl extends ConstraintImpl {
     @Override
     public Set<PropertyExistenceImpl> getPropertyExistenceConditions() {
         return Collections.emptySet();
-    }
-
-    @Override
-    public Map<DynamicOperandImpl, Set<StaticOperandImpl>> getInMap() {
-        return Collections.emptyMap();
     }
 
     @Override

@@ -44,7 +44,8 @@ Session state and refresh behaviour
 In Jackrabbit 2 sessions always reflects the latest state of the repository. With Oak a session
 reflects a stable view of the repository from the time the session was acquired ([MVCC model]
 (http://en.wikipedia.org/wiki/MVCC)). This is a fundamental design aspect for achieving the
-distributed nature of an Oak repository.
+distributed nature of an Oak repository. A rarely encountered side effect of this is that sessions
+expose [write skew](architecture/transactional-model.html).
 
 This change can cause subtle differences in behavior when two sessions perform modifications
 relying on one session seeing the other session's changes. Oak requires explicit calls to
@@ -84,6 +85,9 @@ See the [query overview page](query.html) for details.
 
 Observation
 -----------
+* `Event.getInfo()` contains the primary and mixin node types of the associated parent node of the 
+  event. The key `jcr:primaryType` maps to the primary type and the key `jcr:mixinTypes` maps to an 
+  array containing the mixin types.
 
 * `Event.getUserId()`, `Event.getUserData()`and `Event.getDate()` will only be available for locally
   generated events (i.e. on the same cluster node). To help identifying potential trouble spots,
@@ -235,27 +239,58 @@ name siblings but that might not cover all cases.
 XML Import
 ----------
 
-The import behavior for [`IMPORT_UUID_CREATE_NEW`](http://www.day.com/maven/jsr170/javadocs/jcr-2.0/javax/jcr/ImportUUIDBehavior.html#IMPORT_UUID_CREATE_NEW) in Oak is implemented slightly different compared to Jackrabbit. Jackrabbit 2.x only creates a new UUID when it detects an existing conflicting node with the same UUID. Oak always creates a new UUID, even if there is no conflicting node. The are mainly two reasons why this is done in Oak:
+The import behavior for
+[`IMPORT_UUID_CREATE_NEW`](http://www.day.com/maven/jsr170/javadocs/jcr-2.0/javax/jcr/ImportUUIDBehavior.html#IMPORT_UUID_CREATE_NEW)
+in Oak is implemented slightly different compared to Jackrabbit. Jackrabbit 2.x only creates a new
+UUID when it detects an existing conflicting node with the same UUID. Oak always creates a new UUID,
+even if there is no conflicting node. The are mainly two reasons why this is done in Oak:
 
-* The implementation in Oak is closer to what the JCR specification says: *Incoming nodes are assigned newly created identifiers upon addition to the workspace. As a result, identifier collisions never occur.*
-* Oak uses a MVCC model where a session operates on a snapshot of the repository. It is therefore very difficult to ensure new UUIDs only in case of a conflict. Based on the snapshot view of a session, an existing node with a conflicting UUID may not be visible until commit.
+* The implementation in Oak is closer to what the JCR specification says: *Incoming nodes are
+assigned newly created identifiers upon addition to the workspace. As a result, identifier
+collisions never occur.*
+* Oak uses a MVCC model where a session operates on a snapshot of the repository. It is therefore
+very difficult to ensure new UUIDs only in case of a conflict. Based on the snapshot view of a
+session, an existing node with a conflicting UUID may not be visible until commit.
 
 Identifiers
 -----------
 
-In contrast to Jackrabbit 2.x, only referenceable nodes in Oak have a UUID assigned. With Jackrabbit 2.x the UUID is only visible in content when the node is referenceable and exposes the UUID as a `jcr:uuid` property. But using `Node.getIdentifer()`, it is possible to get the UUID of any node. With Oak this method will only return a UUID when the node is referenceable, otherwise the identifier is the UUID of the nearest referenceable ancestor with the relative path to the node.
+In contrast to Jackrabbit 2.x, only referenceable nodes in Oak have a UUID assigned. With Jackrabbit
+2.x the UUID is only visible in content when the node is referenceable and exposes the UUID as a
+`jcr:uuid` property. But using `Node.getIdentifier()`, it is possible to get the UUID of any node.
+With Oak this method will only return a UUID when the node is referenceable, otherwise the
+identifier is the UUID of the nearest referenceable ancestor with the relative path to the node.
+
+Manually adding a property with the name `jcr:uuid` to a non referenceable node might have
+unexpected effects as Oak maintains an unique index on `jcr:uuid` properties. As the namespace
+`jcr` is reserved, doing so is strongly discouraged.
 
 Versioning
 ----------
 
-Because of the different identifier implementation in Oak, the value of a `jcr:frozenUuid` property on a frozen node will not always be a UUID (see also section about Identifiers). The property reflects the value returned by `Node.getIdentifier()` when a node is copied into the version storage as a frozen node. This also means a node restored from a frozen node will only have a `jcr:uuid` when it is actually referenceable.
+* Because of the different identifier implementation in Oak, the value of a `jcr:frozenUuid` property
+on a frozen node will not always be a UUID (see also section about Identifiers). The property
+reflects the value returned by `Node.getIdentifier()` when a node is copied into the version storage
+as a frozen node. This also means a node restored from a frozen node will only have a `jcr:uuid`
+when it is actually referenceable.
+
+* Oak does currently not implement activities (`OPTION_ACTIVITIES_SUPPORTED`), configurations and
+baselines (`OPTION_BASELINES_SUPPORTED`).
+
+* Oak does currently not implement the various variants of `VersionManager.merge` but throws an
+`UnsupportedRepositoryOperationException` if such a method is called.
 
 Security
 --------
 
-* [AccessControl Management](differences_accesscontrol.html)
-* [Authentication](differences_authentication.html)
-* [Permission Evaluation](differences_permission.html)
-* [Principal Management](differences_principal.html)
-* [Privilege Management](differences_privileges.html)
-* [User Management](differences_user.html)
+* [Authentication](security/authentication/differences.html)
+* [AccessControl Management](security/accesscontrol/differences.html)
+* [Permission Evaluation](security/permission/differences.html)
+* [Privilege Management](security/privilege/differences.html)
+* [Principal Management](security/principal/differences.html)
+* [User Management](security/user/differences.html)
+
+Workspaces
+----------
+
+An Oak repository only has one default workspace.

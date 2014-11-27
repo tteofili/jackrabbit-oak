@@ -18,6 +18,9 @@ package org.apache.jackrabbit.oak.security.authentication.ldap.impl;
 
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.Iterator;
+import java.util.LinkedList;
+import java.util.List;
 import java.util.Map;
 
 import javax.annotation.Nonnull;
@@ -53,6 +56,7 @@ import org.apache.felix.scr.annotations.Component;
 import org.apache.felix.scr.annotations.ConfigurationPolicy;
 import org.apache.felix.scr.annotations.Deactivate;
 import org.apache.felix.scr.annotations.Service;
+import org.apache.jackrabbit.commons.iterator.AbstractLazyIterator;
 import org.apache.jackrabbit.oak.spi.security.ConfigurationParameters;
 import org.apache.jackrabbit.oak.spi.security.authentication.external.ExternalGroup;
 import org.apache.jackrabbit.oak.spi.security.authentication.external.ExternalIdentity;
@@ -93,9 +97,20 @@ public class LdapIdentityProvider implements ExternalIdentityProvider {
     private LdapConnectionPool adminPool;
 
     /**
+     * admin connection factory
+     */
+    private PoolableLdapConnectionFactory adminConnectionFactory;
+
+    /**
      * the connection pool with unbound connections
      */
     private UnboundLdapConnectionPool userPool;
+
+    /**
+     * user connection factory
+     */
+    private PoolableUnboundConnectionFactory userConnectionFactory;
+
 
     /**
      * Default constructor for OSGi
@@ -129,7 +144,7 @@ public class LdapIdentityProvider implements ExternalIdentityProvider {
      * Initializes the ldap identity provider.
      */
     private void init() {
-        if (adminPool != null) {
+        if (adminConnectionFactory != null) {
             throw new IllegalStateException("Provider already initialized.");
         }
 
@@ -139,17 +154,27 @@ public class LdapIdentityProvider implements ExternalIdentityProvider {
             cc.setName(config.getBindDN());
             cc.setCredentials(config.getBindPassword());
         }
+        adminConnectionFactory = new PoolableLdapConnectionFactory(cc);
 
-        PoolableLdapConnectionFactory factory = new PoolableLdapConnectionFactory(cc);
-        adminPool = new LdapConnectionPool(factory);
-        adminPool.setTestOnBorrow(true);
-        adminPool.setWhenExhaustedAction(GenericObjectPool.WHEN_EXHAUSTED_GROW);
+        if (config.getAdminPoolConfig().getMaxActive() != 0) {
+            adminPool = new LdapConnectionPool(adminConnectionFactory);
+            adminPool.setTestOnBorrow(true);
+            adminPool.setMaxActive(config.getAdminPoolConfig().getMaxActive());
+            adminPool.setWhenExhaustedAction(GenericObjectPool.WHEN_EXHAUSTED_BLOCK);
+        }
 
         // setup unbound connection pool. let's create a new version of the config
         cc = createConnectionConfig();
-        userPool = new UnboundLdapConnectionPool(new PoolableUnboundConnectionFactory(cc));
-        userPool.setTestOnBorrow(true);
-        userPool.setWhenExhaustedAction(GenericObjectPool.WHEN_EXHAUSTED_GROW);
+
+        userConnectionFactory = new PoolableUnboundConnectionFactory(cc);
+        if (config.getUserPoolConfig().getMaxActive() != 0) {
+            userPool = new UnboundLdapConnectionPool(userConnectionFactory);
+            userPool.setTestOnBorrow(true);
+            userPool.setMaxActive(config.getUserPoolConfig().getMaxActive());
+            userPool.setWhenExhaustedAction(GenericObjectPool.WHEN_EXHAUSTED_BLOCK);
+        }
+
+        log.info("LdapIdentityProvider initialized: {}", config);
     }
 
     /**
@@ -282,6 +307,82 @@ public class LdapIdentityProvider implements ExternalIdentityProvider {
         }
     }
 
+    @Override
+    public Iterator<ExternalUser> listUsers() throws ExternalIdentityException {
+        DebugTimer timer = new DebugTimer();
+        LdapConnection connection = connect();
+        timer.mark("connect");
+        try {
+            final List<Entry> entries = getEntries(connection, config.getUserConfig());
+            timer.mark("lookup");
+            if (log.isDebugEnabled()) {
+                log.debug("listUsers() {}", timer.getString());
+            }
+            return new AbstractLazyIterator<ExternalUser>() {
+
+                private final Iterator<Entry> iter = entries.iterator();
+
+                @Override
+                protected ExternalUser getNext() {
+                    while (iter.hasNext()) {
+                        try {
+                            return createUser(iter.next(), null);
+                        } catch (LdapInvalidAttributeValueException e) {
+                            log.warn("Error while creating external user object", e);
+                        }
+                    }
+                    return null;
+                }
+            };
+        } catch (LdapException e) {
+            log.error("Error during ldap lookup. " + timer.getString(), e);
+            throw new ExternalIdentityException("Error during ldap lookup.", e);
+        } catch (CursorException e) {
+            log.error("Error during ldap lookup. " + timer.getString(), e);
+            throw new ExternalIdentityException("Error during ldap lookup.", e);
+        } finally {
+            disconnect(connection);
+        }
+    }
+
+    @Override
+    public Iterator<ExternalGroup> listGroups() throws ExternalIdentityException {
+        DebugTimer timer = new DebugTimer();
+        LdapConnection connection = connect();
+        timer.mark("connect");
+        try {
+            final List<Entry> entries = getEntries(connection, config.getGroupConfig());
+            timer.mark("lookup");
+            if (log.isDebugEnabled()) {
+                log.debug("listGroups() {}", timer.getString());
+            }
+            return new AbstractLazyIterator<ExternalGroup>() {
+
+                private final Iterator<Entry> iter = entries.iterator();
+
+                @Override
+                protected ExternalGroup getNext() {
+                    while (iter.hasNext()) {
+                        try {
+                            return createGroup(iter.next(), null);
+                        } catch (LdapInvalidAttributeValueException e) {
+                            log.warn("Error while creating external user object", e);
+                        }
+                    }
+                    return null;
+                }
+            };
+        } catch (LdapException e) {
+            log.error("Error during ldap lookup. " + timer.getString(), e);
+            throw new ExternalIdentityException("Error during ldap lookup.", e);
+        } catch (CursorException e) {
+            log.error("Error during ldap lookup. " + timer.getString(), e);
+            throw new ExternalIdentityException("Error during ldap lookup.", e);
+        } finally {
+            disconnect(connection);
+        }
+    }
+
     private Entry getEntry(LdapConnection connection, LdapProviderConfig.Identity idConfig, String id)
             throws CursorException, LdapException {
         String searchFilter = idConfig.getSearchFilter(id);
@@ -295,27 +396,92 @@ public class LdapIdentityProvider implements ExternalIdentityProvider {
         req.setFilter(searchFilter);
 
         // Process the request
-        SearchCursor searchCursor = connection.search(req);
-        while (searchCursor.next()) {
-            Response response = searchCursor.get();
+        SearchCursor searchCursor = null;
+        try {
+            searchCursor = connection.search(req);
+            while (searchCursor.next()) {
+                Response response = searchCursor.get();
 
-            // process the SearchResultEntry
-            if (response instanceof SearchResultEntry) {
-                Entry resultEntry = ((SearchResultEntry) response).getEntry();
-                if (searchCursor.next()) {
-                    log.warn("search for {} returned more than one entry. discarding additional ones.", searchFilter);
+                // process the SearchResultEntry
+                if (response instanceof SearchResultEntry) {
+                    Entry resultEntry = ((SearchResultEntry) response).getEntry();
+                    if (searchCursor.next()) {
+                        log.warn("search for {} returned more than one entry. discarding additional ones.", searchFilter);
+                    }
+                    if (log.isDebugEnabled()) {
+                        log.debug("search below {} with {} found {}", idConfig.getBaseDN(), searchFilter, resultEntry.getDn());
+                    }
+                    return resultEntry;
                 }
-                if (log.isDebugEnabled()) {
-                    log.debug("search below {} with {} found {}",
-                            new Object[]{idConfig.getBaseDN(), searchFilter, resultEntry.getDn()});
-                }
-                return resultEntry;
+            }
+        } finally {
+            if (searchCursor != null) {
+                searchCursor.close();
             }
         }
         if (log.isDebugEnabled()) {
             log.debug("search below {} with {} found 0 entries.", idConfig.getBaseDN(), searchFilter);
         }
         return null;
+    }
+
+    /**
+     * currently fetch all entries so that we can close the connection afterwards. maybe switch to an iterator approach
+     * later.
+     */
+    private List<Entry> getEntries(LdapConnection connection, LdapProviderConfig.Identity idConfig)
+            throws CursorException, LdapException {
+        StringBuilder filter = new StringBuilder();
+        int num = 0;
+        for (String objectClass: idConfig.getObjectClasses()) {
+            num++;
+            filter.append("(objectclass=")
+                    .append(LdapProviderConfig.encodeFilterValue(objectClass))
+                    .append(')');
+        }
+        String extraFilter = idConfig.getExtraFilter();
+        if (extraFilter != null && extraFilter.length() > 0) {
+            num++;
+            filter.append(extraFilter);
+        }
+        String searchFilter = num > 1
+                ? "(&" + filter + ")"
+                : filter.toString();
+
+        // Create the SearchRequest object
+        SearchRequest req = new SearchRequestImpl();
+        req.setScope(SearchScope.SUBTREE);
+        req.addAttributes(SchemaConstants.ALL_USER_ATTRIBUTES);
+        req.setTimeLimit((int) config.getSearchTimeout());
+        req.setBase(new Dn(idConfig.getBaseDN()));
+        req.setFilter(searchFilter);
+
+        // Process the request
+        List<Entry> result = new LinkedList<Entry>();
+        SearchCursor searchCursor = null;
+        try {
+            searchCursor = connection.search(req);
+            while (searchCursor.next()) {
+                Response response = searchCursor.get();
+
+                // process the SearchResultEntry
+                if (response instanceof SearchResultEntry) {
+                    Entry resultEntry = ((SearchResultEntry) response).getEntry();
+                    result.add(resultEntry);
+                    if (log.isDebugEnabled()) {
+                        log.debug("search below {} with {} found {}", idConfig.getBaseDN(), searchFilter, resultEntry.getDn());
+                    }
+                }
+            }
+        } finally {
+            if (searchCursor != null) {
+                searchCursor.close();
+            }
+        }
+        if (log.isDebugEnabled()) {
+            log.debug("search below {} with {} found {} entries.", idConfig.getBaseDN(), searchFilter, result.size());
+        }
+        return result;
     }
 
     private ExternalUser createUser(Entry e, String id)
@@ -360,7 +526,11 @@ public class LdapIdentityProvider implements ExternalIdentityProvider {
     @Nonnull
     private LdapConnection connect() throws ExternalIdentityException {
         try {
-            return adminPool.getConnection();
+            if (adminPool == null) {
+                return adminConnectionFactory.makeObject();
+            } else {
+                return adminPool.getConnection();
+            }
         } catch (Throwable e) {
             log.error("Error while connecting to the ldap server.", e);
             throw new ExternalIdentityException("Error while connecting and binding to the ldap server", e);
@@ -370,7 +540,11 @@ public class LdapIdentityProvider implements ExternalIdentityProvider {
     private void disconnect(@Nullable LdapConnection connection) throws ExternalIdentityException {
         try {
             if (connection != null) {
-                adminPool.releaseConnection(connection);
+                if (adminPool == null) {
+                    adminConnectionFactory.destroyObject(connection);
+                } else {
+                    adminPool.releaseConnection(connection);
+                }
             }
         } catch (Exception e) {
             log.warn("Error while disconnecting from the ldap server.", e);
@@ -386,11 +560,21 @@ public class LdapIdentityProvider implements ExternalIdentityProvider {
         final SimpleCredentials creds = (SimpleCredentials) credentials;
         final ExternalUser user = getUser(creds.getUserID());
         if (user != null) {
+            // OAK-2078: check for non-empty passwords to avoid anonymous bind on weakly configured servers
+            // see http://tools.ietf.org/html/rfc4513#section-5.1.1 for details.
+            if (creds.getPassword().length == 0) {
+                throw new LoginException("Refusing to authenticate against LDAP server: Empty passwords not allowed.");
+            }
+
             // authenticate
             LdapConnection connection = null;
             try {
                 DebugTimer timer = new DebugTimer();
-                connection = userPool.getConnection();
+                if (userPool == null) {
+                    connection = userConnectionFactory.makeObject();
+                } else {
+                    connection = userPool.getConnection();
+                }
                 timer.mark("connect");
                 connection.bind(user.getExternalId().getId(), new String(creds.getPassword()));
                 timer.mark("bind");
@@ -404,7 +588,11 @@ public class LdapIdentityProvider implements ExternalIdentityProvider {
             } finally {
                 if (connection != null) {
                     try {
-                        userPool.releaseConnection(connection);
+                        if (userPool == null) {
+                            userConnectionFactory.destroyObject(connection);
+                        } else {
+                            userPool.releaseConnection(connection);
+                        }
                     } catch (Exception e) {
                         // ignore
                     }
@@ -431,6 +619,7 @@ public class LdapIdentityProvider implements ExternalIdentityProvider {
         String searchFilter = config.getMemberOfSearchFilter(ref.getId());
 
         LdapConnection connection = null;
+        SearchCursor searchCursor = null;
         try {
             // Create the SearchRequest object
             SearchRequest req = new SearchRequestImpl();
@@ -445,7 +634,7 @@ public class LdapIdentityProvider implements ExternalIdentityProvider {
             connection = connect();
             timer.mark("connect");
 
-            SearchCursor searchCursor = connection.search(req);
+            searchCursor = connection.search(req);
             timer.mark("search");
             while (searchCursor.next()) {
                 Response response = searchCursor.get();
@@ -457,15 +646,17 @@ public class LdapIdentityProvider implements ExternalIdentityProvider {
             }
             timer.mark("iterate");
             if (log.isDebugEnabled()) {
-                log.debug("search below {} with {} found {} entries. {}", new Object[]{
-                        config.getGroupConfig().getBaseDN(), searchFilter, groups.size(), timer.getString()
-                });
+                log.debug("search below {} with {} found {} entries. {}",
+                        config.getGroupConfig().getBaseDN(), searchFilter, groups.size(), timer.getString());
             }
             return groups;
         } catch (Exception e) {
             log.error("Error during ldap membership search." ,e);
             throw new ExternalIdentityException("Error during ldap membership search.", e);
         } finally {
+            if (searchCursor != null) {
+                searchCursor.close();
+            }
             disconnect(connection);
         }
     }
@@ -495,9 +686,7 @@ public class LdapIdentityProvider implements ExternalIdentityProvider {
             }
             timer.mark("iterate");
             if (log.isDebugEnabled()) {
-                log.debug("members lookup of {} found {} members. {}", new Object[]{
-                        ref.getId(), members.size(), timer.getString()
-                });
+                log.debug("members lookup of {} found {} members. {}", ref.getId(), members.size(), timer.getString());
             }
             return members;
         } catch (Exception e) {

@@ -42,7 +42,11 @@ public abstract class SolrServerConfiguration<S extends SolrServerProvider> {
         return this.type;
     }
 
+<<<<<<< HEAD
     public S newInstance()
+=======
+    public S getProvider()
+>>>>>>> 946101f1867fca376a421a5346a53559d0aaf516
             throws NoSuchMethodException, IllegalAccessException,
             InvocationTargetException, InstantiationException {
         if (constructor == null) {

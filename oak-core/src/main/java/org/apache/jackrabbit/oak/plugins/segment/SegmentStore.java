@@ -16,16 +16,18 @@
  */
 package org.apache.jackrabbit.oak.plugins.segment;
 
-import java.util.UUID;
-
 import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
 
 import org.apache.jackrabbit.oak.api.Blob;
+import org.apache.jackrabbit.oak.spi.blob.BlobStore;
 
+/**
+ * The backend storage interface used by the segment node store.
+ */
 public interface SegmentStore {
 
-    SegmentWriter getWriter();
+    SegmentTracker getTracker();
 
     /**
      * Returns the head state.
@@ -38,23 +40,31 @@ public interface SegmentStore {
     boolean setHead(SegmentNodeState base, SegmentNodeState head);
 
     /**
+     * Checks whether the identified segment exists in this store.
+     *
+     * @param id segment identifier
+     * @return {@code true} if the segment exists, {@code false} otherwise
+     */
+    boolean containsSegment(SegmentId id);
+
+    /**
      * Reads the identified segment from this store.
      *
      * @param segmentId segment identifier
-     * @return identified segment, or {@code null} if not found
+     * @return identified segment, or a {@link SegmentNotFoundException} thrown if not found
      */
     @CheckForNull
-    Segment readSegment(UUID segmentId);
+    Segment readSegment(SegmentId segmentId);
 
     /**
      * Writes the given segment to the segment store.
      *
-     * @param segmentId segment identifier
+     * @param id segment identifier
      * @param bytes byte buffer that contains the raw contents of the segment
      * @param offset start offset within the byte buffer
      * @param length length of the segment
      */
-    void writeSegment(UUID segmentId, byte[] bytes, int offset, int length);
+    void writeSegment(SegmentId id, byte[] bytes, int offset, int length);
 
     void close();
 
@@ -65,5 +75,16 @@ public interface SegmentStore {
      * @return external blob
      */
     Blob readBlob(String reference);
+
+    /**
+     * Returns the external BlobStore (if configured) with this store
+     */
+    @CheckForNull
+    BlobStore getBlobStore();
+
+    /**
+     * Triggers removal of segments that are no longer referenceable.
+     */
+    void gc();
 
 }

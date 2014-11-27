@@ -16,26 +16,37 @@
  */
 package org.apache.jackrabbit.oak.plugins.segment;
 
+import com.google.common.collect.Lists;
 import org.apache.commons.io.FileUtils;
+import org.apache.commons.io.IOUtils;
+import org.apache.jackrabbit.core.data.FileDataStore;
 import org.apache.jackrabbit.oak.api.Blob;
+import org.apache.jackrabbit.oak.plugins.blob.ReferenceCollector;
+import org.apache.jackrabbit.oak.plugins.blob.datastore.DataStoreBlobStore;
 import org.apache.jackrabbit.oak.plugins.memory.AbstractBlob;
 import org.apache.jackrabbit.oak.plugins.segment.file.FileBlob;
 import org.apache.jackrabbit.oak.api.Type;
-import org.apache.jackrabbit.oak.plugins.segment.SegmentNodeStore;
-import org.apache.jackrabbit.oak.plugins.segment.SegmentStore;
 import org.apache.jackrabbit.oak.plugins.segment.file.FileStore;
+import org.apache.jackrabbit.oak.spi.blob.BlobStore;
 import org.apache.jackrabbit.oak.spi.commit.CommitInfo;
 import org.apache.jackrabbit.oak.spi.commit.EmptyHook;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.junit.After;
+import org.junit.Ignore;
 import org.junit.Test;
 
+import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
+import java.util.List;
 import java.util.Random;
 
 import static junit.framework.Assert.assertTrue;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 
 public class ExternalBlobTest {
 
@@ -43,10 +54,66 @@ public class ExternalBlobTest {
     private SegmentNodeStore nodeStore;
     private FileBlob fileBlob;
 
-    @Test
-    public void testCreateAndRead() throws Exception {
-        SegmentNodeStore nodeStore = getNodeStore();
+    @Test @Ignore("would need a FileBlobStore for this")
+    public void testFileBlob() throws Exception {
+        nodeStore = getNodeStore(new TestBlobStore());
+        testCreateAndRead(getFileBlob());
+    }
 
+    @Test
+    public void testDataStoreBlob() throws Exception {
+        FileDataStore fds = createFileDataStore();
+        DataStoreBlobStore dbs = new DataStoreBlobStore(fds);
+        nodeStore = getNodeStore(dbs);
+
+        //Test for Blob which get inlined
+        Blob b1 = testCreateAndRead(createBlob(fds.getMinRecordLength()-2));
+        assertTrue(b1 instanceof SegmentBlob);
+        assertNull(((SegmentBlob) b1).getBlobId());
+
+        //Test for Blob which need to be pushed to BlobStore
+        byte[] data2 = new byte[Segment.MEDIUM_LIMIT + 1];
+        new Random().nextBytes(data2);
+        Blob b2 = testCreateAndRead(nodeStore.createBlob(new ByteArrayInputStream(data2)));
+        assertTrue(b2 instanceof SegmentBlob);
+        assertNotNull(b2.getReference());
+        InputStream is = dbs.getInputStream(((SegmentBlob) b2).getBlobId());
+        assertNotNull(IOUtils.contentEquals(new ByteArrayInputStream(data2), is));
+        is.close();
+    }
+
+    @Test
+    public void testNullBlobId() throws Exception{
+        FileDataStore fds = createFileDataStore();
+        DataStoreBlobStore dbs = new DataStoreBlobStore(fds);
+        nodeStore = getNodeStore(dbs);
+
+        NodeBuilder nb = nodeStore.getRoot().builder();
+        NodeBuilder cb = nb.child("hello");
+        cb.setProperty("blob1", createBlob(Segment.MEDIUM_LIMIT - 1));
+
+        int noOfBlobs = 4000;
+        for(int i = 0; i < noOfBlobs; i++){
+            cb.setProperty("blob"+i, createBlob(Segment.MEDIUM_LIMIT+1));
+        }
+
+        cb.setProperty("anotherBlob2", createBlob(Segment.MEDIUM_LIMIT + 1));
+        cb.setProperty("anotherBlob3", createBlob(Segment.MEDIUM_LIMIT + 1));
+        nodeStore.merge(nb, EmptyHook.INSTANCE, CommitInfo.EMPTY);
+
+        final List<String> refrences = Lists.newArrayList();
+        store.getTracker().collectBlobReferences(new ReferenceCollector() {
+            @Override
+            public void addReference(String reference) {
+                assertNotNull(reference);
+                refrences.add(reference);
+            }
+        });
+
+        assertEquals(noOfBlobs + 2, refrences.size());
+    }
+
+    private Blob testCreateAndRead(Blob blob) throws Exception {
         NodeState state = nodeStore.getRoot().getChildNode("hello");
         if (!state.exists()) {
             NodeBuilder builder = nodeStore.getRoot().builder();
@@ -54,7 +121,6 @@ public class ExternalBlobTest {
             nodeStore.merge(builder, EmptyHook.INSTANCE, CommitInfo.EMPTY);
         }
 
-        Blob blob = getFileBlob();
         NodeBuilder builder = nodeStore.getRoot().builder();
         builder.getChildNode("hello").setProperty("world", blob);
         nodeStore.merge(builder, EmptyHook.INSTANCE, CommitInfo.EMPTY);
@@ -63,22 +129,41 @@ public class ExternalBlobTest {
         blob = state.getProperty("world").getValue(Type.BINARY);
 
         assertTrue("Blob written and read must be equal",
-                AbstractBlob.equal(blob, getFileBlob()));
+                AbstractBlob.equal(blob, blob));
+        return blob;
     }
 
     @After
-    public void close() {
+    public void close() throws IOException {
         if (store != null) {
             store.close();
         }
+        FileUtils.cleanDirectory(getWorkDir());
     }
 
-    protected SegmentNodeStore getNodeStore() throws IOException {
+    protected SegmentNodeStore getNodeStore(BlobStore blobStore) throws IOException {
         if (nodeStore == null) {
-            store = new FileStore(new File("target", "ExternalBlobTest"), 256, false);
+            store = new FileStore(blobStore, getWorkDir(), 256, false);
             nodeStore = new SegmentNodeStore(store);
         }
         return nodeStore;
+    }
+
+    private Blob createBlob(int size) throws IOException {
+        byte[] data = new byte[size];
+        new Random().nextBytes(data);
+        return nodeStore.createBlob(new ByteArrayInputStream(data));
+    }
+
+    private FileDataStore createFileDataStore() {
+        FileDataStore fds = new FileDataStore();
+        fds.setMinRecordLength(4092);
+        fds.init(getWorkDir().getAbsolutePath());
+        return fds;
+    }
+
+    private File getWorkDir(){
+        return new File("target", "ExternalBlobTest");
     }
 
     private FileBlob getFileBlob() throws IOException {
@@ -93,5 +178,40 @@ public class ExternalBlobTest {
             fileBlob = new FileBlob(file.getPath());
         }
         return fileBlob;
+    }
+
+    private class TestBlobStore implements BlobStore {
+        @Override
+        public String writeBlob(InputStream in) throws IOException {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public int readBlob(String blobId, long pos, byte[] buff, int off, int length) throws IOException {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public long getBlobLength(String blobId) throws IOException {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public InputStream getInputStream(String blobId) throws IOException {
+            if(blobId.equals(fileBlob.getReference())){
+                return fileBlob.getNewStream();
+            }
+            return null;
+        }
+
+        @Override
+        public String getBlobId(String reference) {
+            return reference;
+        }
+
+        @Override
+        public String getReference(String blobId) {
+            return blobId;
+        }
     }
 }

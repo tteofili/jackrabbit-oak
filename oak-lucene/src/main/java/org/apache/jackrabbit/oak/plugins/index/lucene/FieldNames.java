@@ -43,9 +43,41 @@ public final class FieldNames {
     public static final String FULLTEXT = ":fulltext";
 
     /**
+     * Prefix for all field names that are fulltext indexed by property name.
+     */
+    public static final String ANALYZED_FIELD_PREFIX = "full:";
+
+    /**
+     * Prefix used for storing fulltext of relative node
+     */
+    public static final String FULLTEXT_RELATIVE_NODE = "fullnode:";
+
+    /**
      * Used to select only the PATH field from the lucene documents
      */
     public static final Set<String> PATH_SELECTOR = new HashSet<String>(
             Arrays.asList(PATH));
 
+    /**
+     * Encodes the field name such that it can be used for storing DocValue
+     * This is done such a field if used for both sorting and querying uses
+     * a different name for docvalue field
+     *
+     * @param name name to encode
+     * @return encoded field name
+     */
+    public static String createDocValFieldName(String name){
+        return ":dv" + name;
+    }
+
+    public static String createAnalyzedFieldName(String pname) {
+        return ANALYZED_FIELD_PREFIX + pname;
+    }
+
+    public static String createFulltextFieldName(String nodeRelativePath) {
+        if (nodeRelativePath == null){
+            return FULLTEXT;
+        }
+        return FULLTEXT_RELATIVE_NODE + nodeRelativePath;
+    }
 }

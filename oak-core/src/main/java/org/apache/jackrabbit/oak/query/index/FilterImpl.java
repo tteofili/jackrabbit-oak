@@ -32,6 +32,7 @@ import javax.jcr.PropertyType;
 
 import org.apache.jackrabbit.oak.api.PropertyValue;
 import org.apache.jackrabbit.oak.commons.PathUtils;
+import org.apache.jackrabbit.oak.query.QueryEngineSettings;
 import org.apache.jackrabbit.oak.query.ast.JoinConditionImpl;
 import org.apache.jackrabbit.oak.query.ast.NativeFunctionImpl;
 import org.apache.jackrabbit.oak.query.ast.Operator;
@@ -50,6 +51,8 @@ public class FilterImpl implements Filter {
     private final SelectorImpl selector;
     
     private final String queryStatement;
+    
+    private final QueryEngineSettings settings;
 
     /**
      * Whether the filter is always false.
@@ -98,7 +101,7 @@ public class FilterImpl implements Filter {
     // TODO support "order by"
     
     public FilterImpl() {
-        this(null, null);
+        this(null, null, new QueryEngineSettings());
     }
 
     /**
@@ -107,11 +110,12 @@ public class FilterImpl implements Filter {
      * @param selector the selector for the given filter
      * @param queryStatement the query statement
      */
-    public FilterImpl(SelectorImpl selector, String queryStatement) {
+    public FilterImpl(SelectorImpl selector, String queryStatement, QueryEngineSettings settings) {
         this.selector = selector;
         this.queryStatement = queryStatement;
         this.matchesAllTypes = selector != null ? selector.matchesAllTypes()
                 : false;
+        this.settings = settings;
     }
 
     public FilterImpl(Filter filter) {
@@ -127,6 +131,7 @@ public class FilterImpl implements Filter {
         this.selector = impl.selector;
         this.matchesAllTypes = selector != null ? selector.matchesAllTypes()
                 : false;
+        this.settings = filter.getQueryEngineSettings();
     }
 
     public void setPreparing(boolean preparing) {
@@ -202,6 +207,7 @@ public class FilterImpl implements Filter {
         return alwaysFalse;
     }
 
+    @Override
     public SelectorImpl getSelector() {
         return selector;
     }
@@ -213,17 +219,17 @@ public class FilterImpl implements Filter {
 
     @Override @Nonnull
     public Set<String> getSupertypes() {
-        return selector.getSupertypes();
+        return selector == null ? null : selector.getSupertypes();
     }
 
     @Override @Nonnull
     public Set<String> getPrimaryTypes() {
-        return selector.getPrimaryTypes();
+        return selector == null ? null : selector.getPrimaryTypes();
     }
 
     @Override @Nonnull
     public Set<String> getMixinTypes() {
-        return selector.getMixinTypes();
+        return selector == null ? null : selector.getMixinTypes();
     }
 
     @Override
@@ -281,7 +287,12 @@ public class FilterImpl implements Filter {
         if (x.list == null) {
             x.list = list;
         } else {
-            x.list.retainAll(list);
+            // this is required for multi-valued properties:
+            // for example, if a multi-value property p contains {1, 2},
+            // and we search using "p in (1, 3) and p in (2, 4)", then
+            // this needs to match - so we search for "p in (1, 2, 3, 4)"
+            x.list.removeAll(list);
+            x.list.addAll(list);
         }
     }
 
@@ -345,8 +356,6 @@ public class FilterImpl implements Filter {
                 x.first = v;
             }
             break;
-        case IN:
-            
         }
         if (x.first != null && x.last != null) {
             if (x.first.compareTo(x.last) > 0) {
@@ -392,7 +401,7 @@ public class FilterImpl implements Filter {
             buff.append("query=").append(queryStatement);
         }
         if (fullTextConstraint != null) {
-            buff.append("fullText=").append(fullTextConstraint);
+            buff.append(" fullText=").append(fullTextConstraint);
         }
         buff.append(", path=").append(getPathPlan());
         if (!propertyRestrictions.isEmpty()) {
@@ -578,6 +587,11 @@ public class FilterImpl implements Filter {
 
     public void setMatchesAllTypes(boolean matchesAllTypes) {
         this.matchesAllTypes = matchesAllTypes;
+    }
+
+    @Override
+    public QueryEngineSettings getQueryEngineSettings() {
+        return settings;
     }
 
 }

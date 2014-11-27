@@ -17,18 +17,24 @@
 package org.apache.jackrabbit.oak.plugins.index.lucene;
 
 import com.google.common.collect.ImmutableList;
+
 import java.util.Iterator;
+
 import org.apache.jackrabbit.oak.Oak;
 import org.apache.jackrabbit.oak.api.ContentRepository;
 import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.plugins.nodetype.write.InitialContent;
 import org.apache.jackrabbit.oak.query.AbstractQueryTest;
+import org.apache.jackrabbit.oak.spi.commit.Observer;
+import org.apache.jackrabbit.oak.spi.query.QueryIndexProvider;
 import org.apache.jackrabbit.oak.spi.security.OpenSecurityProvider;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import static java.util.Arrays.asList;
 import static junit.framework.Assert.assertEquals;
 import static org.apache.jackrabbit.oak.api.Type.STRINGS;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.TestUtil.useV2;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
@@ -41,15 +47,25 @@ public class LuceneIndexQueryTest extends AbstractQueryTest {
     @Override
     protected void createTestIndexNode() throws Exception {
         Tree index = root.getTree("/");
-        createTestIndexNode(index, LuceneIndexConstants.TYPE_LUCENE);
+        Tree indexDefn = createTestIndexNode(index, LuceneIndexConstants.TYPE_LUCENE);
+        useV2(indexDefn);
+        indexDefn.setProperty(LuceneIndexConstants.TEST_MODE, true);
+        indexDefn.setProperty(LuceneIndexConstants.EVALUATE_PATH_RESTRICTION, true);
+
+        Tree props = TestUtil.newRulePropTree(indexDefn, "nt:base");
+        TestUtil.enablePropertyIndex(props, "c1/p", false);
+        TestUtil.enableForFullText(props, LuceneIndexConstants.REGEX_ALL_PROPS, true);
+
         root.commit();
     }
 
     @Override
     protected ContentRepository createRepository() {
+        LowCostLuceneIndexProvider provider = new LowCostLuceneIndexProvider();
         return new Oak().with(new InitialContent())
                 .with(new OpenSecurityProvider())
-                .with(new LowCostLuceneIndexProvider())
+                .with((QueryIndexProvider) provider)
+                .with((Observer) provider)
                 .with(new LuceneIndexEditorProvider())
                 .createContentRepository();
     }
@@ -59,9 +75,15 @@ public class LuceneIndexQueryTest extends AbstractQueryTest {
         test("sql1.txt");
     }
 
+    @Ignore("OAK-2296")
     @Test
     public void sql2() throws Exception {
         test("sql2.txt");
+    }
+    
+    @Test
+    public void sql2FullText() throws Exception {
+        test("sql2-fulltext.txt");
     }
 
     @Test
@@ -266,22 +288,71 @@ public class LuceneIndexQueryTest extends AbstractQueryTest {
     }
 
     @Test
-    public void testNativeMLTQuery() throws Exception {
-        String nativeQueryString = "select [jcr:path] from [nt:base] where native('lucene', 'mlt?stream.body=World&mlt.fl=name&mlt.mindf=0&mlt.mintf=0')";
-
-        Tree tree = root.getTree("/");
-        Tree test = tree.addChild("test");
-        test.addChild("a").setProperty("name", "Hello World, today weather is nice");
-        test.addChild("b").setProperty("name", "Cheers World, today weather is quite nice");
-        tree.addChild("c");
+    public void testRepSimilarAsNativeQuery() throws Exception {
+        String nativeQueryString = "select [jcr:path] from [nt:base] where " + 
+                "native('lucene', 'mlt?stream.body=/test/a&mlt.fl=:path&mlt.mindf=0&mlt.mintf=0')";
+        Tree test = root.getTree("/").addChild("test");
+        test.addChild("a").setProperty("text", "Hello World");
+        test.addChild("b").setProperty("text", "He said Hello and then the world said Hello as well.");
+        test.addChild("c").setProperty("text", "He said Hi.");
         root.commit();
+        Iterator<String> result = executeQuery(nativeQueryString, "JCR-SQL2").iterator();
+        assertTrue(result.hasNext());
+        assertEquals("/test/a", result.next());
+        assertTrue(result.hasNext());
+        assertEquals("/test/b", result.next());
+        assertFalse(result.hasNext());
+    }
+    
+    @Test
+    public void testRepSimilarQuery() throws Exception {
+        String query = "select [jcr:path] from [nt:base] where similar(., '/test/a')";
+        Tree test = root.getTree("/").addChild("test");
+        test.addChild("a").setProperty("text", "Hello World Hello World");
+        test.addChild("b").setProperty("text", "Hello World");
+        test.addChild("c").setProperty("text", "World");
+        test.addChild("d").setProperty("text", "Hello");
+        test.addChild("e").setProperty("text", "World");
+        test.addChild("f").setProperty("text", "Hello");
+        test.addChild("g").setProperty("text", "World");
+        test.addChild("h").setProperty("text", "Hello");
+        root.commit();
+        Iterator<String> result = executeQuery(query, "JCR-SQL2").iterator();
+        assertTrue(result.hasNext());
+        assertEquals("/test/a", result.next());
+        assertTrue(result.hasNext());
+        assertEquals("/test/b", result.next());
+        assertTrue(result.hasNext());
+    }
 
-        Iterator<String> strings = executeQuery(nativeQueryString, "JCR-SQL2").iterator();
-        assertTrue(strings.hasNext());
-        assertEquals("/test/a", strings.next());
-        assertTrue(strings.hasNext());
-        assertEquals("/test/b", strings.next());
-        assertFalse(strings.hasNext());
+    @Test
+    public void testRepSimilarXPathQuery() throws Exception {
+        String query = "//element(*, nt:base)[rep:similar(., '/test/a')]";
+        Tree test = root.getTree("/").addChild("test");
+        test.addChild("a").setProperty("text", "Hello World Hello World");
+        test.addChild("b").setProperty("text", "Hello World");
+        test.addChild("c").setProperty("text", "World");
+        test.addChild("d").setProperty("text", "Hello");
+        test.addChild("e").setProperty("text", "World");
+        test.addChild("f").setProperty("text", "Hello");
+        test.addChild("g").setProperty("text", "World");
+        test.addChild("h").setProperty("text", "Hello");
+        root.commit();
+        Iterator<String> result = executeQuery(query, "xpath").iterator();
+        assertTrue(result.hasNext());
+        assertEquals("/test/a", result.next());
+        assertTrue(result.hasNext());
+        assertEquals("/test/b", result.next());
+    }
+
+    @Test
+    public void testTokenizeCN() throws Exception {
+        Tree t = root.getTree("/").addChild("containsCN");
+        Tree one = t.addChild("one");
+        one.setProperty("t", "美女衬衫");
+        root.commit();
+        assertQuery("//*[jcr:contains(., '美女')]", "xpath",
+                ImmutableList.of(one.getPath()));
     }
 
 }

@@ -16,7 +16,18 @@
  */
 package org.apache.jackrabbit.oak.jcr.session;
 
+import static com.google.common.collect.Lists.newArrayListWithCapacity;
+import static org.apache.jackrabbit.oak.api.Type.NAME;
+import static org.apache.jackrabbit.oak.api.Type.NAMES;
+import static org.apache.jackrabbit.oak.api.Type.PATH;
+import static org.apache.jackrabbit.oak.api.Type.PATHS;
+import static org.apache.jackrabbit.oak.api.Type.STRING;
+import static org.apache.jackrabbit.oak.api.Type.UNDEFINED;
+import static org.apache.jackrabbit.oak.api.Type.UNDEFINEDS;
+import static org.apache.jackrabbit.oak.plugins.memory.PropertyStates.createProperty;
+
 import java.util.List;
+
 import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
 import javax.jcr.AccessDeniedException;
@@ -46,16 +57,6 @@ import org.apache.jackrabbit.oak.plugins.nodetype.write.ReadWriteNodeTypeManager
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import static com.google.common.collect.Lists.newArrayListWithCapacity;
-import static org.apache.jackrabbit.oak.api.Type.NAME;
-import static org.apache.jackrabbit.oak.api.Type.NAMES;
-import static org.apache.jackrabbit.oak.api.Type.PATH;
-import static org.apache.jackrabbit.oak.api.Type.PATHS;
-import static org.apache.jackrabbit.oak.api.Type.STRING;
-import static org.apache.jackrabbit.oak.api.Type.UNDEFINED;
-import static org.apache.jackrabbit.oak.api.Type.UNDEFINEDS;
-import static org.apache.jackrabbit.oak.plugins.memory.PropertyStates.createProperty;
-
 /**
  * TODO document
  */
@@ -63,6 +64,7 @@ abstract class ItemImpl<T extends ItemDelegate> implements Item {
     private static final Logger log = LoggerFactory.getLogger(ItemImpl.class);
 
     public static final String ITEM_SAVE_DOES_SESSION_SAVE = "item-save-does-session-save";
+    public static final int MV_PROPERTY_WARN_THRESHOLD = 1000;
 
     /**
      * The value of this flag determines the behaviour of {@link #save()}. If {@code false},
@@ -87,8 +89,8 @@ abstract class ItemImpl<T extends ItemDelegate> implements Item {
     }
 
     protected abstract class ItemWriteOperation<U> extends SessionOperation<U> {
-        protected ItemWriteOperation() {
-            super(true);
+        protected ItemWriteOperation(String name) {
+            super(name, true);
         }
         @Override
         public void checkPreconditions() throws RepositoryException {
@@ -132,7 +134,7 @@ abstract class ItemImpl<T extends ItemDelegate> implements Item {
     @Override
     @Nonnull
     public String getName() throws RepositoryException {
-        String oakName = perform(new ItemOperation<String>(dlg) {
+        String oakName = perform(new ItemOperation<String>(dlg, "getName") {
             @Override
             public String perform() {
                 return item.getName();
@@ -148,7 +150,7 @@ abstract class ItemImpl<T extends ItemDelegate> implements Item {
     @Override
     @Nonnull
     public String getPath() throws RepositoryException {
-        return toJcrPath(perform(new ItemOperation<String>(dlg) {
+        return toJcrPath(perform(new ItemOperation<String>(dlg, "getPath") {
             @Override
             public String perform() {
                 return item.getPath();
@@ -170,7 +172,7 @@ abstract class ItemImpl<T extends ItemDelegate> implements Item {
             return sessionContext.getSession().getRootNode();
         }
 
-        ItemDelegate ancestor = perform(new ItemOperation<ItemDelegate>(dlg) {
+        ItemDelegate ancestor = perform(new ItemOperation<ItemDelegate>(dlg, "getAncestor") {
             @Override
             public ItemDelegate perform() throws RepositoryException {
                 String path = item.getPath();
@@ -254,7 +256,7 @@ abstract class ItemImpl<T extends ItemDelegate> implements Item {
     @Override
     public void save() throws RepositoryException {
         try {
-            perform(new ItemWriteOperation<Void>() {
+            perform(new ItemWriteOperation<Void>("save") {
                 @Override
                 public Void perform() throws RepositoryException {
                     dlg.save();
@@ -290,7 +292,7 @@ abstract class ItemImpl<T extends ItemDelegate> implements Item {
         if (!keepChanges) {
             log.warn("Item#refresh invokes Session#refresh!");
         }
-        perform(new SessionOperation<Void>() {
+        perform(new SessionOperation<Void>("refresh") {
             @Override
             public Void perform() throws InvalidItemStateException {
                 sessionDelegate.refresh(keepChanges);

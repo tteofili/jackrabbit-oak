@@ -27,6 +27,8 @@ import javax.annotation.Nullable;
 import javax.jcr.PropertyType;
 
 import org.apache.jackrabbit.oak.api.PropertyValue;
+import org.apache.jackrabbit.oak.query.QueryEngineSettings;
+import org.apache.jackrabbit.oak.query.ast.SelectorImpl;
 import org.apache.jackrabbit.oak.query.fulltext.FullTextExpression;
 
 /**
@@ -41,6 +43,13 @@ import org.apache.jackrabbit.oak.query.fulltext.FullTextExpression;
  * certain path, or equality to a certain path.
  */
 public interface Filter {
+
+    /**
+     * Get the selector associated with this filter.
+     *
+     * @return selector
+     */
+    SelectorImpl getSelector();
 
     /**
      * Get the list of property restrictions, if any.
@@ -63,6 +72,8 @@ public interface Filter {
      * @return the condition (null if none)
      */
     FullTextExpression getFullTextConstraint();
+    
+    QueryEngineSettings getQueryEngineSettings();
     
     /**
      * Whether the filter contains a native condition.

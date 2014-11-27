@@ -20,13 +20,13 @@
 package org.apache.jackrabbit.oak.plugins.observation;
 
 import static java.util.Collections.addAll;
+import static org.apache.jackrabbit.oak.plugins.observation.filter.VisibleFilter.VISIBLE_FILTER;
 
 import java.util.Map;
 import java.util.Set;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
-import javax.jcr.RepositoryException;
 
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
@@ -37,7 +37,6 @@ import org.apache.jackrabbit.oak.core.ImmutableRoot;
 import org.apache.jackrabbit.oak.namepath.GlobalNameMapper;
 import org.apache.jackrabbit.oak.namepath.NamePathMapper;
 import org.apache.jackrabbit.oak.namepath.NamePathMapperImpl;
-import org.apache.jackrabbit.oak.plugins.observation.filter.VisibleFilter;
 import org.apache.jackrabbit.oak.spi.commit.CommitInfo;
 import org.apache.jackrabbit.oak.spi.commit.Observer;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
@@ -119,22 +118,34 @@ public abstract class NodeObserver implements Observer {
 
     @Override
     public void contentChanged(@Nonnull NodeState root, @Nullable CommitInfo info) {
-        try {
-            if (previousRoot != null) {
+        if (previousRoot != null) {
+            try {
                 NamePathMapper namePathMapper = new NamePathMapperImpl(
                         new GlobalNameMapper(new ImmutableRoot(root)));
 
                 Set<String> oakPropertyNames = Sets.newHashSet();
                 for (String name : propertyNames) {
-                    oakPropertyNames.add(namePathMapper.getJcrName(name));
+                    String oakName = namePathMapper.getOakNameOrNull(name);
+                    if (oakName == null) {
+                        LOG.warn("Ignoring invalid property name: {}", name);
+                    } else {
+                        oakPropertyNames.add(oakName);
+                    }
                 }
+
                 NodeState before = previousRoot;
                 NodeState after = root;
                 EventHandler handler = new FilteredHandler(
-                        new VisibleFilter(),
+                        VISIBLE_FILTER,
                         new NodeEventHandler("/", info, namePathMapper, oakPropertyNames));
-                for (String name : PathUtils.elements(path)) {
-                    String oakName = namePathMapper.getOakName(name);
+
+                String oakPath = namePathMapper.getOakPath(path);
+                if (oakPath == null) {
+                    LOG.warn("Cannot listen for changes on invalid path: {}", path);
+                    return;
+                }
+
+                for (String oakName : PathUtils.elements(oakPath)) {
                     before = before.getChildNode(oakName);
                     after = after.getChildNode(oakName);
                     handler = handler.getChildHandler(oakName, before, after);
@@ -144,12 +155,12 @@ public abstract class NodeObserver implements Observer {
                 while (!generator.isDone()) {
                     generator.generate();
                 }
+            } catch (Exception e) {
+                LOG.warn("Error while dispatching observation events", e);
             }
-
-            previousRoot = root;
-        } catch (RepositoryException e) {
-            LOG.warn("Error while handling content change", e);
         }
+
+        previousRoot = root;
     }
 
     private enum EventType {ADDED, DELETED, CHANGED}

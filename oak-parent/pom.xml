@@ -30,24 +30,31 @@
   <groupId>org.apache.jackrabbit</groupId>
   <artifactId>oak-parent</artifactId>
   <name>Oak Parent POM</name>
-  <version>0.19-SNAPSHOT</version>
+  <version>1.1-SNAPSHOT</version>
   <packaging>pom</packaging>
 
   <properties>
-    <test.opts>-Xmx512m -XX:MaxPermSize=64m -XX:+HeapDumpOnOutOfMemoryError -Dupdate.limit=100 -Djava.awt.headless=true</test.opts>
+    <test.opts.memory>-Xmx512m -XX:MaxPermSize=64m</test.opts.memory>
+    <test.opts>${test.opts.coverage} ${test.opts.memory} -XX:+HeapDumpOnOutOfMemoryError -Dupdate.limit=100 -Djava.awt.headless=true</test.opts>
     <skip.deployment>false</skip.deployment>
+    <skip.coverage>true</skip.coverage>
     <known.issues />
     <project.reporting.outputEncoding>
       ${project.build.sourceEncoding}
     </project.reporting.outputEncoding>
-    <jackrabbit.version>2.7.4</jackrabbit.version>
+    <jackrabbit.version>2.9.0</jackrabbit.version>
     <mongo.host>127.0.0.1</mongo.host>
     <mongo.port>27017</mongo.port>
     <mongo.db>MongoMKDB</mongo.db>
     <mongo.db2>MongoMKDB2</mongo.db2>
     <segment.db>SegmentMK</segment.db>
+<<<<<<< HEAD
     <lucene.version>4.7.0</lucene.version>
     <!-- Note that we're using SLF4J API version 1.6 when compiling     -->
+=======
+    <lucene.version>4.7.1</lucene.version>
+    <!-- Note that we're using SLF4J API version 1.7 when compiling     -->
+>>>>>>> 946101f1867fca376a421a5346a53559d0aaf516
     <!-- core Oak components but more recent SLF4J and Logback versions -->
     <!-- when compiling and running test cases and the oak-run jar.     -->
     <!-- This way it's possible to use Oak also in environments that    -->
@@ -56,6 +63,17 @@
     <slf4j.api.version>1.7.6</slf4j.api.version>
     <slf4j.version>1.7.6</slf4j.version> <!-- sync with logback version -->
     <logback.version>1.1.0</logback.version>
+    <h2.version>1.4.182</h2.version>
+
+   <!-- specifies on which fixture to run the integration testing tests. 
+      override in profiles or provide from command line to change behaviour. Provide 
+      more fixtures space separated. See org.apache.jackrabbit.oak.jcr.FixturesHelper#AVAILABLE_FIXTURES 
+      for the possible values: SEGMENT_MK DOCUMENT_MK DOCUMENT_NS DOCUMENT_JDBC -->
+    <fixtures>SEGMENT_MK</fixtures>
+
+   <!-- whether skip the surefire unit testing during the integration testing. 
+      Override with -Dsurefire.skip.ut=true when needed -->
+    <surefire.skip.ut>false</surefire.skip.ut>
   </properties>
 
   <issueManagement>
@@ -88,13 +106,14 @@
             <source>1.6</source>
             <links>
               <link>http://docs.oracle.com/javase/6/docs/api/</link>
+              <link>http://www.day.com/specs/javax.jcr/javadocs/jcr-2.0/</link>
             </links>
           </configuration>
         </plugin>
         <plugin>
           <groupId>org.apache.felix</groupId>
           <artifactId>maven-bundle-plugin</artifactId>
-          <version>2.4.0</version>
+          <version>2.5.0</version>
           <extensions>true</extensions>
           <inherited>true</inherited>
           <configuration>
@@ -107,11 +126,24 @@
               <Bundle-Vendor>The Apache Software Foundation</Bundle-Vendor>
             </instructions>
           </configuration>
+          <executions>
+            <execution>
+              <id>baseline</id>
+              <goals>
+                <goal>baseline</goal>
+              </goals>
+              <configuration>
+                <logResults>false</logResults>
+                <failOnWarning>false</failOnWarning>
+                <failOnError>false</failOnError>
+              </configuration>
+            </execution>
+          </executions>
         </plugin>
         <plugin>
           <groupId>org.apache.felix</groupId>
           <artifactId>maven-scr-plugin</artifactId>
-          <version>1.15.0</version>
+          <version>1.16.0</version>
           <executions>
             <execution>
               <id>generate-scr-scrdescriptor</id>
@@ -154,6 +186,7 @@
               <mongo.db>${mongo.db}</mongo.db>
               <mongo.db2>${mongo.db2}</mongo.db2>
               <segment.db>${segment.db}</segment.db>
+              <ns-fixtures>${fixtures}</ns-fixtures>
             </systemPropertyVariables>
             <redirectTestOutputToFile>true</redirectTestOutputToFile>
           </configuration>
@@ -168,6 +201,7 @@
               <mongo.port>${mongo.port}</mongo.port>
               <mongo.db>${mongo.db}</mongo.db>
               <mongo.db2>${mongo.db2}</mongo.db2>
+              <ns-fixtures>${fixtures}</ns-fixtures>
             </systemPropertyVariables>
           </configuration>
         </plugin>
@@ -215,6 +249,19 @@
                     <execute />
                   </action>
                 </pluginExecution>
+                <pluginExecution>
+                  <pluginExecutionFilter>
+                    <groupId>org.jacoco</groupId>
+                    <artifactId>jacoco-maven-plugin</artifactId>
+                    <versionRange>[0.7.1.201405082137,)</versionRange>
+                    <goals>
+                      <goal>prepare-agent</goal>
+                    </goals>
+                  </pluginExecutionFilter>
+                  <action>
+                    <ignore />
+                  </action>
+                </pluginExecution>
               </pluginExecutions>
             </lifecycleMappingMetadata>
           </configuration>
@@ -246,8 +293,44 @@
           <artifactId>maven-project-info-reports-plugin</artifactId>
           <version>2.4</version>
         </plugin>
+        <plugin>
+          <groupId>org.jacoco</groupId>
+          <artifactId>jacoco-maven-plugin</artifactId>
+          <version>0.7.1.201405082137</version>
+        </plugin>
       </plugins>
     </pluginManagement>
+    <plugins>
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>pre-unit-test</id>
+            <goals>
+              <goal>prepare-agent</goal>
+            </goals>
+            <configuration>
+              <skip>${skip.coverage}</skip>
+              <destFile>${project.build.directory}/coverage-reports/jacoco-ut.exec</destFile>
+              <propertyName>test.opts.coverage</propertyName>
+            </configuration>
+          </execution>
+          <execution>
+            <id>post-unit-test</id>
+            <phase>test</phase>
+            <goals>
+              <goal>report</goal>
+            </goals>
+            <configuration>
+              <skip>${skip.coverage}</skip>
+              <dataFile>${project.build.directory}/coverage-reports/jacoco-ut.exec</dataFile>
+              <outputDirectory>${project.reporting.outputDirectory}/jacoco-ut</outputDirectory>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
   </build>
 
   <reporting>
@@ -297,7 +380,7 @@
       <dependency>
         <groupId>org.mongodb</groupId>
         <artifactId>mongo-java-driver</artifactId>
-        <version>2.11.3</version>
+        <version>2.12.2</version>
       </dependency>
       <dependency>
         <groupId>com.google.guava</groupId>
@@ -349,7 +432,24 @@
   </dependencyManagement>
 
   <profiles>
+    <!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -  Unit testing profiles -->
     <profile>
+         <id>unittesting</id>
+         <properties>
+            <!-- emptying $fixtures means run on all -->
+            <fixtures />
+         </properties>
+         <build>
+            <plugins>
+              <plugin>
+                <artifactId>maven-surefire-plugin</artifactId>
+              </plugin>
+            </plugins>
+         </build>
+    </profile>
+    <!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - Integration testing profiles -->
+    <profile>
+      <!-- runs all the IT agains the default fixture. See <properties> section -->
       <id>integrationTesting</id>
       <activation>
         <property>
@@ -358,6 +458,12 @@
       </activation>
       <build>
         <plugins>
+           <plugin>
+             <artifactId>maven-surefire-plugin</artifactId>
+             <configuration>
+               <skipTests>${surefire.skip.ut}</skipTests>
+             </configuration>
+           </plugin>
           <plugin>
             <artifactId>maven-failsafe-plugin</artifactId>
             <executions>
@@ -372,10 +478,18 @@
         </plugins>
       </build>
     </profile>
+
+    <!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - other profiles -->
     <profile>
       <id>pedantic</id>
       <build>
         <plugins>
+           <plugin>
+             <artifactId>maven-surefire-plugin</artifactId>
+             <configuration>
+               <skipTests>true</skipTests>
+             </configuration>
+           </plugin>
           <plugin>
             <groupId>org.apache.rat</groupId>
             <artifactId>apache-rat-plugin</artifactId>
@@ -419,28 +533,14 @@
       </build>
     </profile>
     <profile>
-      <id>site-with-javadoc</id>
-      <build>
-        <plugins>
-          <plugin>
-            <groupId>org.apache.maven.plugins</groupId>
-            <artifactId>maven-javadoc-plugin</artifactId>
-            <executions>
-              <execution>
-                <id>aggregate</id>
-                <goals>
-                  <goal>aggregate</goal>
-                </goals>
-                <phase>site</phase>
-              </execution>
-            </executions>
-            <configuration>
-              <reportOutputDirectory>${basedir}/oak-doc/target/site</reportOutputDirectory>
-              <additionalparam>-notimestamp</additionalparam>
-            </configuration>
-          </plugin>
-        </plugins>
-      </build>
+      <id>rdb-mysql</id>
+      <dependencies>
+        <dependency>
+          <groupId>mysql</groupId>
+          <artifactId>mysql-connector-java</artifactId>
+          <version>5.1.30</version>
+        </dependency>
+      </dependencies>
     </profile>
     <profile>
       <id>rdb-postgres</id>
@@ -448,9 +548,71 @@
         <dependency>
           <groupId>org.postgresql</groupId>
           <artifactId>postgresql</artifactId>
-          <version>9.3-1100-jdbc4</version>
+          <version>9.3-1101-jdbc4</version>
         </dependency>
       </dependencies>
+    </profile>
+    <profile>
+      <id>rdb-h2</id>
+      <dependencies>
+        <dependency>
+          <groupId>com.h2database</groupId>
+          <artifactId>h2</artifactId>
+          <version>${h2.version}</version>
+        </dependency>
+      </dependencies>
+    </profile>
+    <profile>
+      <!-- requires local copy of Oracle JDBC driver deployed to Maven repo-->
+      <!-- for instance:
+        mvn install:install-file -Dfile=ojdbc6.jar -Dpackaging=jar\
+          -DgroupId=com.oracle -DartifactId=ojdbc6 -Dversion=11.2.0.3.0
+       -->
+      <id>rdb-oracle</id>
+      <dependencies>
+        <dependency>
+          <groupId>com.oracle</groupId>
+          <artifactId>ojdbc6</artifactId>
+          <version>11.2.0.3.0</version>
+        </dependency>
+      </dependencies>
+    </profile>
+    <profile>
+      <!-- requires local copy of IBM DB2 JDBC drivers deployed to Maven repo-->
+      <!-- for instance:
+        mvn install:install-file -Dfile=db2jcc4.jar -Dpackaging=jar\
+          -DgroupId=com.ibm.db2 -DartifactId=db2 -Dversion=4.16.53
+        mvn install:install-file -Dfile=db2jcc_license_cu.jar -Dpackaging=jar\
+          -DgroupId=com.ibm.db2 -DartifactId=db2-license -Dversion=4.16.53
+       -->
+      <id>rdb-db2</id>
+      <dependencies>
+        <dependency>
+          <groupId>com.ibm.db2</groupId>
+          <artifactId>db2</artifactId>
+          <version>4.16.53</version>
+        </dependency>
+        <dependency>
+          <groupId>com.ibm.db2</groupId>
+          <artifactId>db2-license</artifactId>
+          <version>4.16.53</version>
+        </dependency>
+      </dependencies>
+    </profile>
+    <profile>
+      <id>java8</id>
+      <activation>
+        <jdk>[1.8,)</jdk>
+      </activation>
+      <properties>
+        <test.opts.memory>-Xmx512m</test.opts.memory>
+      </properties>
+    </profile>
+    <profile>
+      <id>coverage</id>
+      <properties>
+        <skip.coverage>false</skip.coverage>
+      </properties>
     </profile>
   </profiles>
 </project>

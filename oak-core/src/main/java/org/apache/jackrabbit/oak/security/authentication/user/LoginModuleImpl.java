@@ -23,6 +23,7 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import javax.annotation.CheckForNull;
+import javax.annotation.Nullable;
 import javax.jcr.Credentials;
 import javax.jcr.GuestCredentials;
 import javax.jcr.SimpleCredentials;
@@ -32,13 +33,17 @@ import javax.security.auth.callback.UnsupportedCallbackException;
 import javax.security.auth.login.LoginException;
 
 import org.apache.jackrabbit.oak.api.AuthInfo;
+import org.apache.jackrabbit.oak.api.Root;
 import org.apache.jackrabbit.oak.spi.security.ConfigurationParameters;
 import org.apache.jackrabbit.oak.spi.security.SecurityProvider;
 import org.apache.jackrabbit.oak.spi.security.authentication.AbstractLoginModule;
 import org.apache.jackrabbit.oak.spi.security.authentication.AuthInfoImpl;
 import org.apache.jackrabbit.oak.spi.security.authentication.Authentication;
 import org.apache.jackrabbit.oak.spi.security.authentication.ImpersonationCredentials;
+import org.apache.jackrabbit.oak.spi.security.authentication.PreAuthenticatedLogin;
+import org.apache.jackrabbit.oak.spi.security.user.UserAuthenticationFactory;
 import org.apache.jackrabbit.oak.spi.security.user.UserConfiguration;
+import org.apache.jackrabbit.oak.spi.security.user.UserConstants;
 import org.apache.jackrabbit.oak.spi.security.user.util.UserUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -87,7 +92,7 @@ import org.slf4j.LoggerFactory;
  * Impersonation will succeed if the {@link ImpersonationCredentials#getBaseCredentials() base credentials}
  * refer to a valid user that has not been disabled. If the authenticating
  * subject is not allowed to impersonate the specified user, the login attempt
- * will fail with {@code LoginException}.<p/>
+ * will fail with {@code LoginException}.<p>
  * Please note, that a user will always be allowed to impersonate him/herself
  * irrespective of the impersonation definitions exposed by
  * {@link org.apache.jackrabbit.api.security.user.User#getImpersonation()}
@@ -111,23 +116,30 @@ public final class LoginModuleImpl extends AbstractLoginModule {
 
     @Override
     public boolean login() throws LoginException {
+        final boolean success;
         credentials = getCredentials();
-        userId = getUserId();
 
-        if (credentials == null || userId == null) {
-            log.debug("Could not extract userId/credentials");
-            return false;
+        // check if we have a pre authenticated login from a previous login module
+        PreAuthenticatedLogin preAuthLogin = getSharedPreAuthLogin();
+        if (preAuthLogin != null) {
+            userId = preAuthLogin.getUserId();
+            Authentication authentication = getUserAuthentication(userId);
+            success = authentication != null && authentication.authenticate(PreAuthenticatedLogin.PRE_AUTHENTICATED);
+        } else {
+            userId = getUserId();
+            Authentication authentication = getUserAuthentication(userId);
+            success = authentication != null && authentication.authenticate(credentials);
         }
 
-        Authentication authentication = new UserAuthentication(userId, getUserManager());
-        boolean success = authentication.authenticate(credentials);
         if (success) {
             principals = getPrincipals(userId);
 
             log.debug("Adding Credentials to shared state.");
+            //noinspection unchecked
             sharedState.put(SHARED_KEY_CREDENTIALS, credentials);
 
             log.debug("Adding login name to shared state.");
+            //noinspection unchecked
             sharedState.put(SHARED_KEY_LOGIN_NAME, userId);
         }
         return success;
@@ -207,6 +219,22 @@ public final class LoginModuleImpl extends AbstractLoginModule {
             ConfigurationParameters params = sp.getConfiguration(UserConfiguration.class).getParameters();
             return UserUtil.getAnonymousId(params);
         }
+    }
+
+    @CheckForNull
+    private Authentication getUserAuthentication(@Nullable String userId) {
+        SecurityProvider securityProvider = getSecurityProvider();
+        Root root = getRoot();
+        if (securityProvider != null && root != null) {
+            UserConfiguration uc = securityProvider.getConfiguration(UserConfiguration.class);
+            UserAuthenticationFactory factory = uc.getParameters().getConfigValue(UserConstants.PARAM_USER_AUTHENTICATION_FACTORY, null, UserAuthenticationFactory.class);
+            if (factory != null) {
+                return factory.getAuthentication(uc, root, userId);
+            } else {
+                log.error("No user authentication factory configured in user configuration.");
+            }
+        }
+        return null;
     }
 
     private AuthInfo createAuthInfo() {

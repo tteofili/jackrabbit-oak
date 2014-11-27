@@ -45,11 +45,14 @@ import org.apache.jackrabbit.oak.jcr.delegate.PropertyDelegate;
 import org.apache.jackrabbit.oak.jcr.session.operation.PropertyOperation;
 import org.apache.jackrabbit.oak.plugins.value.ValueFactoryImpl;
 import org.apache.jackrabbit.value.ValueHelper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * TODO document
  */
 public class PropertyImpl extends ItemImpl<PropertyDelegate> implements Property {
+    private static final Logger LOG = LoggerFactory.getLogger(PropertyImpl.class);
 
     private static final Value[] NO_VALUES = new Value[0];
 
@@ -67,7 +70,7 @@ public class PropertyImpl extends ItemImpl<PropertyDelegate> implements Property
     @Override
     @Nonnull
     public Node getParent() throws RepositoryException {
-        return perform(new PropertyOperation<Node>(dlg) {
+        return perform(new PropertyOperation<Node>(dlg, "getParent") {
             @Override
             public Node perform() throws RepositoryException {
                 NodeDelegate parent = property.getParent();
@@ -82,7 +85,7 @@ public class PropertyImpl extends ItemImpl<PropertyDelegate> implements Property
 
     @Override
     public boolean isNew() {
-        return safePerform(new PropertyOperation<Boolean>(dlg) {
+        return safePerform(new PropertyOperation<Boolean>(dlg, "isNew") {
             @Override
             public Boolean perform() {
                 return property.getStatus() == Status.NEW;
@@ -92,7 +95,7 @@ public class PropertyImpl extends ItemImpl<PropertyDelegate> implements Property
 
     @Override
     public boolean isModified() {
-        return safePerform(new PropertyOperation<Boolean>(dlg) {
+        return safePerform(new PropertyOperation<Boolean>(dlg, "isModified") {
             @Override
             public Boolean perform() {
                 return property.getStatus() == Status.MODIFIED;
@@ -102,16 +105,16 @@ public class PropertyImpl extends ItemImpl<PropertyDelegate> implements Property
 
     @Override
     public void remove() throws RepositoryException {
-        perform(new ItemWriteOperation<Void>() {
+        perform(new ItemWriteOperation<Void>("remove") {
             @Override
-            public Void perform() throws RepositoryException {
+            public Void perform() {
                 dlg.remove();
                 return null;
             }
 
             @Override
-            public String description() throws RepositoryException {
-                return String.format("Removing property [%s/%s] ",dlg.getPath(),dlg.getName());
+            public String toString() {
+                return String.format("Removing property [%s/%s] ", dlg.getPath(), dlg.getName());
             }
         });
     }
@@ -229,7 +232,7 @@ public class PropertyImpl extends ItemImpl<PropertyDelegate> implements Property
     @Override
     @Nonnull
     public Value getValue() throws RepositoryException {
-        return perform(new PropertyOperation<Value>(dlg) {
+        return perform(new PropertyOperation<Value>(dlg, "getValue") {
             @Override
             public Value perform() throws RepositoryException {
                 return ValueFactoryImpl.createValue(
@@ -241,7 +244,7 @@ public class PropertyImpl extends ItemImpl<PropertyDelegate> implements Property
     @Override
     @Nonnull
     public Value[] getValues() throws RepositoryException {
-        return perform(new PropertyOperation<List<Value>>(dlg) {
+        return perform(new PropertyOperation<List<Value>>(dlg, "getValues") {
             @Override
             public List<Value> perform() throws RepositoryException {
                 return ValueFactoryImpl.createValues(
@@ -299,7 +302,7 @@ public class PropertyImpl extends ItemImpl<PropertyDelegate> implements Property
     @Override
     @Nonnull
     public Node getNode() throws RepositoryException {
-        return perform(new PropertyOperation<Node>(dlg) {
+        return perform(new PropertyOperation<Node>(dlg, "getNode") {
             @Override
             public Node perform() throws RepositoryException {
                 // TODO: avoid nested calls
@@ -352,7 +355,7 @@ public class PropertyImpl extends ItemImpl<PropertyDelegate> implements Property
     @Override
     @Nonnull
     public Property getProperty() throws RepositoryException {
-        return perform(new PropertyOperation<Property>(dlg) {
+        return perform(new PropertyOperation<Property>(dlg, "getProperty") {
             @Override
             public Property perform() throws RepositoryException {
                 // TODO: avoid nested calls
@@ -388,7 +391,7 @@ public class PropertyImpl extends ItemImpl<PropertyDelegate> implements Property
     @Override
     @Nonnull
     public PropertyDefinition getDefinition() throws RepositoryException {
-        return perform(new PropertyOperation<PropertyDefinition>(dlg) {
+        return perform(new PropertyOperation<PropertyDefinition>(dlg, "getDefinition") {
             @Override
             public PropertyDefinition perform() throws RepositoryException {
                 return getNodeTypeManager().getDefinition(
@@ -400,7 +403,7 @@ public class PropertyImpl extends ItemImpl<PropertyDelegate> implements Property
 
     @Override
     public int getType() throws RepositoryException {
-        return perform(new PropertyOperation<Integer>(dlg) {
+        return perform(new PropertyOperation<Integer>(dlg, "getType") {
             @Override
             public Integer perform() throws RepositoryException {
                 return property.getPropertyState().getType().tag();
@@ -410,7 +413,7 @@ public class PropertyImpl extends ItemImpl<PropertyDelegate> implements Property
 
     @Override
     public boolean isMultiple() throws RepositoryException {
-        return perform(new PropertyOperation<Boolean>(dlg) {
+        return perform(new PropertyOperation<Boolean>(dlg, "isMultiple") {
             @Override
             public Boolean perform() throws RepositoryException {
                 return property.getPropertyState().isArray();
@@ -435,9 +438,9 @@ public class PropertyImpl extends ItemImpl<PropertyDelegate> implements Property
         }
     }
 
-    private void internalSetValue(final @Nonnull Value value)
+    private void internalSetValue(@Nonnull final Value value)
             throws RepositoryException {
-        perform(new ItemWriteOperation<Void>() {
+        perform(new ItemWriteOperation<Void>("internalSetValue") {
             @Override
             public Void perform() throws RepositoryException {
                 Type<?> type = dlg.getPropertyState().getType();
@@ -453,15 +456,19 @@ public class PropertyImpl extends ItemImpl<PropertyDelegate> implements Property
             }
 
             @Override
-            public String description() throws RepositoryException {
-                return String.format("Setting property [%s/%s]",dlg.getPath(),dlg.getName());
+            public String toString() {
+                return String.format("Setting property [%s/%s]", dlg.getPath(), dlg.getName());
             }
         });
     }
 
-    private void internalSetValue(final @Nonnull Value[] values)
+    private void internalSetValue(@Nonnull final Value[] values)
             throws RepositoryException {
-        perform(new ItemWriteOperation<Void>() {
+        if (values.length > MV_PROPERTY_WARN_THRESHOLD) {
+            LOG.warn("Large multi valued property detected ({} values).", values.length);
+        }
+
+        perform(new ItemWriteOperation<Void>("internalSetValue") {
             @Override
             public Void perform() throws RepositoryException {
                 Type<?> type = dlg.getPropertyState().getType();
@@ -472,10 +479,10 @@ public class PropertyImpl extends ItemImpl<PropertyDelegate> implements Property
 
                 List<Value> converted = newArrayListWithCapacity(values.length);
                 ValueFactory factory = getValueFactory();
-                for (int i = 0; i < values.length; i++) {
-                    if (values[i] != null) {
+                for (Value value : values) {
+                    if (value != null) {
                         converted.add(ValueHelper.convert(
-                                values[i], type.tag(), factory));
+                                value, type.tag(), factory));
                     }
                 }
                 dlg.setState(createMultiState(dlg.getName(), converted, type));
@@ -483,8 +490,8 @@ public class PropertyImpl extends ItemImpl<PropertyDelegate> implements Property
             }
 
             @Override
-            public String description() throws RepositoryException {
-                return String.format("Setting property [%s/%s]",dlg.getPath(),dlg.getName());
+            public String toString() {
+                return String.format("Setting property [%s/%s]", dlg.getPath(), dlg.getName());
             }
         });
     }

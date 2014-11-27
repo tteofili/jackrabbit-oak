@@ -27,6 +27,7 @@ import java.util.Map;
 
 import com.google.common.base.Objects;
 import com.google.common.collect.Iterators;
+import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.PeekingIterator;
 import com.google.common.collect.TreeTraverser;
@@ -36,11 +37,13 @@ import com.mongodb.DBCursor;
 import com.mongodb.DBObject;
 import com.mongodb.QueryBuilder;
 
+import com.mongodb.ReadPreference;
 import org.apache.jackrabbit.oak.cache.CacheValue;
 import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.plugins.document.CachedNodeDocument;
 import org.apache.jackrabbit.oak.plugins.document.Collection;
 import org.apache.jackrabbit.oak.plugins.document.Document;
+import org.apache.jackrabbit.oak.plugins.document.NodeDocument;
 import org.apache.jackrabbit.oak.plugins.document.util.Utils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -133,6 +136,7 @@ abstract class CacheInvalidator {
 
             // Fetch lastRev for each such node
             DBCursor cursor = nodes.find(query.get(), keys);
+            cursor.setReadPreference(ReadPreference.primary());
             result.queryCount++;
 
             for (DBObject obj : cursor) {
@@ -162,6 +166,7 @@ abstract class CacheInvalidator {
                 return root.children();
             }
         };
+        public static final int IN_QUERY_BATCH_SIZE = 250;
 
         private final DBCollection nodes;
         private final MongoDocumentStore documentStore;
@@ -208,41 +213,49 @@ abstract class CacheInvalidator {
 
                 final boolean hasMore = pitr.hasNext();
 
-                // Change in level or last element
+                // Change in level of last element
                 if (!sameLevelNodes.isEmpty() &&
                         ((hasMore && tn.level() != pitr.peek().level()) || !hasMore)) {
+                    List<String> sameLevelNodeIds = new ArrayList<String>(sameLevelNodes.keySet());
+                    for(List<String> idBatch : Lists.partition(sameLevelNodeIds, IN_QUERY_BATCH_SIZE)) {
 
-                    QueryBuilder query = QueryBuilder.start(Document.ID)
-                            .in(sameLevelNodes.keySet());
+                        QueryBuilder query = QueryBuilder.start(Document.ID)
+                                .in(idBatch);
 
-                    // Fetch lastRev and modCount for each such nodes
-                    DBCursor cursor = nodes.find(query.get(), keys);
-                    LOG.debug(
-                            "Checking for changed nodes at level {} with {} paths",
-                            tn.level(), sameLevelNodes.size());
-                    result.queryCount++;
-                    for (DBObject obj : cursor) {
+                        // Fetch lastRev and modCount for each such nodes
+                        DBCursor cursor = nodes.find(query.get(), keys);
+                        cursor.setReadPreference(ReadPreference.primary());
+                        LOG.debug(
+                                "Checking for changed nodes at level {} with {} paths",
+                                tn.level(), sameLevelNodes.size());
+                        result.queryCount++;
+                        try {
+                            for (DBObject obj : cursor) {
 
-                        result.cacheEntriesProcessedCount++;
+                                result.cacheEntriesProcessedCount++;
 
-                        Number latestModCount = (Number) obj.get(Document.MOD_COUNT);
-                        String id = (String) obj.get(Document.ID);
+                                Number latestModCount = (Number) obj.get(Document.MOD_COUNT);
+                                String id = (String) obj.get(Document.ID);
 
-                        final TreeNode tn2 = sameLevelNodes.get(id);
-                        CachedNodeDocument cachedDoc = tn2.getDocument();
-                        if (cachedDoc != null) {
-                            boolean noChangeInModCount = Objects.equal(latestModCount, cachedDoc.getModCount());
-                            if (noChangeInModCount) {
-                                result.upToDateCount++;
-                                tn2.markUptodate(startTime);
-                            } else {
-                                result.invalidationCount++;
-                                tn2.invalidate();
+                                final TreeNode tn2 = sameLevelNodes.get(id);
+                                CachedNodeDocument cachedDoc = tn2.getDocument();
+                                if (cachedDoc != null) {
+                                    boolean noChangeInModCount = Objects.equal(latestModCount, cachedDoc.getModCount());
+                                    if (noChangeInModCount) {
+                                        result.upToDateCount++;
+                                        tn2.markUptodate(startTime);
+                                    } else {
+                                        result.invalidationCount++;
+                                        tn2.invalidate();
+                                    }
+                                }
+
+                                // Remove the processed nodes
+                                sameLevelNodes.remove(tn2.getId());
                             }
+                        } finally {
+                            cursor.close();
                         }
-
-                        // Remove the processed nodes
-                        sameLevelNodes.remove(tn2.getId());
                     }
 
                     // NodeDocument present in cache but not in database
@@ -276,10 +289,25 @@ abstract class CacheInvalidator {
                 //check them
                 //TODO Need to determine way to determine if the
                 //key is referring to a split document
-                String path = e.getValue().getPath();
                 result.cacheSize++;
-                for (String name : PathUtils.elements(path)) {
-                    current = current.child(name);
+                CachedNodeDocument doc = e.getValue();
+                String path;
+                if (doc == NodeDocument.NULL) {
+                    String id = e.getKey().toString();
+                    if (Utils.isIdFromLongPath(id)) {
+                        LOG.debug("Negative cache entry with long path {}. Invalidating", id);
+                        documentStore.invalidateCache(Collection.NODES, id);
+                        path = null;
+                    } else {
+                        path = Utils.getPathFromId(id);
+                    }
+                } else {
+                    path = doc.getPath();
+                }
+                if (path != null) {
+                    for (String name : PathUtils.elements(path)) {
+                        current = current.child(name);
+                    }
                 }
             }
             return root;

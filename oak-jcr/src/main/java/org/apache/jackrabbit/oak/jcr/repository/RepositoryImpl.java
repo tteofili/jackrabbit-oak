@@ -17,12 +17,20 @@
 package org.apache.jackrabbit.oak.jcr.repository;
 
 import static com.google.common.base.Preconditions.checkNotNull;
+import static java.util.Collections.emptyMap;
+import static java.util.Collections.singletonMap;
+import static org.apache.jackrabbit.oak.spi.whiteboard.WhiteboardUtils.registerMBean;
 
+import java.io.Closeable;
 import java.util.Collections;
 import java.util.Map;
 import java.util.concurrent.Callable;
-import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
@@ -35,29 +43,25 @@ import javax.jcr.SimpleCredentials;
 import javax.jcr.Value;
 import javax.security.auth.login.LoginException;
 
-import com.google.common.util.concurrent.FutureCallback;
-import com.google.common.util.concurrent.Futures;
-import com.google.common.util.concurrent.ListenableScheduledFuture;
-import com.google.common.util.concurrent.ListeningScheduledExecutorService;
-import com.google.common.util.concurrent.MoreExecutors;
+import com.google.common.collect.ImmutableMap;
 
+import org.apache.commons.io.IOUtils;
 import org.apache.jackrabbit.api.JackrabbitRepository;
 import org.apache.jackrabbit.api.security.authentication.token.TokenCredentials;
 import org.apache.jackrabbit.commons.SimpleValueFactory;
 import org.apache.jackrabbit.oak.api.ContentRepository;
 import org.apache.jackrabbit.oak.api.ContentSession;
 import org.apache.jackrabbit.oak.api.jmx.SessionMBean;
-import org.apache.jackrabbit.oak.plugins.observation.CommitRateLimiter;
-import org.apache.jackrabbit.oak.stats.Clock;
-import org.apache.jackrabbit.oak.stats.StatisticManager;
 import org.apache.jackrabbit.oak.jcr.delegate.SessionDelegate;
 import org.apache.jackrabbit.oak.jcr.session.RefreshStrategy;
 import org.apache.jackrabbit.oak.jcr.session.SessionContext;
 import org.apache.jackrabbit.oak.jcr.session.SessionStats;
+import org.apache.jackrabbit.oak.plugins.observation.CommitRateLimiter;
 import org.apache.jackrabbit.oak.spi.security.SecurityProvider;
 import org.apache.jackrabbit.oak.spi.whiteboard.Registration;
 import org.apache.jackrabbit.oak.spi.whiteboard.Whiteboard;
-import org.apache.jackrabbit.oak.spi.whiteboard.WhiteboardUtils;
+import org.apache.jackrabbit.oak.stats.Clock;
+import org.apache.jackrabbit.oak.stats.StatisticManager;
 import org.apache.jackrabbit.oak.util.GenericDescriptors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -79,6 +83,13 @@ public class RepositoryImpl implements JackrabbitRepository {
      * @see org.apache.jackrabbit.oak.jcr.session.RefreshStrategy
      */
     public static final String REFRESH_INTERVAL = "oak.refresh-interval";
+
+    /**
+     * Name of the session attribute for enabling relaxed locking rules
+     *
+     * @see <a href="https://issues.apache.org/jira/browse/OAK-1329">OAK-1329</a>
+     */
+    public static final String RELAXED_LOCKING = "oak.relaxed-locking";
 
     private final GenericDescriptors descriptors;
     private final ContentRepository contentRepository;
@@ -102,8 +113,9 @@ public class RepositoryImpl implements JackrabbitRepository {
      */
     private final ThreadLocal<Long> threadSaveCount = new ThreadLocal<Long>();
 
-    private final ListeningScheduledExecutorService scheduledExecutor =
-            MoreExecutors.listeningDecorator(Executors.newSingleThreadScheduledExecutor());
+    private final ScheduledExecutorService scheduledExecutor =
+            createListeningScheduledExecutorService();
+
     private final StatisticManager statisticManager;
 
     public RepositoryImpl(@Nonnull ContentRepository contentRepository,
@@ -240,12 +252,14 @@ public class RepositoryImpl implements JackrabbitRepository {
             } else if (attributes.containsKey(REFRESH_INTERVAL)) {
                 throw new RepositoryException("Duplicate attribute '" + REFRESH_INTERVAL + "'.");
             }
+            boolean relaxedLocking = getRelaxedLocking(attributes);
 
             RefreshStrategy refreshStrategy = createRefreshStrategy(refreshInterval);
             ContentSession contentSession = contentRepository.login(credentials, workspaceName);
             SessionDelegate sessionDelegate = createSessionDelegate(refreshStrategy, contentSession);
             SessionContext context = createSessionContext(
-                    statisticManager, securityProvider, createAttributes(refreshInterval),
+                    statisticManager, securityProvider,
+                    createAttributes(refreshInterval, relaxedLocking),
                     sessionDelegate, observationQueueLength, commitRateLimiter);
             return context.getSession();
         } catch (LoginException e) {
@@ -257,29 +271,18 @@ public class RepositoryImpl implements JackrabbitRepository {
             final RefreshStrategy refreshStrategy,
             final ContentSession contentSession) {
         return new SessionDelegate(
-                contentSession, refreshStrategy,
+                contentSession, securityProvider, refreshStrategy,
                 threadSaveCount, statisticManager, clock) {
             // Defer session MBean registration to avoid cluttering the
             // JMX name space with short lived sessions
-            ListenableScheduledFuture<Registration> registration = scheduledExecutor.schedule(
-                    new RegistrationCallable(getSessionStats(), whiteboard), 1, TimeUnit.MINUTES);
+            RegistrationTask registrationTask = new RegistrationTask(getSessionStats(), whiteboard);
+            ScheduledFuture<?> scheduledTask = scheduledExecutor.schedule(registrationTask, 1, TimeUnit.MINUTES);
 
             @Override
             public void logout() {
-                // Cancel session MBean registration and unregister MBean
-                // if registration succeed before the cancellation
-                registration.cancel(false);
-                Futures.addCallback(registration, new FutureCallback<Registration>() {
-                    @Override
-                    public void onSuccess(Registration registration) {
-                        registration.unregister();
-                    }
-
-                    @Override
-                    public void onFailure(Throwable t) {
-                    }
-                });
-
+                // Cancel session MBean registration
+                registrationTask.cancel();
+                scheduledTask.cancel(false);
                 super.logout();
             }
         };
@@ -289,6 +292,9 @@ public class RepositoryImpl implements JackrabbitRepository {
     public void shutdown() {
         statisticManager.dispose();
         scheduledExecutor.shutdown();
+        if (contentRepository instanceof Closeable) {
+            IOUtils.closeQuietly((Closeable) contentRepository);
+        }
     }
 
     //------------------------------------------------------------< internal >---
@@ -325,7 +331,53 @@ public class RepositoryImpl implements JackrabbitRepository {
         return descriptors;
     }
 
-//------------------------------------------------------------< private >---
+    //------------------------------------------------------------< private >---
+
+    private static ScheduledExecutorService createListeningScheduledExecutorService() {
+        ThreadFactory tf = new ThreadFactory() {
+            private final AtomicLong counter = new AtomicLong();
+            @Override
+            public Thread newThread(@Nonnull Runnable r) {
+                Thread t = new Thread(r, newName());
+                t.setDaemon(true);
+                return t;
+            }
+
+            private String newName() {
+                return "oak-repository-executor-" + counter.incrementAndGet();
+            }
+        };
+        return new ScheduledThreadPoolExecutor(1, tf) {
+            // purge the list of schedule tasks before scheduling a new task in order
+            // to reduce memory consumption in the face of many cancelled tasks. See OAK-1890.
+
+            @Override
+            public <V> ScheduledFuture<V> schedule(Callable<V> callable, long delay, TimeUnit unit) {
+                purge();
+                return super.schedule(callable, delay, unit);
+            }
+
+            @Override
+            public ScheduledFuture<?> schedule(Runnable command, long delay, TimeUnit unit) {
+                purge();
+                return super.schedule(command, delay, unit);
+            }
+
+            @Override
+            public ScheduledFuture<?> scheduleAtFixedRate(Runnable command, long initialDelay,
+                    long period, TimeUnit unit) {
+                purge();
+                return super.scheduleAtFixedRate(command, initialDelay, period, unit);
+            }
+
+            @Override
+            public ScheduledFuture<?> scheduleWithFixedDelay(Runnable command, long initialDelay,
+                    long delay, TimeUnit unit) {
+                purge();
+                return super.scheduleWithFixedDelay(command, initialDelay, delay, unit);
+            }
+        };
+    }
 
     private static Long getRefreshInterval(Credentials credentials) {
         if (credentials instanceof SimpleCredentials) {
@@ -342,6 +394,17 @@ public class RepositoryImpl implements JackrabbitRepository {
 
     private static Long getRefreshInterval(Map<String, Object> attributes) {
         return toLong(attributes.get(REFRESH_INTERVAL));
+    }
+
+    private static boolean getRelaxedLocking(Map<String, Object> attributes) {
+        Object value = attributes.get(RELAXED_LOCKING);
+        if (value instanceof Boolean) {
+            return (Boolean) value;
+        } else if (value instanceof String) {
+            return Boolean.parseBoolean((String) value);
+        } else {
+            return false;
+        }
     }
 
     private static Long toLong(Object value) {
@@ -366,10 +429,19 @@ public class RepositoryImpl implements JackrabbitRepository {
         }
     }
 
-    private static Map<String, Object> createAttributes(Long refreshInterval) {
-        return refreshInterval == null
-                ? Collections.<String, Object>emptyMap()
-                : Collections.<String, Object>singletonMap(REFRESH_INTERVAL, refreshInterval);
+    private static Map<String, Object> createAttributes(
+            Long refreshInterval, boolean relaxedLocking) {
+        if (refreshInterval == null && !relaxedLocking) {
+            return emptyMap();
+        } else if (refreshInterval == null) {
+            return singletonMap(RELAXED_LOCKING, (Object) Boolean.valueOf(relaxedLocking));
+        } else if (!relaxedLocking) {
+            return singletonMap(REFRESH_INTERVAL, (Object) refreshInterval);
+        } else {
+            return ImmutableMap.of(
+                    REFRESH_INTERVAL, (Object) refreshInterval,
+                    RELAXED_LOCKING,  (Object) Boolean.valueOf(relaxedLocking));
+        }
     }
 
     /**
@@ -396,19 +468,31 @@ public class RepositoryImpl implements JackrabbitRepository {
         }
     }
 
-    private static class RegistrationCallable implements Callable<Registration> {
+    static class RegistrationTask implements Runnable {
         private final SessionStats sessionStats;
         private final Whiteboard whiteboard;
+        private boolean cancelled;
+        private Registration completed;
 
-        public RegistrationCallable(SessionStats sessionStats, Whiteboard whiteboard) {
+        public RegistrationTask(SessionStats sessionStats, Whiteboard whiteboard) {
             this.sessionStats = sessionStats;
             this.whiteboard = whiteboard;
         }
 
         @Override
-        public Registration call() throws Exception {
-            return WhiteboardUtils.registerMBean(whiteboard, SessionMBean.class,
-                    sessionStats, SessionMBean.TYPE, sessionStats.toString());
+        public synchronized void run() {
+            if (!cancelled) {
+                completed = registerMBean(whiteboard, SessionMBean.class, sessionStats,
+                        SessionMBean.TYPE, sessionStats.toString());
+            }
+        }
+        
+        public synchronized void cancel() {
+            cancelled = true;
+            if (completed != null) {
+                completed.unregister();
+                completed = null;
+            }
         }
     }
 }

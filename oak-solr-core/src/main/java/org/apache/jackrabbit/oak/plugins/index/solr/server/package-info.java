@@ -14,7 +14,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+<<<<<<< HEAD
 @Version("0.17")
+=======
+@Version("1.0")
+>>>>>>> 946101f1867fca376a421a5346a53559d0aaf516
 @Export(optional = "provide:=true")
 package org.apache.jackrabbit.oak.plugins.index.solr.server;
 

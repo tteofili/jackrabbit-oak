@@ -34,11 +34,13 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
 
 import org.apache.jackrabbit.oak.api.Blob;
 import org.apache.jackrabbit.oak.api.CommitFailedException;
+import org.apache.jackrabbit.oak.api.PropertyState;
+import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.plugins.segment.memory.MemoryStore;
+import org.apache.jackrabbit.oak.spi.blob.BlobStore;
 import org.apache.jackrabbit.oak.spi.commit.ChangeDispatcher;
 import org.apache.jackrabbit.oak.spi.commit.CommitHook;
 import org.apache.jackrabbit.oak.spi.commit.CommitInfo;
@@ -48,10 +50,23 @@ import org.apache.jackrabbit.oak.spi.state.ConflictAnnotatingRebaseDiff;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.apache.jackrabbit.oak.spi.state.NodeStore;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+/**
+ * The top level class for the segment store.
+ * <p>
+ * The root node of the JCR content tree is actually stored in the node "/root",
+ * and checkpoints are stored under "/checkpoints".
+ */
 public class SegmentNodeStore implements NodeStore, Observable {
 
+    private static final Logger log = LoggerFactory
+            .getLogger(SegmentNodeStore.class);
+
     static final String ROOT = "root";
+
+    public static final String CHECKPOINTS = "checkpoints";
 
     private final SegmentStore store;
 
@@ -117,12 +132,11 @@ public class SegmentNodeStore implements NodeStore, Observable {
     @Override
     public NodeState merge(
             @Nonnull NodeBuilder builder, @Nonnull CommitHook commitHook,
-            @Nullable CommitInfo info) throws CommitFailedException {
+            @Nonnull CommitInfo info) throws CommitFailedException {
         checkArgument(builder instanceof SegmentNodeBuilder);
         checkNotNull(commitHook);
 
         SegmentNodeBuilder snb = (SegmentNodeBuilder) builder;
-        checkArgument(store == snb.getBaseState().getStore());
 
         try {
             commitSemaphore.acquire();
@@ -145,10 +159,9 @@ public class SegmentNodeStore implements NodeStore, Observable {
         checkArgument(builder instanceof SegmentNodeBuilder);
 
         SegmentNodeBuilder snb = (SegmentNodeBuilder) builder;
-        checkArgument(store == snb.getBaseState().getStore());
 
         NodeState root = getRoot();
-        SegmentNodeState before = snb.getBaseState();
+        NodeState before = snb.getBaseState();
         if (!fastEquals(before, root)) {
             SegmentNodeState after = snb.getNodeState();
             snb.reset(root);
@@ -164,7 +177,6 @@ public class SegmentNodeStore implements NodeStore, Observable {
         checkArgument(builder instanceof SegmentNodeBuilder);
 
         SegmentNodeBuilder snb = (SegmentNodeBuilder) builder;
-        checkArgument(store == snb.getBaseState().getStore());
 
         NodeState root = getRoot();
         snb.reset(root);
@@ -174,18 +186,32 @@ public class SegmentNodeStore implements NodeStore, Observable {
 
     @Override
     public Blob createBlob(InputStream stream) throws IOException {
-        return store.getWriter().writeStream(stream);
+        return store.getTracker().getWriter().writeStream(stream);
     }
 
     @Override
     public Blob getBlob(@Nonnull String reference) {
-        return store.readBlob(reference);
+        //Use of 'reference' here is bit overloaded. In terms of NodeStore API
+        //a blob reference refers to the secure reference obtained from Blob#getReference()
+        //However in SegmentStore terminology a blob is referred via 'external reference'
+        //That 'external reference' would map to blobId obtained from BlobStore#getBlobId
+        BlobStore blobStore = store.getBlobStore();
+        if (blobStore != null) {
+            String blobId = blobStore.getBlobId(reference);
+            if (blobId != null) {
+                return store.readBlob(blobId);
+            }
+            return null;
+        }
+        throw new IllegalStateException("Attempt to read external blob with blobId [" + reference + "] " +
+                "without specifying BlobStore");
     }
 
     @Override @Nonnull
-    public String checkpoint(long lifetime) {
+    public synchronized String checkpoint(long lifetime) {
         checkArgument(lifetime > 0);
         String name = UUID.randomUUID().toString();
+        long now = System.currentTimeMillis();
 
         // try 5 times
         for (int i = 0; i < 5; i++) {
@@ -194,16 +220,32 @@ public class SegmentNodeStore implements NodeStore, Observable {
                     refreshHead();
 
                     SegmentNodeState state = head.get();
-
                     SegmentNodeBuilder builder = state.builder();
-                    NodeBuilder cp = builder.child(name);
-                    cp.setProperty("timestamp", System.currentTimeMillis()
-                            + lifetime);
+
+                    NodeBuilder checkpoints = builder.child("checkpoints");
+                    for (String n : checkpoints.getChildNodeNames()) {
+                        NodeBuilder cp = checkpoints.getChildNode(n);
+                        PropertyState ts = cp.getProperty("timestamp");
+                        if (ts == null
+                                || ts.getType() != Type.LONG
+                                || now > ts.getValue(Type.LONG)) {
+                            cp.remove();
+                        }
+                    }
+
+                    NodeBuilder cp = checkpoints.child(name);
+                    cp.setProperty("timestamp",  now + lifetime);
+                    cp.setProperty("created", now);
                     cp.setChildNode(ROOT, state.getChildNode(ROOT));
 
-                    if (store.setHead(state, builder.getNodeState())) {
+                    SegmentNodeState newState = builder.getNodeState();
+                    if (store.setHead(state, newState)) {
                         refreshHead();
                         return name;
+                    } else {
+                        log.debug(
+                                "Unable to update the head state for checkpoint {} ({}/5)",
+                                new Object[] { name, i + 1 });
                     }
 
                 } finally {
@@ -212,25 +254,65 @@ public class SegmentNodeStore implements NodeStore, Observable {
             }
         }
 
+        log.debug("Failed to create checkpoint {}", name);
         return name;
     }
 
     @Override @CheckForNull
     public NodeState retrieve(@Nonnull String checkpoint) {
-        NodeState cp = head.get().getChildNode(checkpoint).getChildNode(ROOT);
+        checkNotNull(checkpoint);
+        NodeState cp = head.get()
+                .getChildNode("checkpoints")
+                .getChildNode(checkpoint)
+                .getChildNode(ROOT);
         if (cp.exists()) {
             return cp;
         }
         return null;
     }
 
+    @Override
+    public boolean release(@Nonnull String checkpoint) {
+        checkNotNull(checkpoint);
+
+        // try 5 times
+        for (int i = 0; i < 5; i++) {
+            if (commitSemaphore.tryAcquire()) {
+                try {
+                    refreshHead();
+
+                    SegmentNodeState state = head.get();
+                    SegmentNodeBuilder builder = state.builder();
+
+                    NodeBuilder cp = builder.child("checkpoints").child(
+                            checkpoint);
+                    if (cp.exists()) {
+                        cp.remove();
+                        SegmentNodeState newState = builder.getNodeState();
+                        if (store.setHead(state, newState)) {
+                            refreshHead();
+                            return true;
+                        }
+                    }
+                } finally {
+                    commitSemaphore.release();
+                }
+            }
+        }
+        return false;
+    }
+
+    NodeState getCheckpoints() {
+        return head.get().getChildNode(CHECKPOINTS);
+    }
+
     private class Commit {
 
         private final Random random = new Random();
 
-        private SegmentNodeState before;
+        private final NodeState before;
 
-        private SegmentNodeState after;
+        private final SegmentNodeState after;
 
         private final CommitHook hook;
 
@@ -246,10 +328,7 @@ public class SegmentNodeStore implements NodeStore, Observable {
             this.info = checkNotNull(info);
         }
 
-        private boolean setHead(SegmentNodeBuilder builder) {
-            SegmentNodeState before = builder.getBaseState();
-            SegmentNodeState after = builder.getNodeState();
-
+        private boolean setHead(SegmentNodeState before, SegmentNodeState after) {
             refreshHead();
             if (store.setHead(before, after)) {
                 head.set(after);
@@ -261,8 +340,7 @@ public class SegmentNodeStore implements NodeStore, Observable {
             }
         }
 
-        private SegmentNodeBuilder prepare() throws CommitFailedException {
-            SegmentNodeState state = head.get();
+        private SegmentNodeBuilder prepare(SegmentNodeState state) throws CommitFailedException {
             SegmentNodeBuilder builder = state.builder();
             if (fastEquals(before, state.getChildNode(ROOT))) {
                 // use a shortcut when there are no external changes
@@ -297,9 +375,9 @@ public class SegmentNodeStore implements NodeStore, Observable {
                     // someone else has a pessimistic lock on the journal,
                     // so we should not try to commit anything yet
                 } else {
-                    SegmentNodeBuilder builder = prepare();
+                    SegmentNodeBuilder builder = prepare(state);
                     // use optimistic locking to update the journal
-                    if (setHead(builder)) {
+                    if (setHead(state, builder.getNodeState())) {
                         return -1;
                     }
                 }
@@ -333,14 +411,14 @@ public class SegmentNodeStore implements NodeStore, Observable {
                     builder.setProperty("token", UUID.randomUUID().toString());
                     builder.setProperty("timeout", now + timeout);
 
-                    if (setHead(builder)) {
+                    if (setHead(state, builder.getNodeState())) {
                          // lock acquired; rebase, apply commit hooks, and unlock
-                        builder = prepare();
+                        builder = prepare(state);
                         builder.removeProperty("token");
                         builder.removeProperty("timeout");
 
                         // complete the commit
-                        if (setHead(builder)) {
+                        if (setHead(state, builder.getNodeState())) {
                             return;
                         }
                     }

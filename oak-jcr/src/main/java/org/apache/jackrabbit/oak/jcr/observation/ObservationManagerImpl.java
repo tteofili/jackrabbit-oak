@@ -19,15 +19,21 @@
 package org.apache.jackrabbit.oak.jcr.observation;
 
 import static com.google.common.collect.Lists.newArrayList;
+import static com.google.common.collect.Sets.newHashSet;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
+import static org.apache.jackrabbit.oak.commons.PathUtils.concat;
+import static org.apache.jackrabbit.oak.commons.PathUtils.isAncestor;
 import static org.apache.jackrabbit.oak.plugins.observation.filter.GlobbingPathFilter.STAR;
 import static org.apache.jackrabbit.oak.plugins.observation.filter.GlobbingPathFilter.STAR_STAR;
 
+import java.security.Principal;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import javax.annotation.CheckForNull;
+import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import javax.jcr.RepositoryException;
 import javax.jcr.UnsupportedRepositoryOperationException;
@@ -35,11 +41,13 @@ import javax.jcr.nodetype.NoSuchNodeTypeException;
 import javax.jcr.observation.EventJournal;
 import javax.jcr.observation.EventListener;
 import javax.jcr.observation.EventListenerIterator;
-import javax.jcr.observation.ObservationManager;
 
+import org.apache.jackrabbit.api.observation.JackrabbitEventFilter;
+import org.apache.jackrabbit.api.observation.JackrabbitObservationManager;
 import org.apache.jackrabbit.commons.iterator.EventListenerIteratorAdapter;
 import org.apache.jackrabbit.commons.observation.ListenerTracker;
 import org.apache.jackrabbit.oak.api.ContentSession;
+import org.apache.jackrabbit.oak.api.Root;
 import org.apache.jackrabbit.oak.jcr.delegate.SessionDelegate;
 import org.apache.jackrabbit.oak.jcr.session.SessionContext;
 import org.apache.jackrabbit.oak.namepath.NamePathMapper;
@@ -47,9 +55,12 @@ import org.apache.jackrabbit.oak.plugins.nodetype.ReadOnlyNodeTypeManager;
 import org.apache.jackrabbit.oak.plugins.observation.CommitRateLimiter;
 import org.apache.jackrabbit.oak.plugins.observation.ExcludeExternal;
 import org.apache.jackrabbit.oak.plugins.observation.filter.FilterBuilder;
+import org.apache.jackrabbit.oak.plugins.observation.filter.FilterBuilder.Condition;
 import org.apache.jackrabbit.oak.plugins.observation.filter.FilterProvider;
+import org.apache.jackrabbit.oak.plugins.observation.filter.PermissionProviderFactory;
 import org.apache.jackrabbit.oak.plugins.observation.filter.Selectors;
 import org.apache.jackrabbit.oak.spi.commit.Observable;
+import org.apache.jackrabbit.oak.spi.security.authorization.AuthorizationConfiguration;
 import org.apache.jackrabbit.oak.spi.security.authorization.permission.PermissionProvider;
 import org.apache.jackrabbit.oak.spi.whiteboard.Whiteboard;
 import org.apache.jackrabbit.oak.stats.StatisticManager;
@@ -58,7 +69,7 @@ import org.slf4j.LoggerFactory;
 import org.slf4j.Marker;
 import org.slf4j.MarkerFactory;
 
-public class ObservationManagerImpl implements ObservationManager {
+public class ObservationManagerImpl implements JackrabbitObservationManager {
     private static final Logger LOG = LoggerFactory.getLogger(ObservationManagerImpl.class);
     private static final int STOP_TIME_OUT = 1000;
 
@@ -73,12 +84,13 @@ public class ObservationManagerImpl implements ObservationManager {
 
     private final SessionDelegate sessionDelegate;
     private final ReadOnlyNodeTypeManager ntMgr;
-    private final PermissionProvider permissionProvider;
+    private final AuthorizationConfiguration authorizationConfig;
     private final NamePathMapper namePathMapper;
     private final Whiteboard whiteboard;
     private final StatisticManager statisticManager;
     private final int queueLength;
     private final CommitRateLimiter commitRateLimiter;
+    private final PermissionProviderFactory permissionProviderFactory;
 
     /**
      * Create a new instance based on a {@link ContentSession} that needs to implement
@@ -92,17 +104,25 @@ public class ObservationManagerImpl implements ObservationManager {
      */
     public ObservationManagerImpl(
             SessionContext sessionContext, ReadOnlyNodeTypeManager nodeTypeManager,
-            PermissionProvider permissionProvider, Whiteboard whiteboard,
-            int queueLength, CommitRateLimiter commitRateLimiter) {
+            Whiteboard whiteboard, int queueLength, CommitRateLimiter commitRateLimiter) {
 
         this.sessionDelegate = sessionContext.getSessionDelegate();
+        this.authorizationConfig = sessionContext.getSecurityProvider().getConfiguration(AuthorizationConfiguration.class);
         this.ntMgr = nodeTypeManager;
-        this.permissionProvider = permissionProvider;
         this.namePathMapper = sessionContext;
         this.whiteboard = whiteboard;
         this.statisticManager = sessionContext.getStatisticManager();
         this.queueLength = queueLength;
         this.commitRateLimiter = commitRateLimiter;
+        this.permissionProviderFactory = new PermissionProviderFactory() {
+            Set<Principal> principals = sessionDelegate.getAuthInfo().getPrincipals();
+            @Nonnull
+            @Override
+            public PermissionProvider create(Root root) {
+                return authorizationConfig.getPermissionProvider(root,
+                        sessionDelegate.getWorkspaceName(), principals);
+            }
+        };
     }
 
     public void dispose() {
@@ -118,14 +138,18 @@ public class ObservationManagerImpl implements ObservationManager {
         }
     }
 
-    private synchronized void addEventListener(
-            EventListener listener, ListenerTracker tracker, FilterProvider filterProvider) {
+    private synchronized void addEventListener(EventListener listener, ListenerTracker tracker,
+            FilterProvider filterProvider) {
+
         ChangeProcessor processor = processors.get(listener);
         if (processor == null) {
             LOG.debug(OBSERVATION,
                     "Registering event listener {} with filter {}", listener, filterProvider);
+            // TODO sharing the namePathMapper across different thread might lead to lock contention.
+            // If this turns out to be problematic we might create a dedicated snapshot for each
+            // session. See OAK-1368.
             processor = new ChangeProcessor(sessionDelegate.getContentSession(), namePathMapper,
-                    permissionProvider, tracker, filterProvider, statisticManager, queueLength,
+                    tracker, filterProvider, statisticManager, queueLength,
                     commitRateLimiter);
             processors.put(listener, processor);
             processor.start(whiteboard);
@@ -154,18 +178,8 @@ public class ObservationManagerImpl implements ObservationManager {
      */
     public void addEventListener(EventListener listener, FilterProvider filterProvider) {
         // FIXME Add support for FilterProvider in ListenerTracker
-        ListenerTracker tracker = new ListenerTracker(
-                listener, 0, null, true, null, null, false) {
-            @Override
-            protected void warn(String message) {
-                LOG.warn(DEPRECATED, message, initStackTrace);
-            }
-
-            @Override
-            protected void beforeEventDelivery() {
-                sessionDelegate.refreshAtNextAccess();
-            }
-        };
+        ListenerTracker tracker = new WarningListenerTracker(
+                true, listener, 0, null, true, null, null, false);
         addEventListener(listener, tracker, filterProvider);
     }
 
@@ -174,32 +188,111 @@ public class ObservationManagerImpl implements ObservationManager {
             boolean isDeep, String[] uuids, String[] nodeTypeName, boolean noLocal)
             throws RepositoryException {
 
-        FilterBuilder filterBuilder = new FilterBuilder();
-        filterBuilder
-            .basePath(namePathMapper.getOakPath(absPath))
-            .includeSessionLocal(!noLocal)
-            .includeClusterExternal(!(listener instanceof ExcludeExternal))
-            .condition(filterBuilder.all(
-                filterBuilder.deleteSubtree(),
-                filterBuilder.moveSubtree(),
-                filterBuilder.path(isDeep ? STAR_STAR : STAR),
-                filterBuilder.eventType(eventTypes),
-                filterBuilder.uuid(Selectors.PARENT, uuids),
-                filterBuilder.nodeType(Selectors.PARENT, validateNodeTypeNames(nodeTypeName))));
+        JackrabbitEventFilter filter = new JackrabbitEventFilter();
+        filter.setEventTypes(eventTypes);
+        if (absPath != null) {
+            filter.setAbsPath(absPath);
+        }
+        filter.setIsDeep(isDeep);
+        if (uuids != null) {
+            filter.setIdentifiers(uuids);
+        }
+        if (nodeTypeName != null) {
+            filter.setNodeTypes(nodeTypeName);
+        }
+        filter.setNoLocal(noLocal);
+        filter.setNoExternal(listener instanceof ExcludeExternal);
+        addEventListener(listener, filter);
+    }
 
-        ListenerTracker tracker = new ListenerTracker(
-                listener, eventTypes, absPath, isDeep, uuids, nodeTypeName, noLocal) {
-            @Override
-            protected void warn(String message) {
-                LOG.warn(DEPRECATED, message, initStackTrace);
-            }
-            @Override
-            protected void beforeEventDelivery() {
-                sessionDelegate.refreshAtNextAccess();
-            }
-        };
+    @Override
+    public void addEventListener(EventListener listener, JackrabbitEventFilter filter)
+            throws RepositoryException {
+
+        int eventTypes = filter.getEventTypes();
+        boolean isDeep = filter.getIsDeep();
+        String[] uuids = filter.getIdentifiers();
+        String[] nodeTypeName = filter.getNodeTypes();
+        boolean noLocal = filter.getNoLocal();
+        boolean noExternal = filter.getNoExternal() || listener instanceof ExcludeExternal;
+        boolean noInternal = filter.getNoInternal();
+        Set<String> includePaths = getOakPaths(namePathMapper, filter.getAdditionalPaths());
+        String absPath = filter.getAbsPath();
+        if (absPath != null) {
+            includePaths.add(namePathMapper.getOakPath(absPath));
+        }
+        Set<String> excludedPaths = getOakPaths(namePathMapper, filter.getExcludedPaths());
+        optimise(includePaths, excludedPaths);
+        if (includePaths.isEmpty()) {
+            LOG.warn("The passed filter excludes all events. No event listener registered");
+            return;
+        }
+
+        FilterBuilder filterBuilder = new FilterBuilder();
+        String depthPattern = isDeep ? STAR + '/' + STAR_STAR : STAR;
+        List<Condition> includeConditions = newArrayList();
+        for (String path : includePaths) {
+            includeConditions.add(filterBuilder.path(concat(path, depthPattern)));
+            filterBuilder.addSubTree(path);
+        }
+
+        List<Condition> excludeConditions = createExclusions(filterBuilder, excludedPaths);
+
+        filterBuilder
+            .includeSessionLocal(!noLocal)
+            .includeClusterExternal(!noExternal)
+            .includeClusterLocal(!noInternal)
+            .condition(filterBuilder.all(
+                    filterBuilder.all(excludeConditions),
+                    filterBuilder.any(includeConditions),
+                    filterBuilder.deleteSubtree(),
+                    filterBuilder.moveSubtree(),
+                    filterBuilder.eventType(eventTypes),
+                    filterBuilder.uuid(Selectors.PARENT, uuids),
+                    filterBuilder.nodeType(Selectors.PARENT, validateNodeTypeNames(nodeTypeName)),
+                    filterBuilder.accessControl(permissionProviderFactory)));
+
+        // FIXME support multiple path in ListenerTracker
+        ListenerTracker tracker = new WarningListenerTracker(
+                !noExternal, listener, eventTypes, absPath, isDeep, uuids, nodeTypeName, noLocal);
 
         addEventListener(listener, tracker, filterBuilder.build());
+    }
+
+    /**
+     * Removes paths from {@code includePaths} that are completely excluded
+     * and only retains paths in {@code excludedPaths} that are included.
+     * @param includePaths
+     * @param excludedPaths
+     */
+    private static void optimise(Set<String> includePaths, Set<String> excludedPaths) {
+        Set<String> retain = newHashSet();
+        for (String include : includePaths) {
+            for (String exclude : excludedPaths) {
+                if (exclude.equals(include) || isAncestor(exclude, include)) {
+                    includePaths.remove(include);
+                } else if (isAncestor(include, exclude)) {
+                    retain.add(exclude);
+                }
+            }
+        }
+        excludedPaths.retainAll(retain);
+    }
+
+    private static List<Condition> createExclusions(FilterBuilder filterBuilder, Iterable<String> excludedPaths) {
+        List<Condition> conditions = newArrayList();
+        for (String path : excludedPaths) {
+            conditions.add(filterBuilder.not(filterBuilder.path(path + '/' + STAR_STAR)));
+        }
+        return conditions;
+    }
+
+    private static Set<String> getOakPaths(NamePathMapper mapper, String[] paths) {
+        Set<String> oakPaths = newHashSet();
+        for (String path : paths) {
+            oakPaths.add(mapper.getOakPath(path));
+        }
+        return oakPaths;
     }
 
     @Override
@@ -265,6 +358,29 @@ public class ObservationManagerImpl implements ObservationManager {
             LOG.warn(OBSERVATION, "Timed out waiting for change processor to stop after " +
                     STOP_TIME_OUT + " milliseconds. Falling back to asynchronous stop.");
             processor.stop();
+        }
+    }
+
+    private class WarningListenerTracker extends ListenerTracker {
+        private final boolean enableWarning;
+
+        public WarningListenerTracker(
+                boolean enableWarning, EventListener listener, int eventTypes, String absPath,
+                boolean isDeep, String[] uuids, String[] nodeTypeName, boolean noLocal) {
+            super(listener, eventTypes, absPath, isDeep, uuids, nodeTypeName, noLocal);
+            this.enableWarning = enableWarning;
+        }
+
+        @Override
+        protected void warn(String message) {
+            if (enableWarning) {
+                LOG.warn(DEPRECATED, message, initStackTrace);
+            }
+        }
+
+        @Override
+        protected void beforeEventDelivery() {
+            sessionDelegate.refreshAtNextAccess();
         }
     }
 

@@ -41,6 +41,7 @@ import org.apache.jackrabbit.stats.jmx.QueryStatManager;
 public class StatisticManager {
     private final QueryStatImpl queryStat = new QueryStatImpl();
     private final RepositoryStatisticsImpl repoStats;
+    private final TimeSeriesMax maxQueueLength;
     private final CompositeRegistration registration;
 
     /**
@@ -49,11 +50,13 @@ public class StatisticManager {
      * @param whiteboard   whiteboard for registering the individual statistics with
      */
     public StatisticManager(Whiteboard whiteboard, ScheduledExecutorService executor) {
+        queryStat.setEnabled(true);
         repoStats = new RepositoryStatisticsImpl(executor);
+        maxQueueLength = new TimeSeriesMax(executor);
         registration = new CompositeRegistration(
             registerMBean(whiteboard, QueryStatManagerMBean.class, new QueryStatManager(queryStat),
                     "QueryStat", "Oak Query Statistics"),
-            registerMBean(whiteboard, RepositoryStatsMBean.class, new RepositoryStats(repoStats),
+            registerMBean(whiteboard, RepositoryStatsMBean.class, new RepositoryStats(repoStats, maxQueueLength),
                     RepositoryStats.TYPE, "Oak Repository Statistics"));
     }
 
@@ -78,6 +81,10 @@ public class StatisticManager {
         return repoStats.getCounter(type);
     }
 
+    public TimeSeriesMax maxQueLengthRecorder() {
+        return maxQueueLength;
+    }
+
     /**
      * Unregister all statistics previously registered with the whiteboard passed
      * to the constructor.
@@ -85,4 +92,5 @@ public class StatisticManager {
     public void dispose() {
         registration.unregister();
     }
+
 }

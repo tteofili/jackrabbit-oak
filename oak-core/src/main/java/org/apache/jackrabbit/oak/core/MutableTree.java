@@ -21,28 +21,23 @@ package org.apache.jackrabbit.oak.core;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.base.Preconditions.checkState;
-import static com.google.common.collect.Iterables.filter;
-import static com.google.common.collect.Iterables.indexOf;
-import static org.apache.jackrabbit.oak.api.Type.NAME;
+import static com.google.common.collect.Lists.newArrayListWithCapacity;
+import static org.apache.jackrabbit.oak.api.Type.NAMES;
 import static org.apache.jackrabbit.oak.commons.PathUtils.elements;
 import static org.apache.jackrabbit.oak.commons.PathUtils.isAbsolute;
+import static org.apache.jackrabbit.oak.plugins.tree.TreeConstants.OAK_CHILD_ORDER;
 import static org.apache.jackrabbit.oak.spi.state.NodeStateUtils.isHidden;
 
-import java.util.Collections;
-import java.util.Set;
+import java.util.List;
 
 import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
 
-import com.google.common.base.Predicate;
-import com.google.common.collect.Iterables;
-import com.google.common.collect.Sets;
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.core.MutableRoot.Move;
-import org.apache.jackrabbit.oak.plugins.memory.MultiGenericPropertyState;
-import org.apache.jackrabbit.oak.plugins.memory.PropertyBuilder;
+import org.apache.jackrabbit.oak.plugins.memory.PropertyStates;
 import org.apache.jackrabbit.oak.plugins.tree.AbstractTree;
 import org.apache.jackrabbit.oak.plugins.tree.TreeConstants;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
@@ -148,7 +143,7 @@ class MutableTree extends AbstractTree {
     @Override
     public Tree getChild(String name) {
         beforeRead();
-        if (super.hasChild(name)) {
+        if (!isHidden(name)) {
             return createChild(name);
         } else {
             return new HiddenTree(this, name);
@@ -178,12 +173,15 @@ class MutableTree extends AbstractTree {
         beforeWrite();
         if (parent != null && parent.hasChild(name)) {
             nodeBuilder.remove();
-            if (parent.hasOrderableChildren()) {
-                parent.nodeBuilder.setProperty(
-                        PropertyBuilder.copy(NAME, parent.nodeBuilder.getProperty(TreeConstants.OAK_CHILD_ORDER))
-                                .removeValue(name)
-                                .getPropertyState()
-                );
+            PropertyState order = parent.nodeBuilder.getProperty(OAK_CHILD_ORDER);
+            if (order != null) {
+                List<String> names = newArrayListWithCapacity(order.count());
+                for (String n : order.getValue(NAMES)) {
+                    if (!n.equals(name)) {
+                        names.add(n);
+                    }
+                }
+                parent.nodeBuilder.setProperty(OAK_CHILD_ORDER, names, NAMES);
             }
             root.updated();
             return true;
@@ -198,11 +196,16 @@ class MutableTree extends AbstractTree {
         beforeWrite();
         if (!super.hasChild(name)) {
             nodeBuilder.setChildNode(name);
-            if (hasOrderableChildren()) {
-                nodeBuilder.setProperty(
-                        PropertyBuilder.copy(NAME, nodeBuilder.getProperty(TreeConstants.OAK_CHILD_ORDER))
-                                .addValue(name)
-                                .getPropertyState());
+            PropertyState order = nodeBuilder.getProperty(OAK_CHILD_ORDER);
+            if (order != null) {
+                List<String> names = newArrayListWithCapacity(order.count() + 1);
+                for (String n : order.getValue(NAMES)) {
+                    if (!n.equals(name)) {
+                        names.add(n);
+                    }
+                }
+                names.add(name);
+                nodeBuilder.setProperty(OAK_CHILD_ORDER, names, NAMES);
             }
             root.updated();
         }
@@ -213,9 +216,9 @@ class MutableTree extends AbstractTree {
     public void setOrderableChildren(boolean enable) {
         beforeWrite();
         if (enable) {
-            ensureChildOrderProperty();
+            updateChildOrder(true);
         } else {
-            nodeBuilder.removeProperty(TreeConstants.OAK_CHILD_ORDER);
+            nodeBuilder.removeProperty(OAK_CHILD_ORDER);
         }
     }
 
@@ -223,49 +226,56 @@ class MutableTree extends AbstractTree {
     public boolean orderBefore(final String name) {
         beforeWrite();
         if (parent == null) {
-            // root does not have siblings
-            return false;
+            return false; // root does not have siblings
+        } else if (this.name.equals(name)) {
+            return false; // same node
         }
-        if (name != null) {
-            if (name.equals(this.name) || !parent.hasChild(name)) {
-                // same node or no such sibling (not existing or not accessible)
-                return false;
+
+        // perform the reorder
+        List<String> names = newArrayListWithCapacity(10000);
+        NodeBuilder builder = parent.nodeBuilder;
+        boolean found = false;
+
+        // first try reordering based on the (potentially out-of-sync)
+        // child order property in the parent node
+        for (String n : builder.getNames(OAK_CHILD_ORDER)) {
+            if (n.equals(name) && parent.hasChild(name)) {
+                names.add(this.name);
+                found = true;
+            }
+            if (!n.equals(this.name)) {
+                names.add(n);
             }
         }
-        // perform the reorder
-        parent.ensureChildOrderProperty();
-        // all siblings but not this one
-        Iterable<String> siblings = filter(
-                parent.getChildNames(),
-                new Predicate<String>() {
-                    @Override
-                    public boolean apply(String name) {
-                        return !MutableTree.this.name.equals(name);
-                    }
-                });
-        // create head and tail
-        Iterable<String> head;
-        Iterable<String> tail;
-        if (name == null) {
-            head = siblings;
-            tail = Collections.emptyList();
-        } else {
-            int idx = indexOf(siblings, new Predicate<String>() {
-                @Override
-                public boolean apply(String sibling) {
-                    return name.equals(sibling);
+
+        // if the target node name was not found in the parent's child order
+        // property, we need to fall back to recreating the child order list
+        if (!found) {
+            names.clear();
+            for (String n : parent.getChildNames()) {
+                if (n.equals(name)) {
+                    names.add(this.name);
+                    found = true;
                 }
-            });
-            head = Iterables.limit(siblings, idx);
-            tail = Iterables.skip(siblings, idx);
+                if (!n.equals(this.name)) {
+                    names.add(n);
+                }
+            }
         }
-        // concatenate head, this name and tail
-        parent.nodeBuilder.setProperty(
-                MultiGenericPropertyState.nameProperty(
-                        TreeConstants.OAK_CHILD_ORDER, Iterables.concat(head, Collections.singleton(getName()), tail))
-        );
-        root.updated();
-        return true;
+
+        if (name == null) {
+            names.add(this.name);
+            found = true;
+        }
+
+        if (found) {
+            builder.setProperty(OAK_CHILD_ORDER, names, NAMES);
+            root.updated();
+            return true;
+        } else {
+            // no such sibling (not existing or not accessible)
+            return false;
+        }
     }
 
     @Override
@@ -339,26 +349,18 @@ class MutableTree extends AbstractTree {
     }
 
     /**
-     * Update the child order with children that have been removed or added.
-     * Added children are appended to the end of the {@link org.apache.jackrabbit.oak.plugins.tree.TreeConstants#OAK_CHILD_ORDER}
-     * property.
+     * Updates the child order to match any added or removed child nodes that
+     * are not yet reflected in the {@link TreeConstants#OAK_CHILD_ORDER}
+     * property. If the {@code force} flag is set, the child order is set
+     * in any case, otherwise only if the node already is orderable.
+     *
+     * @param force whether to add child order information if it doesn't exist
      */
-    void updateChildOrder() {
-        if (!hasOrderableChildren()) {
-            return;
+    void updateChildOrder(boolean force) {
+        if (force || hasOrderableChildren()) {
+            nodeBuilder.setProperty(PropertyStates.createProperty(
+                    OAK_CHILD_ORDER, getChildNames(), Type.NAMES));
         }
-        Set<String> names = Sets.newLinkedHashSet();
-        for (String name : getChildNames()) {
-            if (nodeBuilder.hasChildNode(name)) {
-                names.add(name);
-            }
-        }
-        for (String name : nodeBuilder.getChildNodeNames()) {
-            names.add(name);
-        }
-        PropertyBuilder<String> builder = PropertyBuilder.array(NAME, TreeConstants.OAK_CHILD_ORDER);
-        builder.setValues(names);
-        nodeBuilder.setProperty(builder.getPropertyState());
     }
 
     String getPathInternal() {
@@ -435,18 +437,4 @@ class MutableTree extends AbstractTree {
         return movesApplied;
     }
 
-    /**
-     * Ensures that the {@link org.apache.jackrabbit.oak.plugins.tree.TreeConstants#OAK_CHILD_ORDER} exists. This method will create
-     * the property if it doesn't exist and initialize the value with the names
-     * of the children as returned by {@link NodeBuilder#getChildNodeNames()}.
-     */
-    private void ensureChildOrderProperty() {
-        if (!nodeBuilder.hasProperty(TreeConstants.OAK_CHILD_ORDER)) {
-            nodeBuilder.setProperty(
-                    MultiGenericPropertyState.nameProperty(TreeConstants.OAK_CHILD_ORDER, nodeBuilder.getChildNodeNames()));
-        }
-    }
-
 }
-
-

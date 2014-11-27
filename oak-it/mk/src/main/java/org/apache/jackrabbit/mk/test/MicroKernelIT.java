@@ -34,7 +34,7 @@ import java.util.Set;
 
 import org.apache.jackrabbit.mk.api.MicroKernelException;
 import org.apache.jackrabbit.mk.test.util.TestInputStream;
-import org.apache.jackrabbit.mk.util.MicroKernelInputStream;
+import org.apache.jackrabbit.oak.commons.mk.MicroKernelInputStream;
 import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
 import org.junit.Test;
@@ -54,6 +54,16 @@ public class MicroKernelIT extends AbstractMicroKernelIT {
 
     @Override
     protected void addInitialTestContent() {
+        JSONObject obj = parseJSONObject(mk.getNodes("/", null, 0, 0, -1, null));
+        Set<String> names = getNodeNames(obj);
+        StringBuilder sb = new StringBuilder();
+        for (String nm : names) {
+            sb.append("-\"");
+            sb.append(nm);
+            sb.append("\"\n");
+        }
+        mk.commit("/", sb.toString(), null, "clean test content");
+
         mk.commit("/", "+\"test\" : {" +
                 "\"stringProp\":\"stringVal\"," +
                 "\"intProp\":42," +
@@ -563,6 +573,26 @@ public class MicroKernelIT extends AbstractMicroKernelIT {
     }
 
     @Test
+    public void getNodesWithDefaultFilter() {
+        String head = mk.getHeadRevision();
+
+        String[] filters = { null, "" };
+
+        for (String filter : filters) {
+            // verify initial content with implicit default filter
+            JSONObject obj = parseJSONObject(mk.getNodes("/", head, 1, 0, -1, filter));
+            assertPropertyExists(obj, "test/:childNodeCount");
+            assertPropertyNotExists(obj, "test/:hash");
+            assertPropertyNotExists(obj, "test/:id");
+            assertPropertyValue(obj, "test/stringProp", "stringVal");
+            assertPropertyValue(obj, "test/intProp", 42L);
+            assertPropertyValue(obj, "test/floatProp", 42.2);
+            assertPropertyValue(obj, "test/booleanProp", true);
+            assertPropertyValue(obj, "test/multiIntProp", new Object[]{1, 2, 3});
+        }
+    }
+
+    @Test
     public void getNodesNonExistingPath() {
         String head = mk.getHeadRevision();
 
@@ -1014,6 +1044,8 @@ public class MicroKernelIT extends AbstractMicroKernelIT {
         // make sure /branch doesn't exist in head
         assertFalse(mk.nodeExists("/branch", null));
 
+        long ts = System.currentTimeMillis();
+
         String oldHead = mk.getHeadRevision();
 
         // create a branch on head
@@ -1031,7 +1063,8 @@ public class MicroKernelIT extends AbstractMicroKernelIT {
         branchRev = mk.commit("", "+\"/branch/foo\":{}", branchRev, "");
 
         // make sure branchRev doesn't show up in revision history
-        String hist = mk.getRevisionHistory(0, -1, null);
+        // get history since initial timestamp
+        String hist = mk.getRevisionHistory(ts, -1, null);
         JSONArray array = parseJSONArray(hist);
         for (Object entry : array) {
             assertTrue(entry instanceof JSONObject);
@@ -1384,5 +1417,15 @@ public class MicroKernelIT extends AbstractMicroKernelIT {
         } catch (IOException e) {
             fail(e.getMessage());
         }
+    }
+
+    @Test
+    public void testReadReturnsNonNegative() {
+        TestInputStream in = new TestInputStream(0);
+        String id = mk.write(in);
+        assertNotNull(id);
+        assertTrue(in.isClosed());
+
+        assertTrue("read returns negative value", mk.read(id, 0, new byte[1], 0, 1) >= 0);
     }
 }

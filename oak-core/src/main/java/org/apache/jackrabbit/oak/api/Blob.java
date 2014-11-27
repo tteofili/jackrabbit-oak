@@ -33,7 +33,7 @@ import javax.annotation.Nonnull;
  * <p>
  * Due to their nature blobs should not be used as keys in hash tables.
  * To highlight that and to ensure semantic correctness of the equality
- * contract across different blob implementations, the {@link #hashCode()}
+ * contract across different blob implementations, the {@link Object#hashCode()}
  * method of all blob instances should return zero.
  */
 public interface Blob {
@@ -67,4 +67,24 @@ public interface Blob {
     @CheckForNull
     String getReference();
 
+    /**
+     * A unique identifier of the content of this value. Usually this is a
+     * message digest of the content (a cryptographically secure one-way hash).
+     * This allows to avoid processing large binary values multiple times.
+     * <p>
+     * This method returns null if the identifier is unknown. The identifier may
+     * not always be available, for example if the value has not yet been saved
+     * or processed. Once an identifier is available, it will never change
+     * because values are immutable.
+     * <p>
+     * If two values have the same identifier, the content of the value is
+     * guaranteed to be the same. However it is not guaranteed that two values
+     * with the same content will return the same identifier.
+     * <p>
+     * The identifier is opaque, meaning it can have any format and size.
+     *
+     * @return the unique identifier or null
+     */
+    @CheckForNull
+    String getContentIdentity();
 }

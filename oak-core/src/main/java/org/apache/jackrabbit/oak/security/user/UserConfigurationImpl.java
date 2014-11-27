@@ -26,6 +26,9 @@ import javax.annotation.Nonnull;
 
 import org.apache.felix.scr.annotations.Activate;
 import org.apache.felix.scr.annotations.Component;
+import org.apache.felix.scr.annotations.Properties;
+import org.apache.felix.scr.annotations.Property;
+import org.apache.felix.scr.annotations.PropertyOption;
 import org.apache.felix.scr.annotations.Service;
 import org.apache.jackrabbit.api.security.user.UserManager;
 import org.apache.jackrabbit.oak.api.Root;
@@ -39,16 +42,72 @@ import org.apache.jackrabbit.oak.spi.security.ConfigurationParameters;
 import org.apache.jackrabbit.oak.spi.security.Context;
 import org.apache.jackrabbit.oak.spi.security.SecurityConfiguration;
 import org.apache.jackrabbit.oak.spi.security.SecurityProvider;
+import org.apache.jackrabbit.oak.spi.security.user.UserAuthenticationFactory;
 import org.apache.jackrabbit.oak.spi.security.user.UserConfiguration;
 import org.apache.jackrabbit.oak.spi.security.user.UserConstants;
+import org.apache.jackrabbit.oak.spi.security.user.util.PasswordUtil;
+import org.apache.jackrabbit.oak.spi.xml.ImportBehavior;
 import org.apache.jackrabbit.oak.spi.xml.ProtectedItemImporter;
 
 /**
  * Default implementation of the {@link UserConfiguration}.
  */
-@Component()
+@Component(metatype = true, label = "Apache Jackrabbit Oak UserConfiguration")
 @Service({UserConfiguration.class, SecurityConfiguration.class})
+@Properties({
+        @Property(name = UserConstants.PARAM_USER_PATH,
+                label = "User Path",
+                description = "Path underneath which user nodes are being created.",
+                value = UserConstants.DEFAULT_USER_PATH),
+        @Property(name = UserConstants.PARAM_GROUP_PATH,
+                label = "Group Path",
+                description = "Path underneath which group nodes are being created.",
+                value = UserConstants.DEFAULT_GROUP_PATH),
+        @Property(name = UserConstants.PARAM_SYSTEM_RELATIVE_PATH,
+                label = "System User Relative Path",
+                description = "Path relative to the user root path underneath which system user nodes are being created. The default value is 'system'.",
+                value = UserConstants.DEFAULT_SYSTEM_RELATIVE_PATH),
+        @Property(name = UserConstants.PARAM_DEFAULT_DEPTH,
+                label = "Default Depth",
+                description = "Number of levels that are used by default to store authorizable nodes",
+                intValue = UserConstants.DEFAULT_DEPTH),
+        @Property(name = ProtectedItemImporter.PARAM_IMPORT_BEHAVIOR,
+                label = "Import Behavior",
+                description = "Behavior for user/group related items upon XML import.",
+                options = {
+                        @PropertyOption(name = ImportBehavior.NAME_ABORT, value = ImportBehavior.NAME_ABORT),
+                        @PropertyOption(name = ImportBehavior.NAME_BESTEFFORT, value = ImportBehavior.NAME_BESTEFFORT),
+                        @PropertyOption(name = ImportBehavior.NAME_IGNORE, value = ImportBehavior.NAME_IGNORE)
+                },
+                value = ImportBehavior.NAME_IGNORE),
+        @Property(name = UserConstants.PARAM_PASSWORD_HASH_ALGORITHM,
+                label = "Hash Algorithm",
+                description = "Name of the algorithm used to generate the password hash.",
+                value = PasswordUtil.DEFAULT_ALGORITHM),
+        @Property(name = UserConstants.PARAM_PASSWORD_HASH_ITERATIONS,
+                label = "Hash Iterations",
+                description = "Number of iterations to generate the password hash.",
+                intValue = PasswordUtil.DEFAULT_ITERATIONS),
+        @Property(name = UserConstants.PARAM_PASSWORD_SALT_SIZE,
+                label = "Hash Salt Size",
+                description = "Salt size to generate the password hash.",
+                intValue = PasswordUtil.DEFAULT_SALT_SIZE),
+        @Property(name = UserConstants.PARAM_SUPPORT_AUTOSAVE,
+                label = "Autosave Support",
+                description = "Configuration option to enable autosave behavior. Note: this config option is present for backwards compatibility with Jackrabbit 2.x and should only be used for broken code that doesn't properly verify the autosave behavior (see Jackrabbit API). If this option is turned on autosave will be enabled by default; otherwise autosave is not supported.",
+                boolValue = false),
+        @Property(name = UserConstants.PARAM_PASSWORD_MAX_AGE,
+                label = "Maximum Password Age",
+                description = "Maximum age in days a password may have. Values greater 0 will implicitly enable password expiry. A value of 0 indicates unlimited password age.",
+                intValue = UserConstants.DEFAULT_PASSWORD_MAX_AGE),
+        @Property(name = UserConstants.PARAM_PASSWORD_INITIAL_CHANGE,
+                label = "Change Password On First Login",
+                description = "When enabled, forces users to change their password upon first login.",
+                boolValue = UserConstants.DEFAULT_PASSWORD_INITIAL_CHANGE)
+})
 public class UserConfigurationImpl extends ConfigurationBase implements UserConfiguration, SecurityConfiguration {
+
+    private final UserAuthenticationFactory defaultAuthFactory = new UserAuthenticationFactoryImpl();
 
     public UserConfigurationImpl() {
         super();
@@ -68,6 +127,19 @@ public class UserConfigurationImpl extends ConfigurationBase implements UserConf
     @Override
     public String getName() {
         return NAME;
+    }
+
+    @Nonnull
+    @Override
+    public ConfigurationParameters getParameters() {
+        ConfigurationParameters params = super.getParameters();
+        if (!params.containsKey(UserConstants.PARAM_USER_AUTHENTICATION_FACTORY)) {
+            return ConfigurationParameters.of(
+                    params,
+                    ConfigurationParameters.of(UserConstants.PARAM_USER_AUTHENTICATION_FACTORY, defaultAuthFactory));
+        } else {
+            return params;
+        }
     }
 
     @Nonnull

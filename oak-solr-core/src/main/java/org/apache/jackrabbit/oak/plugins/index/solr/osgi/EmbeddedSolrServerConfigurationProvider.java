@@ -38,28 +38,34 @@ import org.osgi.service.component.ComponentContext;
 @Property(name = "name", value = "embedded", propertyPrivate = true)
 public class EmbeddedSolrServerConfigurationProvider implements SolrServerConfigurationProvider<EmbeddedSolrServerProvider> {
 
-    @Property(value = SolrServerConfigurationDefaults.SOLR_HOME_PATH)
+    @Property(value = SolrServerConfigurationDefaults.SOLR_HOME_PATH, label = "Solr home directory")
     private static final String SOLR_HOME_PATH = "solr.home.path";
 
-    @Property(value = SolrServerConfigurationDefaults.CORE_NAME)
+    @Property(value = SolrServerConfigurationDefaults.CORE_NAME, label = "Solr Core name")
     private static final String SOLR_CORE_NAME = "solr.core.name";
 
-    @Property(value = SolrServerConfigurationDefaults.SOLR_CONFIG_PATH)
+    @Property(value = SolrServerConfigurationDefaults.SOLR_CONFIG_PATH, label = "Path to specific Solr Core configuration")
     private static final String SOLR_CONFIG_FILE = "solr.config.path";
 
+<<<<<<< HEAD:oak-solr-core/src/main/java/org/apache/jackrabbit/oak/plugins/index/solr/osgi/EmbeddedSolrServerConfigurationProvider.java
     @Property(value = SolrServerConfigurationDefaults.HTTP_PORT)
     private static final String SOLR_HTTP_PORT = "solr.http.port";
 
     @Property(value = SolrServerConfigurationDefaults.CONTEXT)
     private static final String SOLR_CONTEXT = "solr.context";
 
+=======
+>>>>>>> 946101f1867fca376a421a5346a53559d0aaf516:oak-solr-core/src/main/java/org/apache/jackrabbit/oak/plugins/index/solr/osgi/EmbeddedSolrServerConfigurationProvider.java
     private String solrHome;
     private String solrConfigFile;
     private String solrCoreName;
 
+<<<<<<< HEAD:oak-solr-core/src/main/java/org/apache/jackrabbit/oak/plugins/index/solr/osgi/EmbeddedSolrServerConfigurationProvider.java
     private Integer solrHttpPort;
     private String solrContext;
 
+=======
+>>>>>>> 946101f1867fca376a421a5346a53559d0aaf516:oak-solr-core/src/main/java/org/apache/jackrabbit/oak/plugins/index/solr/osgi/EmbeddedSolrServerConfigurationProvider.java
     private SolrServerConfiguration<EmbeddedSolrServerProvider> solrServerConfiguration;
 
 
@@ -73,20 +79,26 @@ public class EmbeddedSolrServerConfigurationProvider implements SolrServerConfig
         solrConfigFile = String.valueOf(componentContext.getProperties().get(SOLR_CONFIG_FILE));
         solrCoreName = String.valueOf(componentContext.getProperties().get(SOLR_CORE_NAME));
 
+<<<<<<< HEAD:oak-solr-core/src/main/java/org/apache/jackrabbit/oak/plugins/index/solr/osgi/EmbeddedSolrServerConfigurationProvider.java
         solrHttpPort = Integer.valueOf(String.valueOf(componentContext.getProperties().get(SOLR_HTTP_PORT)));
         solrContext = String.valueOf(componentContext.getProperties().get(SOLR_CONTEXT));
 
         solrServerConfiguration = new EmbeddedSolrServerConfiguration(solrHome, solrConfigFile, solrCoreName).
                 withHttpConfiguration(solrContext, solrHttpPort);
+=======
+        solrServerConfiguration = new EmbeddedSolrServerConfiguration(solrHome, solrConfigFile, solrCoreName);
+>>>>>>> 946101f1867fca376a421a5346a53559d0aaf516:oak-solr-core/src/main/java/org/apache/jackrabbit/oak/plugins/index/solr/osgi/EmbeddedSolrServerConfigurationProvider.java
     }
 
     @Deactivate
     protected void deactivate() throws Exception {
         solrHome = null;
-        solrHttpPort = null;
         solrConfigFile = null;
         solrCoreName = null;
+<<<<<<< HEAD:oak-solr-core/src/main/java/org/apache/jackrabbit/oak/plugins/index/solr/osgi/EmbeddedSolrServerConfigurationProvider.java
         solrContext = null;
+=======
+>>>>>>> 946101f1867fca376a421a5346a53559d0aaf516:oak-solr-core/src/main/java/org/apache/jackrabbit/oak/plugins/index/solr/osgi/EmbeddedSolrServerConfigurationProvider.java
     }
 
     @Override

@@ -116,7 +116,7 @@ public class SameNamePropertyNodeTest extends AbstractJCRTest {
      */
     @Test
     public void testMicroKernelSupport() throws Exception {
-        NodeStore nodeStore = NodeStoreFixture.MK_IMPL.createNodeStore();
+        NodeStore nodeStore = NodeStoreFixture.DOCUMENT_MK.createNodeStore();
         JackrabbitRepository repository  = (JackrabbitRepository) new Jcr(nodeStore).createRepository();
         try {
             assertFalse(repository.getDescriptorValue(Repository.OPTION_NODE_AND_PROPERTY_WITH_SAME_NAME_SUPPORTED).getBoolean());

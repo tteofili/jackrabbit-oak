@@ -19,6 +19,7 @@ package org.apache.jackrabbit.oak.plugins.index.solr.index;
 import java.util.Set;
 import org.apache.jackrabbit.oak.plugins.index.solr.SolrBaseTest;
 import org.apache.jackrabbit.oak.plugins.index.solr.query.SolrQueryIndex;
+import org.apache.jackrabbit.oak.query.QueryEngineSettings;
 import org.apache.jackrabbit.oak.query.ast.Operator;
 import org.apache.jackrabbit.oak.query.ast.SelectorImpl;
 import org.apache.jackrabbit.oak.query.index.FilterImpl;
@@ -59,7 +60,7 @@ public class SolrIndexHookIT extends SolrBaseTest {
         NodeState indexed = hook.processCommit(before, after, CommitInfo.EMPTY);
 
         QueryIndex queryIndex = new SolrQueryIndex("solr", server, configuration);
-        FilterImpl filter = new FilterImpl(mock(SelectorImpl.class), "");
+        FilterImpl filter = new FilterImpl(mock(SelectorImpl.class), "", new QueryEngineSettings());
         filter.restrictPath("/newnode", Filter.PathRestriction.EXACT);
         filter.restrictProperty("prop", Operator.EQUAL,
                 PropertyValues.newString("val"));
@@ -82,13 +83,13 @@ public class SolrIndexHookIT extends SolrBaseTest {
                 .setProperty("type", "solr");
 
         NodeState before = builder.getNodeState();
-        builder.setProperty("foo", "bar");
+        builder.child("test").setProperty("foo", "bar");
         NodeState after = builder.getNodeState();
 
         NodeState indexed = hook.processCommit(before, after, CommitInfo.EMPTY);
 
         QueryIndex queryIndex = new SolrQueryIndex("solr", server, configuration);
-        FilterImpl filter = new FilterImpl(mock(SelectorImpl.class), "");
+        FilterImpl filter = new FilterImpl(mock(SelectorImpl.class), "", new QueryEngineSettings());
         filter.restrictProperty("foo", Operator.EQUAL,
                 PropertyValues.newString("bar"));
         Cursor cursor = queryIndex.query(filter, indexed);
@@ -96,7 +97,7 @@ public class SolrIndexHookIT extends SolrBaseTest {
         assertTrue("no results found", cursor.hasNext());
         IndexRow next = cursor.next();
         assertNotNull("first returned item should not be null", next);
-        assertEquals("/", next.getPath());
+        assertEquals("/test", next.getPath());
         assertNotNull(next.getValue("foo"));
         assertEquals(PropertyValues.newString("[bar]"), next.getValue("foo"));
         assertFalse(cursor.hasNext());
@@ -112,7 +113,7 @@ public class SolrIndexHookIT extends SolrBaseTest {
                 .setProperty("type", "solr");
 
         NodeState before = builder.getNodeState();
-        builder.setProperty("foo", "bar");
+        builder.child("test").setProperty("foo", "bar");
         builder.child("a").setProperty("foo", "bar");
         builder.child("a").child("b").setProperty("foo", "bar");
         builder.child("a").child("b").child("c").setProperty("foo", "bar");
@@ -122,7 +123,7 @@ public class SolrIndexHookIT extends SolrBaseTest {
         NodeState indexed = hook.processCommit(before, after, CommitInfo.EMPTY);
 
         QueryIndex queryIndex = new SolrQueryIndex("solr", server, configuration);
-        FilterImpl filter = new FilterImpl(mock(SelectorImpl.class), "");
+        FilterImpl filter = new FilterImpl(mock(SelectorImpl.class), "", new QueryEngineSettings());
         filter.restrictProperty("foo", Operator.EQUAL,
                 PropertyValues.newString("bar"));
         filter.restrictFulltextCondition("bar");
@@ -132,7 +133,7 @@ public class SolrIndexHookIT extends SolrBaseTest {
         while (cursor.hasNext()) {
             paths.add(cursor.next().getPath());
         }
-        assertTrue(paths.remove("/"));
+        assertTrue(paths.remove("/test"));
         assertTrue(paths.remove("/a"));
         assertTrue(paths.remove("/a/b"));
         assertTrue(paths.remove("/a/b/c"));

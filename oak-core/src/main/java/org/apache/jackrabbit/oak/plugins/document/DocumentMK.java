@@ -17,6 +17,8 @@
 package org.apache.jackrabbit.oak.plugins.document;
 
 import java.io.InputStream;
+import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -25,11 +27,13 @@ import javax.sql.DataSource;
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.Weigher;
+import com.google.common.util.concurrent.MoreExecutors;
 import com.mongodb.DB;
 
 import org.apache.jackrabbit.mk.api.MicroKernel;
 import org.apache.jackrabbit.mk.api.MicroKernelException;
 import org.apache.jackrabbit.oak.spi.blob.BlobStore;
+import org.apache.jackrabbit.oak.spi.blob.GarbageCollectableBlobStore;
 import org.apache.jackrabbit.oak.spi.blob.MemoryBlobStore;
 import org.apache.jackrabbit.oak.commons.json.JsopReader;
 import org.apache.jackrabbit.oak.commons.json.JsopStream;
@@ -43,20 +47,34 @@ import org.apache.jackrabbit.oak.plugins.document.DocumentNodeState.Children;
 import org.apache.jackrabbit.oak.plugins.document.mongo.MongoBlobStore;
 import org.apache.jackrabbit.oak.plugins.document.memory.MemoryDocumentStore;
 import org.apache.jackrabbit.oak.plugins.document.mongo.MongoDocumentStore;
+import org.apache.jackrabbit.oak.plugins.document.persistentCache.CacheType;
+import org.apache.jackrabbit.oak.plugins.document.persistentCache.PersistentCache;
 import org.apache.jackrabbit.oak.plugins.document.rdb.RDBBlobStore;
 import org.apache.jackrabbit.oak.plugins.document.rdb.RDBDocumentStore;
+import org.apache.jackrabbit.oak.plugins.document.util.StringValue;
+import org.apache.jackrabbit.oak.stats.Clock;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * A MicroKernel implementation that stores the data in a {@link DocumentStore}.
  */
 public class DocumentMK implements MicroKernel {
+    
+    static final Logger LOG = LoggerFactory.getLogger(DocumentMK.class);
+    
+    /**
+     * The path where the persistent cache is stored.
+     */
+    static final String DEFAULT_PERSISTENT_CACHE_URI = 
+            System.getProperty("oak.documentMK.persCache");
 
     /**
      * The threshold where special handling for many child node starts.
      */
     static final int MANY_CHILDREN_THRESHOLD = Integer.getInteger(
             "oak.documentMK.manyChildren", 50);
-    
+
     /**
      * Enable the LIRS cache.
      */
@@ -74,7 +92,7 @@ public class DocumentMK implements MicroKernel {
      */
     static final int CACHE_CONCURRENCY = Integer.getInteger(
             "oak.documentMK.cacheConcurrency", 16);
-        
+
     /**
      * The node store.
      */
@@ -125,7 +143,11 @@ public class DocumentMK implements MicroKernel {
 
     @Override @Nonnull
     public String checkpoint(long lifetime) throws MicroKernelException {
-        return nodeStore.checkpoint(lifetime);
+        try {
+            return nodeStore.checkpoint(lifetime);
+        } catch (DocumentStoreException e) {
+            throw new MicroKernelException(e);
+        }
     }
 
     @Override
@@ -160,9 +182,13 @@ public class DocumentMK implements MicroKernel {
         if (path == null || path.equals("")) {
             path = "/";
         }
-        return nodeStore.diff(fromRevisionId, toRevisionId, path);
+        try {
+            return nodeStore.diff(fromRevisionId, toRevisionId, path);
+        } catch (DocumentStoreException e) {
+            throw new MicroKernelException(e);
+        }
     }
-    
+
     @Override
     public boolean nodeExists(String path, String revisionId)
             throws MicroKernelException {
@@ -171,7 +197,12 @@ public class DocumentMK implements MicroKernel {
         }
         revisionId = revisionId != null ? revisionId : nodeStore.getHeadRevision().toString();
         Revision rev = Revision.fromString(revisionId);
-        DocumentNodeState n = nodeStore.getNode(path, rev);
+        DocumentNodeState n;
+        try {
+            n = nodeStore.getNode(path, rev);
+        } catch (DocumentStoreException e) {
+            throw new MicroKernelException(e);
+        }
         return n != null;
     }
 
@@ -191,40 +222,44 @@ public class DocumentMK implements MicroKernel {
         }
         revisionId = revisionId != null ? revisionId : nodeStore.getHeadRevision().toString();
         Revision rev = Revision.fromString(revisionId);
-        DocumentNodeState n = nodeStore.getNode(path, rev);
-        if (n == null) {
-            return null;
-        }
-        JsopStream json = new JsopStream();
-        boolean includeId = filter != null && filter.contains(":id");
-        includeId |= filter != null && filter.contains(":hash");
-        json.object();
-        n.append(json, includeId);
-        int max;
-        if (maxChildNodes == -1) {
-            max = Integer.MAX_VALUE;
-            maxChildNodes = Integer.MAX_VALUE;
-        } else {
-            // use long to avoid overflows
-            long m = ((long) maxChildNodes) + offset;
-            max = (int) Math.min(m, Integer.MAX_VALUE);
-        }
-        Children c = nodeStore.getChildren(n, null, max);
-        for (long i = offset; i < c.children.size(); i++) {
-            if (maxChildNodes-- <= 0) {
-                break;
+        try {
+            DocumentNodeState n = nodeStore.getNode(path, rev);
+            if (n == null) {
+                return null;
             }
-            String name = c.children.get((int) i);
-            json.key(name).object().endObject();
+            JsopStream json = new JsopStream();
+            boolean includeId = filter != null && filter.contains(":id");
+            includeId |= filter != null && filter.contains(":hash");
+            json.object();
+            n.append(json, includeId);
+            int max;
+            if (maxChildNodes == -1) {
+                max = Integer.MAX_VALUE;
+                maxChildNodes = Integer.MAX_VALUE;
+            } else {
+                // use long to avoid overflows
+                long m = ((long) maxChildNodes) + offset;
+                max = (int) Math.min(m, Integer.MAX_VALUE);
+            }
+            Children c = nodeStore.getChildren(n, null, max);
+            for (long i = offset; i < c.children.size(); i++) {
+                if (maxChildNodes-- <= 0) {
+                    break;
+                }
+                String name = c.children.get((int) i);
+                json.key(name).object().endObject();
+            }
+            if (c.hasMore) {
+                // TODO use a better way to notify there are more children
+                json.key(":childNodeCount").value(Long.MAX_VALUE);
+            } else {
+                json.key(":childNodeCount").value(c.children.size());
+            }
+            json.endObject();
+            return json.toString();
+        } catch (DocumentStoreException e) {
+            throw new MicroKernelException(e);
         }
-        if (c.hasMore) {
-            // TODO use a better way to notify there are more children
-            json.key(":childNodeCount").value(Long.MAX_VALUE);
-        } else {
-            json.key(":childNodeCount").value(c.children.size());
-        }
-        json.endObject();
-        return json.toString();
     }
 
     @Override
@@ -240,6 +275,8 @@ public class DocumentMK implements MicroKernel {
             parseJsonDiff(commit, jsonDiff, rootPath);
             rev = commit.apply();
             success = true;
+        } catch (DocumentStoreException e) {
+            throw new MicroKernelException(e);
         } finally {
             if (!success) {
                 nodeStore.canceled(commit);
@@ -269,8 +306,10 @@ public class DocumentMK implements MicroKernel {
         }
         try {
             return nodeStore.merge(revision, null).toString();
+        } catch (DocumentStoreException e) {
+            throw new MicroKernelException(e);
         } catch (CommitFailedException e) {
-            throw new MicroKernelException(e.getMessage(), e);
+            throw new MicroKernelException(e);
         }
     }
 
@@ -299,13 +338,17 @@ public class DocumentMK implements MicroKernel {
         if (!ancestor.isBranch()) {
             throw new MicroKernelException("Not a branch revision: " + ancestorRevisionId);
         }
-        return nodeStore.reset(branch, ancestor).toString();
+        try {
+            return nodeStore.reset(branch, ancestor).toString();
+        } catch (DocumentStoreException e) {
+            throw new MicroKernelException(e);
+        }
     }
 
     @Override
     public long getLength(String blobId) throws MicroKernelException {
         try {
-            return nodeStore.getBlob(blobId).length();
+            return nodeStore.getBlobStore().getBlobLength(blobId);
         } catch (Exception e) {
             throw new MicroKernelException(e);
         }
@@ -315,7 +358,8 @@ public class DocumentMK implements MicroKernel {
     public int read(String blobId, long pos, byte[] buff, int off, int length)
             throws MicroKernelException {
         try {
-            return nodeStore.getBlobStore().readBlob(blobId, pos, buff, off, length);
+            int read = nodeStore.getBlobStore().readBlob(blobId, pos, buff, off, length);
+            return read < 0 ? 0 : read;
         } catch (Exception e) {
             throw new MicroKernelException(e);
         }
@@ -335,7 +379,7 @@ public class DocumentMK implements MicroKernel {
     public DocumentStore getDocumentStore() {
         return store;
     }
-    
+
     //------------------------------< internal >--------------------------------
 
     private void parseJsonDiff(Commit commit, String json, String rootPath) {
@@ -445,6 +489,7 @@ public class DocumentMK implements MicroKernel {
         private static final long DEFAULT_MEMORY_CACHE_SIZE = 256 * 1024 * 1024;
         private DocumentNodeStore nodeStore;
         private DocumentStore documentStore;
+        private DiffCache diffCache;
         private BlobStore blobStore;
         private int clusterId  = Integer.getInteger("oak.documentMK.clusterId", 0);
         private int asyncDelay = 1000;
@@ -459,71 +504,85 @@ public class DocumentMK implements MicroKernel {
         private boolean useSimpleRevision;
         private long splitDocumentAgeMillis = 5 * 60 * 1000;
         private long offHeapCacheSize = -1;
+        private long maxReplicationLagMillis = TimeUnit.HOURS.toMillis(6);
+        private boolean disableBranches;
+        private Clock clock = Clock.SIMPLE;
+        private Executor executor;
+        private String persistentCacheURI = DEFAULT_PERSISTENT_CACHE_URI;
+        private PersistentCache persistentCache;
 
         public Builder() {
             memoryCacheSize(DEFAULT_MEMORY_CACHE_SIZE);
         }
 
         /**
-         * Set the MongoDB connection to use. By default an in-memory store is used.
-         * 
+         * Use the given MongoDB as backend storage for the DocumentNodeStore.
+         *
          * @param db the MongoDB connection
+         * @param changesSizeMB the size in MB of the capped collection backing
+         *                      the MongoDiffCache.
          * @return this
          */
-        public Builder setMongoDB(DB db) {
+        public Builder setMongoDB(DB db, int changesSizeMB, int blobCacheSizeMB) {
             if (db != null) {
                 if (this.documentStore == null) {
                     this.documentStore = new MongoDocumentStore(db, this);
                 }
 
                 if (this.blobStore == null) {
-                    this.blobStore = new MongoBlobStore(db);
+                    GarbageCollectableBlobStore s = new MongoBlobStore(db, blobCacheSizeMB * 1024 * 1024L);
+                    PersistentCache p = getPersistentCache();
+                    if (p != null) {
+                        s = p.wrapBlobStore(s);
+                    }
+                    this.blobStore = s;
+                }
+
+                if (this.diffCache == null) {
+                    this.diffCache = new MongoDiffCache(db, changesSizeMB, this);
                 }
             }
             return this;
         }
 
         /**
-         * Sets a JDBC connection URL to use for the RDB document and blob
-         * stores.
-         * 
+         * Set the MongoDB connection to use. By default an in-memory store is used.
+         *
+         * @param db the MongoDB connection
          * @return this
          */
-        public Builder setRDBConnection(String jdbcurl, String username, String password) {
-            this.documentStore = new RDBDocumentStore(jdbcurl, username, password, this);
-            this.blobStore = new RDBBlobStore(jdbcurl, username, password);
-            return this;
-        }
-
-        /**
-         * Sets a JDBC connection URLs to use for the RDB document and blob
-         * stores.
-         * 
-         * @return this
-         */
-        public Builder setRDBConnection(String dsjdbcurl, String dsusername, String dspassword, String bsjdbcurl,
-                String bsusername, String bspassword) {
-            this.documentStore = new RDBDocumentStore(dsjdbcurl, dsusername, dspassword, this);
-            this.blobStore = new RDBBlobStore(bsjdbcurl, bsusername, bspassword);
-            return this;
+        public Builder setMongoDB(DB db) {
+            return setMongoDB(db, 8, 16);
         }
 
         /**
          * Sets a {@link DataSource} to use for the RDB document and blob
          * stores.
-         * 
+         *
          * @return this
          */
         public Builder setRDBConnection(DataSource ds) {
             this.documentStore = new RDBDocumentStore(ds, this);
-            this.blobStore = new RDBBlobStore(ds);
+            if(this.blobStore == null) {
+                this.blobStore = new RDBBlobStore(ds);
+            }
+            return this;
+        }
+        
+        /**
+         * Sets the persistent cache option.
+         *
+         * @return this
+         */
+        public Builder setPersistentCache(String persistentCache) {
+            this.persistentCacheURI = persistentCache;
             return this;
         }
 
         /**
          * Sets a {@link DataSource}s to use for the RDB document and blob
          * stores.
-         * 
+         *
          * @return this
          */
         public Builder setRDBConnection(DataSource documentStoreDataSource, DataSource blobStoreDataSource) {
@@ -534,7 +593,7 @@ public class DocumentMK implements MicroKernel {
 
         /**
          * Use the timing document store wrapper.
-         * 
+         *
          * @param timing whether to use the timing wrapper.
          * @return this
          */
@@ -558,7 +617,7 @@ public class DocumentMK implements MicroKernel {
 
         /**
          * Set the document store to use. By default an in-memory store is used.
-         * 
+         *
          * @param documentStore the document store
          * @return this
          */
@@ -566,7 +625,7 @@ public class DocumentMK implements MicroKernel {
             this.documentStore = documentStore;
             return this;
         }
-        
+
         public DocumentStore getDocumentStore() {
             if (documentStore == null) {
                 documentStore = new MemoryDocumentStore();
@@ -581,9 +640,21 @@ public class DocumentMK implements MicroKernel {
             return nodeStore;
         }
 
+        public DiffCache getDiffCache() {
+            if (diffCache == null) {
+                diffCache = new MemoryDiffCache(this);
+            }
+            return diffCache;
+        }
+
+        public Builder setDiffCache(DiffCache diffCache) {
+            this.diffCache = diffCache;
+            return this;
+        }
+
         /**
          * Set the blob store to use. By default an in-memory store is used.
-         * 
+         *
          * @param blobStore the blob store
          * @return this
          */
@@ -602,7 +673,7 @@ public class DocumentMK implements MicroKernel {
         /**
          * Set the cluster id to use. By default, 0 is used, meaning the cluster
          * id is automatically generated.
-         * 
+         *
          * @param clusterId the cluster id
          * @return this
          */
@@ -610,15 +681,15 @@ public class DocumentMK implements MicroKernel {
             this.clusterId = clusterId;
             return this;
         }
-        
+
         public int getClusterId() {
             return clusterId;
         }
-        
+
         /**
          * Set the maximum delay to write the last revision to the root node. By
          * default 1000 (meaning 1 second) is used.
-         * 
+         *
          * @param asyncDelay in milliseconds
          * @return this
          */
@@ -626,7 +697,7 @@ public class DocumentMK implements MicroKernel {
             this.asyncDelay = asyncDelay;
             return this;
         }
-        
+
         public int getAsyncDelay() {
             return asyncDelay;
         }
@@ -643,7 +714,7 @@ public class DocumentMK implements MicroKernel {
         public Builder memoryCacheSize(long memoryCacheSize) {
             this.nodeCacheSize = memoryCacheSize * 25 / 100;
             this.childrenCacheSize = memoryCacheSize * 10 / 100;
-            this.diffCacheSize = memoryCacheSize * 2 / 100;
+            this.diffCacheSize = memoryCacheSize * 5 / 100;
             this.docChildrenCacheSize = memoryCacheSize * 3 / 100;
             this.documentCacheSize = memoryCacheSize - nodeCacheSize - childrenCacheSize - diffCacheSize - docChildrenCacheSize;
             return this;
@@ -677,12 +748,12 @@ public class DocumentMK implements MicroKernel {
         public boolean isUseSimpleRevision() {
             return useSimpleRevision;
         }
-        
+
         public Builder setSplitDocumentAgeMillis(long splitDocumentAgeMillis) {
             this.splitDocumentAgeMillis = splitDocumentAgeMillis;
             return this;
         }
-        
+
         public long getSplitDocumentAgeMillis() {
             return splitDocumentAgeMillis;
         }
@@ -700,17 +771,109 @@ public class DocumentMK implements MicroKernel {
             return this;
         }
 
+        public Executor getExecutor() {
+            if(executor == null){
+                return MoreExecutors.sameThreadExecutor();
+            }
+            return executor;
+        }
+
+        public Builder setExecutor(Executor executor){
+            this.executor = executor;
+            return this;
+        }
+
+        public Builder clock(Clock clock) {
+            this.clock = clock;
+            return this;
+        }
+
+        public Clock getClock() {
+            return clock;
+        }
+
+        public Builder setMaxReplicationLag(long duration, TimeUnit unit){
+            maxReplicationLagMillis = unit.toMillis(duration);
+            return this;
+        }
+
+        public long getMaxReplicationLagMillis() {
+            return maxReplicationLagMillis;
+        }
+
+        public Builder disableBranches() {
+            disableBranches = true;
+            return this;
+        }
+
+        public boolean isDisableBranches() {
+            return disableBranches;
+        }
+
         /**
          * Open the DocumentMK instance using the configured options.
-         * 
+         *
          * @return the DocumentMK instance
          */
         public DocumentMK open() {
             return new DocumentMK(this);
         }
         
-        public <K extends CacheValue, V extends CacheValue> Cache<K, V> buildCache(long maxWeight) {
-            if (LIRS_CACHE) {
+        public Cache<PathRev, DocumentNodeState> buildNodeCache(DocumentNodeStore store) {
+            return buildCache(CacheType.NODE, getNodeCacheSize(), store, null);
+        }
+        
+        public Cache<PathRev, DocumentNodeState.Children> buildChildrenCache() {
+            return buildCache(CacheType.CHILDREN, getChildrenCacheSize(), null, null);            
+        }
+        
+        public Cache<StringValue, NodeDocument.Children> buildDocChildrenCache() {
+            return buildCache(CacheType.DOC_CHILDREN, getDocChildrenCacheSize(), null, null);
+        }
+        
+        public Cache<PathRev, StringValue> buildDiffCache() {
+            return buildCache(CacheType.DIFF, getDiffCacheSize(), null, null);
+        }
+
+        public Cache<CacheValue, NodeDocument> buildDocumentCache(DocumentStore docStore) {
+            return buildCache(CacheType.DOCUMENT, getDocumentCacheSize(), null, docStore);
+        }
+
+        private <K extends CacheValue, V extends CacheValue> Cache<K, V> buildCache(
+                CacheType cacheType,
+                long maxWeight,
+                DocumentNodeStore docNodeStore,
+                DocumentStore docStore
+                ) {
+            Cache<K, V> cache = buildCache(maxWeight);
+            PersistentCache p = getPersistentCache();
+            if (p != null) {
+                if (docNodeStore != null) {
+                    docNodeStore.setPersistentCache(p);
+                }
+                cache = p.wrap(docNodeStore, docStore, cache, cacheType);
+            }
+            return cache;
+        }
+        
+        private PersistentCache getPersistentCache() {
+            if (persistentCacheURI == null) {
+                return null;
+            }
+            if (persistentCache == null) {
+                try {
+                    persistentCache = new PersistentCache(persistentCacheURI);
+                } catch (Throwable e) {
+                    LOG.warn("Persistent cache not available; please disable the configuration", e);
+                    throw new IllegalArgumentException(e);
+                }
+            }
+            return persistentCache;
+        }
+        
+        private <K extends CacheValue, V extends CacheValue> Cache<K, V> buildCache(
+                long maxWeight) {
+            if (LIRS_CACHE || persistentCacheURI != null) {
                 return CacheLIRS.newBuilder().
                         weigher(weigher).
                         averageWeight(2000).
@@ -725,6 +888,7 @@ public class DocumentMK implements MicroKernel {
                     recordStats().
                     build();
         }
-    }
 
+    }
+    
 }

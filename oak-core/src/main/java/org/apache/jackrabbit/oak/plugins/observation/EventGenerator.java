@@ -71,11 +71,21 @@ public class EventGenerator {
     private final LinkedList<Runnable> continuations = newLinkedList();
 
     /**
+     * Creates a new generator instance. Changes to process need to be added
+     * through {@link #addHandler(NodeState, NodeState, EventHandler)}
+     */
+    public EventGenerator() {}
+
+    /**
      * Creates a new generator instance for processing the given changes.
      */
     public EventGenerator(
             @Nonnull NodeState before, @Nonnull NodeState after,
             @Nonnull EventHandler handler) {
+        continuations.addFirst(new Continuation(handler, before, after, 0));
+    }
+
+    public void addHandler(NodeState before, NodeState after, EventHandler handler) {
         continuations.addFirst(new Continuation(handler, before, after, 0));
     }
 
@@ -318,7 +328,7 @@ public class EventGenerator {
         private boolean fullQueue() {
             if (counter > skip // must have processed at least one event
                     && continuations.size() >= MAX_QUEUED_CONTINUATIONS) {
-                continuations.addFirst(new Continuation(
+                continuations.add(new Continuation(
                         handler, this.before, this.after, counter));
                 return true;
             } else {

@@ -26,11 +26,13 @@ import java.util.Properties;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-
 import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
+import org.apache.jackrabbit.oak.commons.PropertiesUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -83,7 +85,9 @@ public final class ConfigurationParameters implements Map<String, Object> {
     public static ConfigurationParameters of(@Nonnull ConfigurationParameters... params) {
         Map<String, Object> m = new HashMap<String, Object>();
         for (ConfigurationParameters cp : params) {
-            m.putAll(cp.options);
+            if (cp != null) {
+                m.putAll(cp.options);
+            }
         }
         return m.isEmpty() ? EMPTY : new ConfigurationParameters(m);
     }
@@ -139,6 +143,19 @@ public final class ConfigurationParameters implements Map<String, Object> {
             options.put(String.valueOf(e.getKey()), e.getValue());
         }
         return new ConfigurationParameters(options);
+    }
+
+    /**
+     * Creates new a single valued configuration parameters instance from the
+     * given key and value.
+     *
+     * @param key The key
+     * @param value The value
+     * @return a new instance of configuration parameters.
+     */
+    @Nonnull
+    public static ConfigurationParameters of(@Nonnull String key, @Nonnull Object value) {
+        return new ConfigurationParameters(ImmutableMap.of(key, value));
     }
 
     /**
@@ -244,6 +261,24 @@ public final class ConfigurationParameters implements Map<String, Object> {
                 return (T) Double.valueOf(str);
             } else if (clazz == Boolean.class || clazz == boolean.class) {
                 return (T) Boolean.valueOf(str);
+            } else if (clazz == String[].class){
+                return (T) PropertiesUtil.toStringArray(configProperty, (String[]) defaultValue);
+            } else if (clazz == Set.class || Set.class.isAssignableFrom(clazz)) {
+                if (configProperty instanceof Set) {
+                    return (T) configProperty;
+                } else if (configProperty instanceof Collection) {
+                    return (T) ImmutableSet.copyOf((Collection) configProperty);
+                } else if (configProperty.getClass().isArray()) {
+                    return (T) ImmutableSet.copyOf((Object[]) configProperty);
+                } else {
+                    String[] arr = PropertiesUtil.toStringArray(configProperty);
+                    if (arr != null) {
+                        return (T) ImmutableSet.copyOf(arr);
+                    } else {
+                        log.warn("Unsupported target type {} for value {}", clazz.getName(), str);
+                        throw new IllegalArgumentException("Cannot convert config entry " + str + " to " + clazz.getName());
+                    }
+                }
             } else {
                 // unsupported target type
                 log.warn("Unsupported target type {} for value {}", clazz.getName(), str);

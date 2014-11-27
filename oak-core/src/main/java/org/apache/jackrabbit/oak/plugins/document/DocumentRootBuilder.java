@@ -35,13 +35,13 @@ import org.apache.jackrabbit.oak.spi.state.NodeState;
  * This implementation tracks the number of pending changes and purges them to
  * a private branch of the underlying store if a certain threshold is met.
  */
-class DocumentRootBuilder extends MemoryNodeBuilder {
+class DocumentRootBuilder extends AbstractDocumentNodeBuilder {
 
     /**
      * Number of content updates that need to happen before the updates
      * are automatically purged to the private branch.
      */
-    private static final int UPDATE_LIMIT = Integer.getInteger("update.limit", 1000);
+    static final int UPDATE_LIMIT = Integer.getInteger("update.limit", 10000);
 
     /**
      * The underlying store
@@ -67,7 +67,8 @@ class DocumentRootBuilder extends MemoryNodeBuilder {
      */
     private int updates;
 
-    DocumentRootBuilder(DocumentNodeState base, DocumentNodeStore store) {
+    DocumentRootBuilder(@Nonnull DocumentNodeState base,
+                        @Nonnull DocumentNodeStore store) {
         super(checkNotNull(base));
         this.store = checkNotNull(store);
         this.base = base;
@@ -100,6 +101,17 @@ class DocumentRootBuilder extends MemoryNodeBuilder {
         }
     }
 
+    @Nonnull
+    @Override
+    public NodeState getNodeState() {
+        if (DocumentNodeStoreBranch.getCurrentBranch() != null) {
+            purge();
+            return branch.getHead();
+        } else {
+            return super.getNodeState();
+        }
+    }
+
     @Override
     public Blob createBlob(InputStream stream) throws IOException {
         return store.createBlob(stream);
@@ -111,7 +123,7 @@ class DocumentRootBuilder extends MemoryNodeBuilder {
      * Rebase this builder on top of the head of the underlying store
      */
     NodeState rebase() {
-        NodeState head = getNodeState();
+        NodeState head = super.getNodeState();
         NodeState inMemBase = super.getBaseState();
 
         // Rebase branch
@@ -123,7 +135,7 @@ class DocumentRootBuilder extends MemoryNodeBuilder {
 
         // Set new base and return rebased head
         base = branch.getBase();
-        return getNodeState();
+        return super.getNodeState();
     }
 
     /**
@@ -185,7 +197,7 @@ class DocumentRootBuilder extends MemoryNodeBuilder {
     }
 
     private void purge() {
-        branch.setRoot(getNodeState());
+        branch.setRoot(super.getNodeState());
         super.reset(branch.getHead());
         updates = 0;
     }

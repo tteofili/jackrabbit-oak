@@ -18,7 +18,6 @@ package org.apache.jackrabbit.oak.plugins.document;
 
 import javax.annotation.Nonnull;
 
-import org.apache.jackrabbit.mk.api.MicroKernelException;
 import org.apache.jackrabbit.oak.plugins.document.util.Utils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -65,13 +64,13 @@ class Collision {
      * Marks the collision in the document store. Either our or their
      * revision is annotated with a collision marker. Their revision is
      * marked if it is not yet committed, otherwise our revision is marked.
-     * 
+     *
      * @param store the document store.
      * @return the revision that was marked. Either our or their.
-     * @throws MicroKernelException if the mark operation fails.
+     * @throws DocumentStoreException if the mark operation fails.
      */
     @Nonnull
-    Revision mark(DocumentStore store) throws MicroKernelException {
+    Revision mark(DocumentStore store) throws DocumentStoreException {
         // first try to mark their revision
         if (markCommitRoot(document, theirRev, store)) {
             return theirRev;
@@ -81,7 +80,7 @@ class Collision {
         document.deepCopy(newDoc);
         UpdateUtils.applyChanges(newDoc, ourOp, context.getRevisionComparator());
         if (!markCommitRoot(newDoc, ourRev, store)) {
-            throw new MicroKernelException("Unable to annotate our revision "
+            throw new IllegalStateException("Unable to annotate our revision "
                     + "with collision marker. Our revision: " + ourRev
                     + ", document:\n" + newDoc.format());
         }
@@ -91,7 +90,7 @@ class Collision {
     /**
      * Marks the commit root of the change to the given <code>document</code> in
      * <code>revision</code>.
-     * 
+     *
      * @param document the document.
      * @param revision the revision of the commit to annotated with a collision
      *            marker.
@@ -127,7 +126,12 @@ class Collision {
         if (commitRoot.isCommitted(revision)) {
             return false;
         }
-        op.setMapEntry(NodeDocument.COLLISIONS, revision, true);
+        // check if there is already a collision marker
+        if (commitRoot.getLocalMap(NodeDocument.COLLISIONS).containsKey(revision)) {
+            // already marked
+            return true;
+        }
+        NodeDocument.addCollision(op, revision);
         commitRoot = store.createOrUpdate(Collection.NODES, op);
         // check again on old document right before our update was applied
         if (commitRoot.isCommitted(revision)) {
@@ -138,11 +142,11 @@ class Collision {
                 new Object[]{commitRootPath, p, revision});
         return true;
     }
-    
+
     private static void throwNoCommitRootException(@Nonnull Revision revision,
                                                    @Nonnull Document document)
-                                                           throws MicroKernelException {
-        throw new MicroKernelException("No commit root for revision: "
+                                                           throws DocumentStoreException {
+        throw new DocumentStoreException("No commit root for revision: "
                 + revision + ", document: " + document.format());
     }
 }

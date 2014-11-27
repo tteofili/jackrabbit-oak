@@ -16,16 +16,98 @@
  */
 package org.apache.jackrabbit.oak.plugins.index.property;
 
+import com.google.common.base.Predicate;
+
 
 /**
  * convenience orderable object that represents a tuple of values and paths
- * 
+ *
  * where the values are the indexed keys from the index and the paths are the path which hold the
  * key
  */
 public class ValuePathTuple implements Comparable<ValuePathTuple> {
     private String value;
     private String path;
+
+    /**
+     * convenience Predicate for easing the testing
+     */
+    public static class GreaterThanPredicate implements Predicate<ValuePathTuple> {
+        /**
+         * the value for comparison
+         */
+        private String value;
+
+        /**
+         * whether we should include the value in the result
+         */
+        private boolean include;
+
+        public GreaterThanPredicate(String value) {
+            this.value = value;
+        }
+
+        public GreaterThanPredicate(String value, boolean include) {
+            this.value = value;
+            this.include = include;
+        }
+
+        @Override
+        public boolean apply(ValuePathTuple arg0) {
+            return (value.compareTo(arg0.getValue()) < 0)
+                   || (include && value.equals(arg0.getValue()));
+        }
+    };
+
+    public static class LessThanPredicate implements Predicate<ValuePathTuple> {
+        /**
+         * the value for comparison
+         */
+        private String value;
+
+        /**
+         * whether we should include the value in the result
+         */
+        private boolean include;
+
+        public LessThanPredicate(String value) {
+            this.value = value;
+        }
+
+        public LessThanPredicate(String value, boolean include) {
+            this.value = value;
+            this.include = include;
+        }
+
+        @Override
+        public boolean apply(ValuePathTuple arg0) {
+            return (value.compareTo(arg0.getValue()) > 0)
+                || (include && value.equals(arg0.getValue()));
+        }
+
+    }
+
+    public static class BetweenPredicate implements Predicate<ValuePathTuple> {
+        private String start;
+        private String end;
+        private boolean includeStart;
+        private boolean includeEnd;
+        
+        public BetweenPredicate(String start, String end, boolean includeStart, boolean includeEnd) {
+            this.start = start;
+            this.end = end;
+            this.includeStart = includeStart;
+            this.includeEnd = includeEnd;
+        }
+
+        @Override
+        public boolean apply(ValuePathTuple arg0) {
+            String other = arg0.getValue();
+            return 
+                (start.compareTo(other) < 0 || (includeStart && start.equals(other)))
+                && (end.compareTo(other) > 0 || (includeEnd && end.equals(other)));
+        }
+    }
 
     ValuePathTuple(String value, String path) {
         this.value = value;
@@ -97,5 +179,15 @@ public class ValuePathTuple implements Comparable<ValuePathTuple> {
 
     public String getPath() {
         return path;
+    }
+
+    @Override
+    public String toString() {
+        return String.format(
+            "value: %s - path: %s - hash: %s",
+            value,
+            path,
+            super.toString()
+        );
     }
 }

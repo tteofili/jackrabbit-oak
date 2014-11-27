@@ -235,16 +235,29 @@ public class MicroKernelImplTest {
     public void rebaseAddExistingNode() {
         mk.commit("", "+\"/x\":{}", null, null);
         String branch = mk.branch(null);
-        branch = mk.commit("", "+\"/x/a\":{}", branch, null);
+        branch = mk.commit("", "+\"/x/a\":{\"foo\":true}", branch, null);
         mk.commit("", "+\"/x/a\":{\"b\":{}}", null, null);
 
         branch = mk.rebase(branch, null);
 
         assertTrue(mk.nodeExists("/x/a/b", branch));
-        String conflict = mk.getNodes("/x/:conflict", branch, 100, 0, -1, null);
-        assertEquals(
-            "{\":childNodeCount\":1,\"addExistingNode\":{\":childNodeCount\":1,\"a\":{\":childNodeCount\":0}}}",
-            conflict);
+        assertFalse(mk.nodeExists("/x/a/foo", null));
+        String branchNode = mk.getNodes("/x", branch, 100, 0, -1, null);
+        assertFalse(branchNode.contains(":conflict"));
+    }
+
+    @Test
+    public void rebaseAddExistingConflictingNode() {
+        mk.commit("", "+\"/x\":{}", null, null);
+        String branch = mk.branch(null);
+        branch = mk.commit("", "+\"/x/a\":{\"foo\":true}", branch, null);
+        mk.commit("", "+\"/x/a\":{\"foo\":false,\"b\":{}}", null, null);
+
+        branch = mk.rebase(branch, null);
+
+        assertTrue(mk.nodeExists("/x/a/b", branch));
+        String branchNode = mk.getNodes("/x", branch, 100, 0, -1, null);
+        assertTrue(branchNode.contains(":conflict"));
     }
 
     @Test
@@ -259,9 +272,9 @@ public class MicroKernelImplTest {
         String branchNode = mk.getNodes("/x/y", branch, 0, 0, -1, null);
         assertTrue(branchNode.contains("\"p\":99"));
         String conflict = mk.getNodes("/x/y/:conflict", branch, 100, 0, -1, null);
-        assertEquals(
-                "{\":childNodeCount\":1,\"addExistingProperty\":{\"q\":42,\"p\":42,\":childNodeCount\":0}}",
-                conflict);
+        assertTrue(conflict,
+                conflict.equals("{\":childNodeCount\":1,\"addExistingProperty\":{\"q\":42,\"p\":42,\":childNodeCount\":0}}") ||
+                conflict.equals("{\":childNodeCount\":1,\"addExistingProperty\":{\"p\":42,\"q\":42,\":childNodeCount\":0}}"));
     }
 
     @Test

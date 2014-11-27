@@ -19,11 +19,12 @@
 package org.apache.jackrabbit.oak.jcr;
 
 import static java.util.Arrays.asList;
+import static javax.jcr.ImportUUIDBehavior.IMPORT_UUID_CREATE_NEW;
+import static javax.jcr.Repository.OPTION_NODE_AND_PROPERTY_WITH_SAME_NAME_SUPPORTED;
 import static org.apache.jackrabbit.commons.JcrUtils.getChildNodes;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 import static org.junit.Assume.assumeTrue;
@@ -42,7 +43,6 @@ import java.util.Set;
 
 import javax.jcr.Binary;
 import javax.jcr.GuestCredentials;
-import javax.jcr.ImportUUIDBehavior;
 import javax.jcr.InvalidItemStateException;
 import javax.jcr.Item;
 import javax.jcr.ItemExistsException;
@@ -65,6 +65,7 @@ import javax.jcr.nodetype.NodeDefinition;
 import javax.jcr.nodetype.NodeType;
 import javax.jcr.nodetype.NodeTypeManager;
 import javax.jcr.nodetype.NodeTypeTemplate;
+import javax.jcr.nodetype.PropertyDefinitionTemplate;
 
 import org.apache.jackrabbit.JcrConstants;
 import org.apache.jackrabbit.api.JackrabbitNode;
@@ -76,6 +77,10 @@ import org.apache.jackrabbit.commons.jackrabbit.SimpleReferenceBinary;
 import org.apache.jackrabbit.core.data.RandomInputStream;
 import org.apache.jackrabbit.oak.jcr.repository.RepositoryImpl;
 import org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants;
+import org.apache.jackrabbit.spi.QValue;
+import org.apache.jackrabbit.spi.commons.conversion.DefaultNamePathResolver;
+import org.apache.jackrabbit.spi.commons.value.QValueFactoryImpl;
+import org.apache.jackrabbit.spi.commons.value.QValueValue;
 import org.junit.Before;
 import org.junit.Ignore;
 import org.junit.Test;
@@ -349,33 +354,6 @@ public class RepositoryTest extends AbstractRepositoryTest {
         root.getNode("/foo");
     }
 
-    @Test(expected = RepositoryException.class)
-    public void testExceptionThrownForInvalidPath() throws RepositoryException {
-        Session session = getAdminSession();
-        session.itemExists("//jcr:content");
-    }
-
-    @Test
-    @Ignore("OAK-1174")  // FIXME OAK-1174
-    public void testInvalidName() throws RepositoryException {
-        Session session = getAdminSession();
-
-        RepositoryException exception = null;
-        try {
-            session.itemExists("/jcr:cont]ent");
-        } catch (RepositoryException e) {
-            exception = e;
-        }
-
-        session.setNamespacePrefix("foo", "http://foo.bar");
-        try {
-            session.itemExists("/jcr:cont]ent");
-            assertNull(exception);
-        } catch (RepositoryException e) {
-            assertNotNull(exception);
-        }
-    }
-
     @Test
     public void getNodeByIdentifier() throws RepositoryException {
         Node node = getNode("/foo");
@@ -596,6 +574,20 @@ public class RepositoryTest extends AbstractRepositoryTest {
     }
 
     @Test
+    public void testIsNew() throws RepositoryException, InterruptedException {
+        Session session = getAdminSession();
+        Node root = session.getRootNode();
+        Node node1 = root.addNode("node1");
+        session.save();
+
+        node1.remove();
+        Node node2 = root.addNode("node2");
+        assertTrue("The Node is just added", node2.isNew());
+        Node node1Again = root.addNode("node1");
+        assertTrue("The Node is just added but has a remove in same commit", node1Again.isNew());
+    }
+
+    @Test
     public void testAddNodeWithExpandedName() throws RepositoryException {
         Session session = getAdminSession();
 
@@ -654,6 +646,29 @@ public class RepositoryTest extends AbstractRepositoryTest {
         Node parentNode = getNode(TEST_PATH);
         addProperty(parentNode, "string", getAdminSession().getValueFactory().createValue("string value"));
     }
+
+    @Test
+    public void testGetItemReturnsNodeBeforeProperty() throws RepositoryException {
+        String snnpSupported = getRepository().getDescriptor(OPTION_NODE_AND_PROPERTY_WITH_SAME_NAME_SUPPORTED);
+        assumeTrue(Boolean.valueOf(snnpSupported));
+
+        String newNodeName = "getItemTest";
+        String nodeAndPropertyName = "subnode";
+
+        Session session = getAdminSession();
+        Node root = session.getRootNode();
+        assertFalse(root.hasNode(newNodeName));
+        Node newNode = root.addNode(newNodeName, NodeTypeConstants.NT_OAK_UNSTRUCTURED);
+
+        newNode.setProperty(nodeAndPropertyName, "prop value");
+        newNode.addNode(nodeAndPropertyName);
+        session.save();
+
+        Item item = session.getItem("/" + newNodeName + "/" + nodeAndPropertyName);
+
+        assertTrue("should retrieve Node before property", item.isNode());
+    }
+
 
     @Test
     public void addMultiValuedString() throws RepositoryException {
@@ -983,6 +998,18 @@ public class RepositoryTest extends AbstractRepositoryTest {
         InputStream is = new NumberStream(123456);
         Binary bin = getAdminSession().getValueFactory().createBinary(is);
         addProperty(parentNode, "bigBinary", getAdminSession().getValueFactory().createValue(bin));
+    }
+
+    @Test
+    public void addAlienBinaryProperty() throws RepositoryException, IOException {
+        Session session = getAdminSession();
+        QValue qValue = QValueFactoryImpl.getInstance().create("binaryValue".getBytes());
+        Value value = new QValueValue(qValue, new DefaultNamePathResolver(session));
+        getNode(TEST_PATH).setProperty("binary", value);
+        session.save();
+
+        Value valueAgain = getNode(TEST_PATH).getProperty("binary").getValue();
+        assertEqualStream(value.getBinary().getStream(), valueAgain.getBinary().getStream());
     }
 
     @Test
@@ -1602,8 +1629,8 @@ public class RepositoryTest extends AbstractRepositoryTest {
         Session session1 = createAdminSession();
         Session session2 = createAdminSession();
         try {
-            session1.getRootNode().addNode("node");
-            session2.getRootNode().addNode("node").setProperty("p", "v");
+            session1.getRootNode().addNode("node").setProperty("p", "v1");
+            session2.getRootNode().addNode("node").setProperty("p", "v2");
             assertTrue(session1.getRootNode().hasNode("node"));
             assertTrue(session2.getRootNode().hasNode("node"));
 
@@ -2043,7 +2070,7 @@ public class RepositoryTest extends AbstractRepositoryTest {
         node.remove();
         session.save();
         session.importXML("/", new ByteArrayInputStream(out.toByteArray()),
-                ImportUUIDBehavior.IMPORT_UUID_CREATE_NEW);
+                IMPORT_UUID_CREATE_NEW);
         session.save();
         node = session.getNode("/node");
         assertFalse(uuid.equals(node.getIdentifier()));
@@ -2052,7 +2079,7 @@ public class RepositoryTest extends AbstractRepositoryTest {
     @Test
     public void testReferenceBinary() throws RepositoryException {
         ValueFactory valueFactory = getAdminSession().getValueFactory();
-        Binary binary = valueFactory.createBinary(new RandomInputStream(1, 256*1024));
+        Binary binary = valueFactory.createBinary(new RandomInputStream(1, 256 * 1024));
 
         String reference = binary instanceof ReferenceBinary
             ? ((ReferenceBinary) binary).getReference()
@@ -2067,6 +2094,52 @@ public class RepositoryTest extends AbstractRepositoryTest {
         } finally {
             session.logout();
         }
+    }
+
+    @Test
+    public void manyTransientChanges() throws RepositoryException {
+        // test for OAK-1670, run with -Dupdate.limit=100
+        Session session = getAdminSession();
+        Node test = session.getRootNode().getNode(TEST_NODE);
+        Node foo = test.addNode("foo");
+        session.save();
+        test.setProperty("p", "value");
+        for (int i = 0; i < 76; i++) {
+            test.addNode("n" + i);
+        }
+        Node t = foo.addNode("test");
+        t.setProperty("prop", "value");
+        session.getNode(TEST_PATH + "/foo/test").setProperty("prop", "value");
+        session.save();
+
+        session.logout();
+    }
+
+    @Test // OAK-2038
+    public void importWithRegisteredType() throws Exception {
+        Session session = getAdminSession();
+        NodeTypeManager ntMgr = getAdminSession().getWorkspace().getNodeTypeManager();
+        NodeTypeTemplate ntd = ntMgr.createNodeTypeTemplate();
+        ntd.setName("fooType");
+        PropertyDefinitionTemplate propDefTemplate = ntMgr.createPropertyDefinitionTemplate();
+        propDefTemplate.setName("fooProp");
+        propDefTemplate.setRequiredType(PropertyType.STRING);
+        ntd.getPropertyDefinitionTemplates().add(propDefTemplate);
+        ntMgr.registerNodeType(ntd, false);
+
+        Node node = session.getRootNode().addNode("node", "fooType");
+        node.setProperty("fooProp", "fooValue");
+        session.save();
+        
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        session.exportDocumentView("/node", out, true, false);
+        node.remove();
+        session.save();
+
+        session.getWorkspace().importXML(
+                "/", new ByteArrayInputStream(out.toByteArray()), IMPORT_UUID_CREATE_NEW);
+        session.save();
+        assertEquals("fooValue", session.getProperty("/node/fooProp").getString());
     }
 
     //------------------------------------------------------------< private >---

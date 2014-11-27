@@ -19,29 +19,43 @@ package org.apache.jackrabbit.oak.plugins.index;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.collect.Lists.newArrayList;
 import static com.google.common.collect.Lists.newArrayListWithCapacity;
+import static org.apache.jackrabbit.oak.api.Type.BOOLEAN;
+import static org.apache.jackrabbit.oak.commons.PathUtils.concat;
 import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.ASYNC_PROPERTY_NAME;
+import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.ASYNC_REINDEX_VALUE;
 import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.INDEX_DEFINITIONS_NAME;
+import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.REINDEX_ASYNC_PROPERTY_NAME;
+import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.REINDEX_COUNT;
 import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.REINDEX_PROPERTY_NAME;
 import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.TYPE_PROPERTY_NAME;
 import static org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState.MISSING_NODE;
+import static org.apache.jackrabbit.oak.spi.commit.CompositeEditor.compose;
+import static org.apache.jackrabbit.oak.spi.commit.EditorDiff.process;
+import static org.apache.jackrabbit.oak.spi.commit.VisibleEditor.wrap;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
 
 import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.api.PropertyState;
-import org.apache.jackrabbit.oak.spi.commit.CompositeEditor;
+import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.spi.commit.Editor;
-import org.apache.jackrabbit.oak.spi.commit.EditorDiff;
-import org.apache.jackrabbit.oak.spi.commit.VisibleEditor;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
+import org.apache.jackrabbit.oak.spi.state.NodeStateUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.google.common.base.Objects;
 
-class IndexUpdate implements Editor {
+public class IndexUpdate implements Editor {
+
+    private final Logger log = LoggerFactory.getLogger(getClass());
 
     private final IndexEditorProvider provider;
 
@@ -51,6 +65,15 @@ class IndexUpdate implements Editor {
 
     private final NodeBuilder builder;
 
+    /** Parent updater, or {@code null} if this is the root updater. */
+    private final IndexUpdate parent;
+
+    /** Name of this node, or {@code null} for the root node. */
+    private final String name;
+
+    /** Path of this editor, built lazily in {@link #getPath()}. */
+    private String path;
+
     /**
      * Editors for indexes that will be normally updated.
      */
@@ -59,17 +82,22 @@ class IndexUpdate implements Editor {
     /**
      * Editors for indexes that need to be re-indexed.
      */
-    private final List<Editor> reindex = newArrayList();
+    private final Map<String, Editor> reindex = new HashMap<String, Editor>();
 
     /**
      * Callback for the update events of the indexing job
      */
     private final IndexUpdateCallback updateCallback;
 
-    IndexUpdate(
+    private MissingIndexProviderStrategy missingProvider = new MissingIndexProviderStrategy();
+
+    public IndexUpdate(
             IndexEditorProvider provider, String async,
             NodeState root, NodeBuilder builder,
             IndexUpdateCallback updateCallback) {
+        this.parent = null;
+        this.name = null;
+        this.path = "/";
         this.provider = checkNotNull(provider);
         this.async = async;
         this.root = checkNotNull(root);
@@ -78,22 +106,28 @@ class IndexUpdate implements Editor {
     }
 
     private IndexUpdate(IndexUpdate parent, String name) {
-        checkNotNull(parent);
+        this.parent = checkNotNull(parent);
+        this.name = name;
         this.provider = parent.provider;
         this.async = parent.async;
         this.root = parent.root;
-        this.builder = parent.builder.child(checkNotNull(name));
+        this.builder = parent.builder.getChildNode(checkNotNull(name));
         this.updateCallback = parent.updateCallback;
     }
 
     @Override
     public void enter(NodeState before, NodeState after)
             throws CommitFailedException {
-        collectIndexEditors(builder.getChildNode(INDEX_DEFINITIONS_NAME));
+        collectIndexEditors(builder.getChildNode(INDEX_DEFINITIONS_NAME), before);
+
+        if (!reindex.isEmpty()) {
+            log.info("Reindexing will be performed for following indexes: {}",
+                    reindex.keySet());
+        }
 
         // no-op when reindex is empty
-        CommitFailedException exception = EditorDiff.process(
-                CompositeEditor.compose(reindex), MISSING_NODE, after);
+        CommitFailedException exception = process(
+                wrap(compose(reindex.values())), MISSING_NODE, after);
         if (exception != null) {
             throw exception;
         }
@@ -103,29 +137,78 @@ class IndexUpdate implements Editor {
         }
     }
 
-    private void collectIndexEditors(NodeBuilder definitions)
-            throws CommitFailedException {
+    private boolean shouldReindex(NodeBuilder definition, NodeState before,
+            String name) {
+        PropertyState ps = definition.getProperty(REINDEX_PROPERTY_NAME);
+        if (ps != null && ps.getValue(BOOLEAN)) {
+            return true;
+        }
+        // reindex in the case this is a new node, even though the reindex flag
+        // might be set to 'false' (possible via content import)
+        boolean result = !before.getChildNode(INDEX_DEFINITIONS_NAME).hasChildNode(name);
+        if (result) {
+            log.info("Found a new index node [{}]. Reindexing is requested",
+                    name);
+        }
+        return result;
+    }
+
+    private void collectIndexEditors(NodeBuilder definitions,
+            NodeState before) throws CommitFailedException {
         for (String name : definitions.getChildNodeNames()) {
             NodeBuilder definition = definitions.getChildNode(name);
             if (Objects.equal(async, definition.getString(ASYNC_PROPERTY_NAME))) {
                 String type = definition.getString(TYPE_PROPERTY_NAME);
+                if (type == null) {
+                    // probably not an index def
+                    continue;
+                }
+                boolean shouldReindex = shouldReindex(definition,
+                        before, name);
                 Editor editor = provider.getIndexEditor(type, definition, root, updateCallback);
                 if (editor == null) {
-                    // trigger reindexing when an indexer becomes available
-                    definition.setProperty(REINDEX_PROPERTY_NAME, true);
-                } else if (definition.getBoolean(REINDEX_PROPERTY_NAME)) {
-                    definition.setProperty(REINDEX_PROPERTY_NAME, false);
-                    // as we don't know the index content node name
-                    // beforehand, we'll remove all child nodes
-                    for (String rm : definition.getChildNodeNames()) {
-                        definition.getChildNode(rm).remove();
+                    missingProvider.onMissingIndex(type, definition);
+                } else if (shouldReindex) {
+                    if (definition.getBoolean(REINDEX_ASYNC_PROPERTY_NAME)
+                            && definition.getString(ASYNC_PROPERTY_NAME) == null) {
+                        // switch index to an async update mode
+                        definition.setProperty(ASYNC_PROPERTY_NAME,
+                                ASYNC_REINDEX_VALUE);
+                    } else {
+                        definition.setProperty(REINDEX_PROPERTY_NAME, false);
+                        incrementReIndexCount(definition);
+                        // as we don't know the index content node name
+                        // beforehand, we'll remove all child nodes
+                        for (String rm : definition.getChildNodeNames()) {
+                            if (NodeStateUtils.isHidden(rm)) {
+                                definition.getChildNode(rm).remove();
+                            }
+                        }
+                        reindex.put(concat(getPath(), INDEX_DEFINITIONS_NAME, name), editor);
                     }
-                    reindex.add(VisibleEditor.wrap(editor));
                 } else {
-                    editors.add(VisibleEditor.wrap(editor));
+                    editors.add(editor);
                 }
             }
         }
+    }
+
+    private void incrementReIndexCount(NodeBuilder definition) {
+        long count = 0;
+        if(definition.hasProperty(REINDEX_COUNT)){
+            count = definition.getProperty(REINDEX_COUNT).getValue(Type.LONG);
+        }
+        definition.setProperty(REINDEX_COUNT, count + 1);
+    }
+
+    /**
+     * Returns the path of this node, building it lazily when first requested.
+     */
+    private String getPath() {
+        if (path == null) {
+            path = concat(parent.getPath(), name);
+        }
+        return path;
     }
 
     @Override
@@ -171,7 +254,7 @@ class IndexUpdate implements Editor {
                 children.add(child);
             }
         }
-        return CompositeEditor.compose(children);
+        return compose(children);
     }
 
     @Override @Nonnull
@@ -186,7 +269,7 @@ class IndexUpdate implements Editor {
                 children.add(child);
             }
         }
-        return CompositeEditor.compose(children);
+        return compose(children);
     }
 
     @Override @CheckForNull
@@ -199,7 +282,25 @@ class IndexUpdate implements Editor {
                 children.add(child);
             }
         }
-        return CompositeEditor.compose(children);
+        return compose(children);
+    }
+
+    protected Set<String> getReindexedDefinitions() {
+        return reindex.keySet();
+    }
+
+    public static class MissingIndexProviderStrategy {
+        public void onMissingIndex(String type, NodeBuilder definition)
+                throws CommitFailedException {
+            // trigger reindexing when an indexer becomes available
+            definition.setProperty(REINDEX_PROPERTY_NAME, true);
+        }
+    }
+
+    public IndexUpdate withMissingProviderStrategy(
+            MissingIndexProviderStrategy missingProvider) {
+        this.missingProvider = missingProvider;
+        return this;
     }
 
 }

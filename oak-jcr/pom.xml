@@ -23,7 +23,7 @@
   <parent>
     <groupId>org.apache.jackrabbit</groupId>
     <artifactId>oak-parent</artifactId>
-    <version>0.19-SNAPSHOT</version>
+    <version>1.1-SNAPSHOT</version>
     <relativePath>../oak-parent/pom.xml</relativePath>
   </parent>
 
@@ -78,6 +78,7 @@
       org.apache.jackrabbit.core.observation.ReorderTest                                           <!-- Uses SNS -->
       org.apache.jackrabbit.core.observation.ShareableNodesTest#testAddShare                       <!-- OAK-118 workspace support needed -->
       org.apache.jackrabbit.core.observation.ShareableNodesTest#testRemoveShare                    <!-- OAK-118 workspace support needed -->
+      org.apache.jackrabbit.core.observation.MixinTest <!--FIXME OAK-2165 -->
 
       <!-- Versioning -->
       org.apache.jackrabbit.test.api.version.VersionTest#testMerge
@@ -122,6 +123,7 @@
       org.apache.jackrabbit.core.query.DerefTest#testRewrite                                         <!-- OAK-321 -->
       org.apache.jackrabbit.core.query.DerefTest#testDerefToVersionNode                              <!-- OAK-321 -->
       org.apache.jackrabbit.core.query.DerefTest#testMultipleDeref                                   <!-- OAK-321 -->
+      org.apache.jackrabbit.core.query.FulltextQueryTest#testMultipleOrExpressions                   <!-- OAK-2249 -->
       org.apache.jackrabbit.core.query.FulltextQueryTest#testContainsPropScopeSQL                    <!-- OAK-902 -->
       org.apache.jackrabbit.core.query.FulltextQueryTest#testContainsPropScopeXPath                  <!-- OAK-902 -->
       org.apache.jackrabbit.core.query.XPathAxisTest#testIndex0Descendant                            <!-- OAK-322 -->
@@ -144,12 +146,6 @@
       org.apache.jackrabbit.core.query.ShareableNodeTest#testName                                    <!-- OAK-118 -->
       org.apache.jackrabbit.core.query.ShareableNodeTest#testPathConstraint                          <!-- OAK-118 -->
       org.apache.jackrabbit.oak.jcr.query.QueryTest#fnNameEncoding                                   <!-- OAK-1000 -->
-
-      <!-- RDB persistence -->
-      org.apache.jackrabbit.core.query.QueryResultTest#testGetSize <!-- OAK-1355 -->
-
-      org.apache.jackrabbit.core.observation.ShareableNodesTest#testAddShareableMixin <!-- OAK-1532 -->
-
     </known.issues>
   </properties>
 
@@ -300,7 +296,7 @@
     <dependency>
       <groupId>com.h2database</groupId>
       <artifactId>h2</artifactId>
-      <version>1.3.158</version>
+      <version>${h2.version}</version>
       <scope>test</scope>
     </dependency>
     <dependency>
@@ -341,15 +337,15 @@
       <scope>test</scope>
     </dependency>
     <dependency>
-      <groupId>org.apache.jackrabbit</groupId>
-      <artifactId>oak-mk</artifactId>
-      <version>${project.version}</version>
-      <scope>test</scope>
-    </dependency>
-    <dependency>
       <groupId>com.googlecode.json-simple</groupId>
       <artifactId>json-simple</artifactId>
       <version>1.1.1</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>commons-dbcp</groupId>
+      <artifactId>commons-dbcp</artifactId>
+      <version>1.4</version>
       <scope>test</scope>
     </dependency>
   </dependencies>

@@ -33,6 +33,37 @@ import org.apache.jackrabbit.core.query.AbstractQueryTest;
  */
 public class QueryFulltextTest extends AbstractQueryTest {
 
+    public void testScore() throws Exception {
+        Session session = superuser;
+        QueryManager qm = session.getWorkspace().getQueryManager();
+        Node n1 = testRootNode.addNode("node1");
+        n1.setProperty("text", "hello hello hello");
+        Node n2 = testRootNode.addNode("node2");
+        n2.setProperty("text", "hello");
+        session.save();
+
+        String xpath = "/jcr:root//*[jcr:contains(@text, 'hello')] order by jcr:score()";
+        Query q = qm.createQuery(xpath, "xpath");
+        String result = getResult(q.execute(), "jcr:score");
+        // expect two numbers (any value)
+        result = result.replaceAll("[0-9\\.]+", "n");
+        assertEquals("n, n", result);
+    }
+
+    public void testScoreWithOr() throws Exception {
+        Session session = superuser;
+        QueryManager qm = session.getWorkspace().getQueryManager();
+        Node n1 = testRootNode.addNode("node1");
+        n1.setProperty("text", "hello");
+        n1.setProperty("id", "1");
+        session.save();
+
+        String xpath = "/jcr:root//*[jcr:contains(@text, 'hello') or @id = '1']";
+        Query q = qm.createQuery(xpath, "xpath");
+        String result = getResult(q.execute(), "jcr:path");
+        assertEquals("/testroot/node1", result);
+    }
+
     public void testFulltext() throws Exception {
         Session session = superuser;
         QueryManager qm = session.getWorkspace().getQueryManager();

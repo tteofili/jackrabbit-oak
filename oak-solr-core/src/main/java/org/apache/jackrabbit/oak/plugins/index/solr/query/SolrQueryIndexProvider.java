@@ -41,9 +41,9 @@ public class SolrQueryIndexProvider implements QueryIndexProvider {
 
     private final Logger log = LoggerFactory.getLogger(SolrQueryIndexProvider.class);
 
-    private SolrServerProvider solrServerProvider;
+    private final SolrServerProvider solrServerProvider;
 
-    private OakSolrConfigurationProvider oakSolrConfigurationProvider;
+    private final OakSolrConfigurationProvider oakSolrConfigurationProvider;
 
     public SolrQueryIndexProvider(SolrServerProvider solrServerProvider, OakSolrConfigurationProvider oakSolrConfigurationProvider) {
         this.oakSolrConfigurationProvider = oakSolrConfigurationProvider;
@@ -69,12 +69,17 @@ public class SolrQueryIndexProvider implements QueryIndexProvider {
                 }
                 try {
                     SolrServer solrServer = solrServerProvider.getSolrServer();
-                    // the query engine should be returned only if the serve is alive, otherwise other indexes should be used
+                    // the query engine should be returned only if the server is alive, otherwise other indexes should be used
                     if (solrServer != null && 0 == solrServer.ping().getStatus()) {
                         tempIndexes.add(new SolrQueryIndex(
                                 entry.getName(),
                                 solrServer,
                                 oakSolrConfigurationProvider.getConfiguration()));
+                    }
+                    else {
+                        if (log.isWarnEnabled()) {
+                            log.warn("cannot create Solr query index as SolrServer {} is unreachable", solrServer);
+                        }
                     }
                 } catch (Exception e) {
                     if (log.isErrorEnabled()) {

@@ -16,20 +16,21 @@
  */
 package org.apache.jackrabbit.oak.plugins.index.solr.configuration;
 
+import java.util.Arrays;
+import java.util.Collection;
+
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.spi.query.Filter;
 
 /**
- * An {@link org.apache.jackrabbit.oak.plugins.index.solr.configuration.OakSolrConfiguration} for the embedded Solr server
+ * Default {@link org.apache.jackrabbit.oak.plugins.index.solr.configuration.OakSolrConfiguration}
  */
 public class DefaultOakSolrConfiguration implements OakSolrConfiguration {
 
+    private static Collection<String> ignoredProperties = Arrays.asList(SolrServerConfigurationDefaults.IGNORED_PROPERTIES.split(","));
+
     @Override
     public String getFieldNameFor(Type<?> propertyType) {
-        if (Type.BINARIES.equals(propertyType) || Type.BINARY.equals(propertyType)) {
-            // TODO : use Tika / SolrCell here
-            return propertyType.toString() + "_bin";
-        }
         return null;
     }
 
@@ -80,6 +81,31 @@ public class DefaultOakSolrConfiguration implements OakSolrConfiguration {
     @Override
     public String getCatchAllField() {
         return SolrServerConfigurationDefaults.CATCHALL_FIELD;
+    }
+
+    @Override
+    public int getRows() {
+        return SolrServerConfigurationDefaults.ROWS;
+    }
+
+    @Override
+    public boolean useForPropertyRestrictions() {
+        return SolrServerConfigurationDefaults.PROPERTY_RESTRICTIONS;
+    }
+
+    @Override
+    public boolean useForPrimaryTypes() {
+        return SolrServerConfigurationDefaults.PRIMARY_TYPES;
+    }
+
+    @Override
+    public boolean useForPathRestrictions() {
+        return SolrServerConfigurationDefaults.PATH_RESTRICTIONS;
+    }
+
+    @Override
+    public Collection<String> getIgnoredProperties() {
+        return ignoredProperties;
     }
 
 }

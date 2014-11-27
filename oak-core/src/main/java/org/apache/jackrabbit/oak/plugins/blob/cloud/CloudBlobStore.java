@@ -19,6 +19,7 @@ package org.apache.jackrabbit.oak.plugins.blob.cloud;
 import java.io.IOException;
 import java.util.ArrayDeque;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 
@@ -26,7 +27,7 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.Maps;
 import com.google.common.io.ByteStreams;
 import org.apache.jackrabbit.oak.commons.StringUtils;
-import org.apache.jackrabbit.oak.spi.blob.AbstractBlobStore;
+import org.apache.jackrabbit.oak.plugins.blob.CachingBlobStore;
 import org.jclouds.ContextBuilder;
 import org.jclouds.blobstore.BlobStoreContext;
 import org.jclouds.blobstore.domain.Blob;
@@ -40,11 +41,11 @@ import static org.jclouds.blobstore.options.ListContainerOptions.Builder.maxResu
 import static org.jclouds.blobstore.options.PutOptions.Builder.multipart;
 
 /**
- * Implementation of the {@link BlobStore} to store blobs in a cloud blob store.
+ * Implementation of the {@link org.apache.jackrabbit.oak.spi.blob.BlobStore} to store blobs in a cloud blob store.
  * <p>
- * Extends {@link AbstractBlobStore} and breaks the the binary to chunks for easier management.
+ * Extends {@link org.apache.jackrabbit.oak.spi.blob.AbstractBlobStore} and breaks the the binary to chunks for easier management.
  */
-public class CloudBlobStore extends AbstractBlobStore {
+public class CloudBlobStore extends CachingBlobStore {
     /**
      * Logger instance.
      */
@@ -96,16 +97,7 @@ public class CloudBlobStore extends AbstractBlobStore {
 
     /**
      * Instantiates a connection to the cloud blob store.
-     * 
-     * @param cloudProvider
-     *            the cloud provider
-     * @param accessKey
-     *            the access key
-     * @param secretKey
-     *            the secret key
-     * @param cloudContainer
-     *            the bucket
-     * @throws Exception
+     * @throws Exception if an error occurs
      */
     public void init() throws Exception {
         try {
@@ -130,7 +122,8 @@ public class CloudBlobStore extends AbstractBlobStore {
         Preconditions.checkNotNull(context);
 
         String id = StringUtils.convertBytesToHex(digest);
-
+        cache.put(id, data);
+        
         org.jclouds.blobstore.BlobStore blobStore = context.getBlobStore();
 
         if (!blobStore.blobExists(cloudContainer, id)) {
@@ -156,32 +149,33 @@ public class CloudBlobStore extends AbstractBlobStore {
         Preconditions.checkNotNull(context);
 
         String id = StringUtils.convertBytesToHex(blockId.getDigest());
-
-        Blob cloudBlob = context.getBlobStore().getBlob(cloudContainer, id);
-        if (cloudBlob == null) {
-            String message = "Did not find block " + id;
-            LOG.error(message);
-            throw new IOException(message);
-        }
-
-        Payload payload = cloudBlob.getPayload();
-        try {
-            byte[] data = ByteStreams.toByteArray(payload.getInput());
-
-            if (blockId.getPos() == 0) {
-                return data;
+        byte[] data = cache.get(id);
+        if (data == null) {
+            Blob cloudBlob = context.getBlobStore().getBlob(cloudContainer, id);
+            if (cloudBlob == null) {
+                String message = "Did not find block " + id;
+                LOG.error(message);
+                throw new IOException(message);
             }
-
-            int len = (int) (data.length - blockId.getPos());
-            if (len < 0) {
-                return new byte[0];
+    
+            Payload payload = cloudBlob.getPayload();
+            try {
+                data = ByteStreams.toByteArray(payload.getInput());
+                cache.put(id, data);        
+            } finally {
+                payload.close();
             }
-            byte[] d2 = new byte[len];
-            System.arraycopy(data, (int) blockId.getPos(), d2, 0, len);
-            return d2;
-        } finally {
-            payload.close();
         }
+        if (blockId.getPos() == 0) {
+            return data;
+        }
+        int len = (int) (data.length - blockId.getPos());
+        if (len < 0) {
+            return new byte[0];
+        }
+        byte[] d2 = new byte[len];
+        System.arraycopy(data, (int) blockId.getPos(), d2, 0, len);
+        return d2;
     }
 
     /**
@@ -224,18 +218,20 @@ public class CloudBlobStore extends AbstractBlobStore {
 
         final org.jclouds.blobstore.BlobStore blobStore = context.getBlobStore();
         return new CloudStoreIterator(blobStore, maxLastModifiedTime);
-}
+    }
 
     @Override
-    public boolean deleteChunk(String chunkId, long maxLastModifiedTime) throws Exception {
+    public boolean deleteChunks(List<String> chunkIds, long maxLastModifiedTime) throws Exception {
         Preconditions.checkNotNull(context);
 
-        final org.jclouds.blobstore.BlobStore blobStore = context.getBlobStore();
-        StorageMetadata metadata = blobStore.blobMetadata(cloudContainer, chunkId);
-        if ((maxLastModifiedTime <= 0) 
-                || (metadata.getLastModified().getTime() <= maxLastModifiedTime)) {
-            blobStore.removeBlob(cloudContainer, chunkId);
-            return true;
+        for (String chunkId : chunkIds) {
+            final org.jclouds.blobstore.BlobStore blobStore = context.getBlobStore();
+            StorageMetadata metadata = blobStore.blobMetadata(cloudContainer, chunkId);
+            if ((maxLastModifiedTime <= 0) 
+                    || (metadata.getLastModified().getTime() <= maxLastModifiedTime)) {
+                blobStore.removeBlob(cloudContainer, chunkId);
+                return true;
+            }
         }
         return true;
     }

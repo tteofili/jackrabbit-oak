@@ -22,15 +22,18 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.util.UUID;
 
+import javax.sql.DataSource;
+
 import com.mongodb.DB;
-import org.apache.jackrabbit.mk.core.MicroKernelImpl;
 import org.apache.jackrabbit.oak.kernel.KernelNodeStore;
 import org.apache.jackrabbit.oak.plugins.document.DocumentMK;
 import org.apache.jackrabbit.oak.plugins.document.DocumentNodeStore;
+import org.apache.jackrabbit.oak.plugins.document.rdb.RDBDataSourceFactory;
 import org.apache.jackrabbit.oak.plugins.document.util.MongoConnection;
 import org.apache.jackrabbit.oak.plugins.segment.SegmentNodeStore;
 import org.apache.jackrabbit.oak.plugins.segment.SegmentStore;
 import org.apache.jackrabbit.oak.plugins.segment.memory.MemoryStore;
+import org.apache.jackrabbit.oak.spi.blob.BlobStore;
 import org.apache.jackrabbit.oak.spi.state.NodeStore;
 
 /**
@@ -45,7 +48,7 @@ public abstract class NodeStoreFixture {
         public NodeStore createNodeStore() {
             return new CloseableNodeStore(new DocumentMK.Builder().open());
         }
-        
+
         @Override
         public NodeStore createNodeStore(int clusterNodeId) {
             MongoConnection connection;
@@ -75,16 +78,21 @@ public abstract class NodeStoreFixture {
     public static final NodeStoreFixture DOCUMENT_NS = createDocumentFixture("mongodb://localhost:27017/oak");
 
     public static final NodeStoreFixture DOCUMENT_JDBC = new NodeStoreFixture() {
+
+        private DataSource ds;
+
         @Override
         public NodeStore createNodeStore() {
             String id = UUID.randomUUID().toString();
-            return new DocumentMK.Builder().setRDBConnection("jdbc:h2:mem:" + id, "sa", "").getNodeStore();
+            this.ds = RDBDataSourceFactory.forJdbcUrl("jdbc:h2:mem:" + id, "sa", "");
+            return new DocumentMK.Builder().setRDBConnection(this.ds).getNodeStore();
         }
 
         @Override
         public NodeStore createNodeStore(int clusterNodeId) {
             try {
-                return new DocumentMK.Builder().setRDBConnection("jdbc:h2:mem:oaknodes-" + clusterNodeId, "sa", "").getNodeStore();
+                this.ds = RDBDataSourceFactory.forJdbcUrl("jdbc:h2:mem:oaknodes-" + clusterNodeId, "sa", "");
+                return new DocumentMK.Builder().setRDBConnection(this.ds).getNodeStore();
             } catch (Exception e) {
                 return null;
             }
@@ -95,20 +103,16 @@ public abstract class NodeStoreFixture {
             if (nodeStore instanceof DocumentNodeStore) {
                 ((DocumentNodeStore) nodeStore).dispose();
             }
+            if (this.ds instanceof Closeable) {
+                try {
+                    ((Closeable)this.ds).close();
+                } catch (IOException ex) {
+                    throw new RuntimeException(ex);
+                }
+            }
         }
     };
 
-    public static final NodeStoreFixture MK_IMPL = new NodeStoreFixture() {
-        @Override
-        public NodeStore createNodeStore() {
-            return new KernelNodeStore(new MicroKernelImpl());
-        }
-
-        @Override
-        public void dispose(NodeStore nodeStore) {
-        }
-    };
-    
     public static NodeStoreFixture createDocumentFixture(final String uri) {
         return new DocumentFixture(uri);
     }
@@ -180,27 +184,33 @@ public abstract class NodeStoreFixture {
 
         private final String uri;
         private final boolean inMemory;
+        private final BlobStore blobStore;
 
-        public DocumentFixture(String uri, boolean inMemory) {
+        public DocumentFixture(String uri, boolean inMemory, BlobStore blobStore) {
             this.uri = uri;
             this.inMemory = inMemory;
+            this.blobStore = blobStore;
         }
 
         public DocumentFixture(String uri) {
-            this(uri, true);
+            this(uri, true, null);
         }
 
         public DocumentFixture() {
-            this(DEFAULT_URI, false);
+            this(DEFAULT_URI, false, null);
         }
 
-        private static NodeStore createNodeStore(String uri) {
+        private static NodeStore createNodeStore(String uri, BlobStore blobStore) {
             MongoConnection connection;
             try {
                 connection = new MongoConnection(uri);
                 DB mongoDB = connection.getDB();
-                return new DocumentMK.Builder()
-                        .setMongoDB(mongoDB).getNodeStore();
+                DocumentMK.Builder builder = new DocumentMK.Builder();
+                if(blobStore != null){
+                    builder.setBlobStore(blobStore);
+                }
+                builder.setMongoDB(mongoDB);
+                return builder.getNodeStore();
             } catch (Exception e) {
                 return null;
             }
@@ -211,19 +221,19 @@ public abstract class NodeStoreFixture {
             if (inMemory) {
                 return new DocumentMK.Builder().getNodeStore();
             } else {
-                return createNodeStore(uri + '-' + System.nanoTime());
+                return createNodeStore(uri + '-' + System.nanoTime(), blobStore);
             }
         }
 
         @Override
         public NodeStore createNodeStore(int clusterNodeId) {
-            return createNodeStore(uri);
+            return createNodeStore(uri, blobStore);
         }
 
         @Override
         public boolean isAvailable() {
             // FIXME is there a better way to check whether MongoDB is available?
-            NodeStore nodeStore = createNodeStore(uri);
+            NodeStore nodeStore = createNodeStore(uri, blobStore);
             if (nodeStore == null) {
                 return false;
             } else {

@@ -18,9 +18,11 @@ package org.apache.jackrabbit.oak.plugins.index.solr.query;
 
 import java.util.HashSet;
 import java.util.Set;
+
 import org.apache.jackrabbit.oak.api.Root;
 import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.plugins.index.solr.SolrBaseTest;
+import org.apache.jackrabbit.oak.query.QueryEngineSettings;
 import org.apache.jackrabbit.oak.query.ast.Operator;
 import org.apache.jackrabbit.oak.query.ast.SelectorImpl;
 import org.apache.jackrabbit.oak.query.index.FilterImpl;
@@ -30,8 +32,8 @@ import org.apache.jackrabbit.oak.spi.query.PropertyValues;
 import org.apache.jackrabbit.oak.spi.query.QueryIndex;
 import org.junit.Test;
 
+import static com.google.common.collect.Sets.newHashSet;
 import static junit.framework.Assert.assertEquals;
-import static junit.framework.Assert.assertFalse;
 import static junit.framework.Assert.assertNotNull;
 import static junit.framework.Assert.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -52,13 +54,10 @@ public class SolrQueryEngineIT extends SolrBaseTest {
         root.commit();
 
         QueryIndex index = new SolrQueryIndex("solr", server, configuration);
-        FilterImpl filter = new FilterImpl(mock(SelectorImpl.class), "");
+        FilterImpl filter = new FilterImpl(mock(SelectorImpl.class), "", new QueryEngineSettings());
         filter.restrictPath("/somenode", Filter.PathRestriction.EXACT);
         Cursor cursor = index.query(filter, store.getRoot());
-        assertNotNull(cursor);
-        assertTrue(cursor.hasNext());
-        assertEquals("/somenode", cursor.next().getPath());
-        assertFalse(cursor.hasNext());
+        assertCursor(cursor, "/somenode");
     }
 
     @Test
@@ -74,15 +73,10 @@ public class SolrQueryEngineIT extends SolrBaseTest {
         root.commit();
 
         QueryIndex index = new SolrQueryIndex("solr", server, configuration);
-        FilterImpl filter = new FilterImpl(mock(SelectorImpl.class), "");
+        FilterImpl filter = new FilterImpl(mock(SelectorImpl.class), "", new QueryEngineSettings());
         filter.restrictPath("/somenode", Filter.PathRestriction.DIRECT_CHILDREN);
         Cursor cursor = index.query(filter, store.getRoot());
-        assertNotNull(cursor);
-        assertTrue(cursor.hasNext());
-        assertEquals("/somenode/child1", cursor.next().getPath());
-        assertTrue(cursor.hasNext());
-        assertEquals("/somenode/child2", cursor.next().getPath());
-        assertFalse(cursor.hasNext());
+        assertCursor(cursor, "/somenode/child1", "/somenode/child2");
     }
 
     @Test
@@ -98,19 +92,12 @@ public class SolrQueryEngineIT extends SolrBaseTest {
         root.commit();
 
         QueryIndex index = new SolrQueryIndex("solr", server, configuration);
-        FilterImpl filter = new FilterImpl(mock(SelectorImpl.class), "");
+        FilterImpl filter = new FilterImpl(mock(SelectorImpl.class), "", new QueryEngineSettings());
         filter.restrictPath("/somenode", Filter.PathRestriction.ALL_CHILDREN);
         Cursor cursor = index.query(filter, store.getRoot());
-        assertNotNull(cursor);
-        assertTrue(cursor.hasNext());
-        assertEquals("/somenode", cursor.next().getPath());
-        assertTrue(cursor.hasNext());
-        assertEquals("/somenode/child1", cursor.next().getPath());
-        assertTrue(cursor.hasNext());
-        assertEquals("/somenode/child2", cursor.next().getPath());
-        assertTrue(cursor.hasNext());
-        assertEquals("/somenode/child2/descendant", cursor.next().getPath());
-        assertFalse(cursor.hasNext());
+        assertCursor(
+                cursor, "/somenode", "/somenode/child1",
+                "/somenode/child2", "/somenode/child2/descendant");
     }
 
     @Test
@@ -123,15 +110,10 @@ public class SolrQueryEngineIT extends SolrBaseTest {
         root.commit();
 
         QueryIndex index = new SolrQueryIndex("solr", server, configuration);
-        FilterImpl filter = new FilterImpl(mock(SelectorImpl.class), "");
+        FilterImpl filter = new FilterImpl(mock(SelectorImpl.class), "", new QueryEngineSettings());
         filter.restrictProperty("foo", Operator.EQUAL, PropertyValues.newString("bar"));
         Cursor cursor = index.query(filter, store.getRoot());
-        assertNotNull(cursor);
-        assertTrue(cursor.hasNext());
-        assertEquals("/somenode", cursor.next().getPath());
-        assertTrue(cursor.hasNext());
-        assertEquals("/anotherone", cursor.next().getPath());
-        assertFalse(cursor.hasNext());
+        assertCursor(cursor, "/somenode", "/anotherone");
     }
 
     @Test
@@ -148,12 +130,18 @@ public class SolrQueryEngineIT extends SolrBaseTest {
         Set<String> primaryTypes = new HashSet<String>();
         primaryTypes.add("nt:folder");
         when(selector.getPrimaryTypes()).thenReturn(primaryTypes);
-        FilterImpl filter = new FilterImpl(selector, "select * from [nt:folder]");
+        FilterImpl filter = new FilterImpl(selector, "select * from [nt:folder]", new QueryEngineSettings());
         Cursor cursor = index.query(filter, store.getRoot());
+        assertCursor(cursor, "/afoldernode");
+    }
+
+    private void assertCursor(Cursor cursor, String... paths) {
         assertNotNull(cursor);
-        assertTrue(cursor.hasNext());
-        assertEquals("/afoldernode", cursor.next().getPath());
-        assertFalse(cursor.hasNext());
+        Set<String> set = newHashSet();
+        while (cursor.hasNext()) {
+            assertTrue(set.add(cursor.next().getPath()));
+        }
+        assertEquals(newHashSet(paths), set);
     }
 
 }

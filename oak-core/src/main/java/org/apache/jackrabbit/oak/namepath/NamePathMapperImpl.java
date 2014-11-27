@@ -77,14 +77,81 @@ public class NamePathMapperImpl implements NamePathMapper {
     //---------------------------------------------------------< PathMapper >---
     @Override
     public String getOakPath(String jcrPath) {
-        return getOakPath(jcrPath, false);
-    }
+        if (!needsFullMapping(jcrPath)) {
+            return jcrPath;
+        }
 
-    @Override
-    public String getOakPathKeepIndex(String jcrPath) {
-        return getOakPath(jcrPath, true);
-    }
+        int length = jcrPath.length();
 
+        // identifier path?
+        if (length > 0 && jcrPath.charAt(0) == '[') {
+            if (jcrPath.charAt(length - 1) != ']') {
+                log.debug("Could not parse path " + jcrPath + ": unterminated identifier");
+                return null;
+            }
+            if (this.idManager == null) {
+                log.debug("Could not parse path " + jcrPath + ": could not resolve identifier");
+                return null;
+            }
+            return this.idManager.getPath(jcrPath.substring(1, length - 1));
+        }
+
+        final StringBuilder parseErrors = new StringBuilder();
+
+        PathListener listener = new PathListener() {
+            @Override
+            public void error(String message) {
+                parseErrors.append(message);
+            }
+
+            @Override
+            public boolean name(String name, int index) {
+                if (index < 0) {
+                    error("invalid index: " + index);
+                    return false;
+                }
+
+                String oakName = nameMapper.getOakNameOrNull(name);
+                if (oakName == null) {
+                    error("Invalid name: " + name);
+                    return false;
+                }
+                if (index > 1) {
+                    oakName += "[" + index + ']';
+                }
+                elements.add(oakName);
+                return true;
+            }
+        };
+
+        JcrPathParser.parse(jcrPath, listener);
+        if (parseErrors.length() != 0) {
+            log.debug("Could not parse path " + jcrPath + ": " + parseErrors.toString());
+            return null;
+        }
+
+        // Empty path maps to ""
+        if (listener.elements.isEmpty()) {
+            return "";
+        }
+
+        StringBuilder oakPath = new StringBuilder();
+        for (String element : listener.elements) {
+            if (element.isEmpty()) {
+                // root
+                oakPath.append('/');
+            }
+            else {
+                oakPath.append(element);
+                oakPath.append('/');
+            }
+        }
+
+        // root path is special-cased early on so it does not need to
+        // be considered here
+        oakPath.deleteCharAt(oakPath.length() - 1);
+        return oakPath.toString();
+    }
 
     @Override
     @Nonnull
@@ -142,82 +209,6 @@ public class NamePathMapperImpl implements NamePathMapper {
         return jcrPath.toString();
     }
 
-    private String getOakPath(final String jcrPath, final boolean keepIndex) {
-        if (!needsFullMapping(jcrPath)) {
-            return jcrPath;
-        }
-
-        int length = jcrPath.length();
-
-        // identifier path?
-        if (length > 0 && jcrPath.charAt(0) == '[') {
-            if (jcrPath.charAt(length - 1) != ']') {
-                log.debug("Could not parse path " + jcrPath + ": unterminated identifier");
-                return null;
-            }
-            if (this.idManager == null) {
-                log.debug("Could not parse path " + jcrPath + ": could not resolve identifier");
-                return null;
-            }
-            return this.idManager.getPath(jcrPath.substring(1, length - 1));
-        }
-
-        final StringBuilder parseErrors = new StringBuilder();
-
-        PathListener listener = new PathListener() {
-            @Override
-            public void error(String message) {
-                parseErrors.append(message);
-            }
-
-            @Override
-            public boolean name(String name, int index) {
-                if (!keepIndex && index > 1) {
-                    error("index > 1");
-                    return false;
-                }
-                String p = nameMapper.getOakNameOrNull(name);
-                if (p == null) {
-                    error("Invalid name: " + name);
-                    return false;
-                }
-                if (keepIndex && index > 0) {
-                    p += "[" + index + ']';
-                }
-                elements.add(p);
-                return true;
-            }
-        };
-
-        JcrPathParser.parse(jcrPath, listener);
-        if (parseErrors.length() != 0) {
-            log.debug("Could not parse path " + jcrPath + ": " + parseErrors.toString());
-            return null;
-        }
-
-        // Empty path maps to ""
-        if (listener.elements.isEmpty()) {
-            return "";
-        }
-
-        StringBuilder oakPath = new StringBuilder();
-        for (String element : listener.elements) {
-            if (element.isEmpty()) {
-                // root
-                oakPath.append('/');
-            }
-            else {
-                oakPath.append(element);
-                oakPath.append('/');
-            }
-        }
-
-        // root path is special-cased early on so it does not need to
-        // be considered here
-        oakPath.deleteCharAt(oakPath.length() - 1);
-        return oakPath.toString();
-    }
-
     /**
      * Checks if the given path needs to be fully parsed to apply namespace
      * mappings or to validate its syntax. If the given path is "simple", i.e.
@@ -239,46 +230,49 @@ public class NamePathMapperImpl implements NamePathMapper {
         int colon = -1; // index of the last colon in the path
 
         switch (path.charAt(0)) {
-        case '{': // possibly an expanded name
-        case '[': // starts with an identifier
-        case '.': // possibly "." or ".."
-        case ':': // colon as the first character
-            return true;
-        case '/':
-            if (length == 1) {
-                return false; // the root path
-            }
-            slash = 0;
-            break;
+            case '{': // possibly an expanded name
+            case '[': // starts with an identifier
+            case '.': // possibly "." or ".."
+            case ':': // colon as the first character
+                return true;
+            case '/':
+                if (length == 1) {
+                    return false; // the root path
+                }
+                slash = 0;
+                break;
         }
 
         for (int i = 1; i < length; i++) {
             switch (path.charAt(i)) {
-            case '{': // possibly an expanded name
-            case '[': // possibly an index
-                return true;
-            case '.':
-                if (i == slash + 1) {
-                    return true; // possibly "." or ".."
-                }
-                break;
-            case ':':
-                if (i == slash + 1              // "x/:y"
-                        || i == colon + i       // "x::y"
-                        || colon > slash        // "x:y:z"
-                        || i + 1 == length) {   // "x:"
+                case '{': // possibly an expanded name
+                case '[': // possibly an index
+                case ']': // illegal character if not part of index
+                case '|': // illegal character
+                case '*': // illegal character
                     return true;
-                }
-                colon = i;
-                break;
-            case '/':
-                if (i == slash + 1              // "x//y"
-                        || i == colon + i       // "x:/y"
-                        || i + 1 == length) {   // "x/"
-                    return true;
-                }
-                slash = i;
-                break;
+                case '.':
+                    if (i == slash + 1) {
+                        return true; // possibly "." or ".."
+                    }
+                    break;
+                case ':':
+                    if (i == slash + 1              // "x/:y"
+                            || i == colon + i       // "x::y"
+                            || colon > slash        // "x:y:z"
+                            || i + 1 == length) {   // "x:"
+                        return true;
+                    }
+                    colon = i;
+                    break;
+                case '/':
+                    if (i == slash + 1              // "x//y"
+                            || i == colon + i       // "x:/y"
+                            || i + 1 == length) {   // "x/"
+                        return true;
+                    }
+                    slash = i;
+                    break;
             }
         }
 

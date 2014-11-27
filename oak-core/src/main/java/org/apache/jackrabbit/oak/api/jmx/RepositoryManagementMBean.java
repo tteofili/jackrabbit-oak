@@ -19,82 +19,182 @@
 
 package org.apache.jackrabbit.oak.api.jmx;
 
+import javax.annotation.CheckForNull;
+import javax.annotation.Nonnull;
+import javax.management.openmbean.CompositeData;
+
 /**
- * This interface exposes repository management operations
- * and the status of such operations.
+ * This interface exposes repository management operations and the status
+ * of such operations. This interface only provides high level functionality
+ * for starting certain management operations and monitoring their outcomes.
+ * Parametrisation and configuration of the operations is beyond the scope
+ * of this interface and must be achieved by other means. For example
+ * through a dedicated MBean of the specific service providing the
+ * respective functionality. Furthermore not all operations might be
+ * available in all deployments or at all times. However the status should
+ * give a clear indication for this case.
  * <p>
- * The status of an operation is an opaque string describing
- * in a human readable form what the operation currently does,
- * which might depend on the particular implementation performing
- * the operation. However the status status must always indicate
- * whether an operation is ongoing or terminated. In the latter case
- * it must indicate whether it terminated successfully or failed.
- * In all cases the status may provide additional information
- * like e.g. how far an ongoing operation progressed, what time
- * it took to complete a terminated operation, or information
- * about what caused a terminated operation to fail.
+ * The status of an operation is represented by a {@code CompositeData}
+ * instance consisting at least of the items {@code code}, {@code id},
+ * and {@code message}. Implementations are free to add further items.
+ * <p>
+ * The {@code code} item is an integer encoding the current status of
+ * the respective operation. Valid values and its semantics are:
+ * <ul>
+ *     <li>{@code 0}: <em>Operation not available</em>. For example
+ *     because the system does not implement the operation or the
+ *     system is in a state where it does not allow the operation to
+ *     be carried out (e.g. the operation is already running). The
+ *     {@code message} should give further indication of the exact
+ *     reason.</li>
+ *     <li>{@code 1}: <em>Status not available</em>. Usually because
+ *     there was no prior attempt to start the operation. The
+ *     {@code message} should give further indication of the exact
+ *     reason.</li>
+ *     <li>{@code 2}: <em>Operation initiated</em>. The {@code message}
+ *     should give further information of when the operation was
+ *     initiated. This status mean that the operation will be performed
+ *     some time in the future without impacting overall system behaviour
+ *     and that no further status updates will be available until this
+ *     operation is performed next time.</li>
+ *     <li>{@code 3}: <em>Operation running</em>.</li>
+ *     <li>{@code 4}: <em>Operation succeeded</em>. The {@code message} should
+ *     give further information on how long the operation took to
+ *     complete.</li>
+ *     <li>{@code 5}: Operation failed. The {@code message} should give
+ *     further information on the reason for the failure.</li>
+ * </ul>
+ * <p>
+ * In all cases the {@code message} may provide additional information
+ * that might be useful in the context of the operation.
+ * <p>
+ * The {@code id} is an identifier for the invocation of an operation.
+ * It is reported as a part of the status for clients to relate the
+ * status to invocation. {@code -1} is returned when not available.
  */
 public interface RepositoryManagementMBean {
+    String TYPE = "RepositoryManagement";
 
     /**
-     * Initiate a backup operation to a file at the given absolute path
+     * Enum whose ordinals correspond to the status codes.
+     */
+    enum StatusCode {
+        UNAVAILABLE("Operation not available"),
+        NONE("Status not available"),
+        INITIATED("Operation initiated"),
+        RUNNING("Operation running"),
+        SUCCEEDED("Operation succeeded"),
+        FAILED("Operation failed");
+
+        public final String name;
+
+        StatusCode(String name) {
+            this.name = name;
+        }
+    }
+
+    /**
+     * Initiate a backup operation.
      *
-     * @param path  absolute path
      * @return  the status of the operation right after it was initiated
      */
-    String startBackup(String path);
+    @Nonnull
+    CompositeData startBackup();
 
     /**
      * Backup status
      *
      * @return  the status of the ongoing operation or if none the terminal
-     * status of the last operation or {@code null} if none.
+     * status of the last operation or <em>Status not available</em> if none.
      */
-    String getBackupStatus();
+    @Nonnull
+    CompositeData getBackupStatus();
 
     /**
-     * Initiate a restore operation from a file at the given absolute path
+     * Initiate a restore operation.
      *
-     * @param path  absolute path
      * @return  the status of the operation right after it was initiated
      */
-    String startRestore(String path);
+    @Nonnull
+    CompositeData startRestore();
 
     /**
      * Restore status
      *
      * @return  the status of the ongoing operation or if none the terminal
-     * status of the last operation or {@code null} if none.
+     * status of the last operation or <em>Status not available</em> if none.
      */
-    String getRestoreStatus();
+    @Nonnull
+    CompositeData getRestoreStatus();
 
     /**
      * Initiate a data store garbage collection operation
      *
      * @return  the status of the operation right after it was initiated
      */
-    String startDataStoreGC();
+    @Nonnull
+    CompositeData startDataStoreGC();
 
     /**
      * Data store garbage collection status
      *
      * @return  the status of the ongoing operation or if none the terminal
-     * status of the last operation or {@code null} if none.
+     * status of the last operation or <em>Status not available</em> if none.
      */
-    String getDataStoreGCStatus();
+    @Nonnull
+    CompositeData getDataStoreGCStatus();
 
     /**
      * Initiate a revision garbage collection operation
      *
      * @return  the status of the operation right after it was initiated
      */
-    String startRevisionGC();
+    @Nonnull
+    CompositeData startRevisionGC();
 
     /**
      * Revision garbage collection status
      *
      * @return  the status of the ongoing operation or if none the terminal
-     * status of the last operation or {@code null} if none.
+     * status of the last operation or <em>Status not available</em> if none.
      */
-    String getRevisionGCStatus();
+    @Nonnull
+    CompositeData getRevisionGCStatus();
+
+    /**
+     * Creates a new checkpoint of the latest root of the tree. The checkpoint
+     * remains valid for at least as long as requested and allows that state
+     * of the repository to be retrieved using the returned opaque string
+     * reference.
+     *
+     * @param lifetime time (in milliseconds, &gt; 0) that the checkpoint
+     *                 should remain available
+     * @return string reference of this checkpoint or {@code null} if
+     * the checkpoint could not be set.
+     *
+     * @deprecated Use {@link CheckpointMBean} instead
+     */
+    @Deprecated
+    @CheckForNull
+    String checkpoint(long lifetime);
+
+    /**
+     * Initiate a reindex operation for the property indexes marked for
+     * reindexing
+     * 
+     * @return the status of the operation right after it was initiated
+     */
+    @Nonnull
+    CompositeData startPropertyIndexAsyncReindex();
+
+    /**
+     * Asynchronous Property Index reindexing status
+     * 
+     * @return the status of the ongoing operation or if none the terminal
+     *         status of the last operation or <em>Status not available</em> if
+     *         none.
+     */
+    @Nonnull
+    CompositeData getPropertyIndexAsyncReindexStatus();
+
 }

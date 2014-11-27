@@ -16,20 +16,102 @@
  */
 package org.apache.jackrabbit.oak.plugins.segment.file;
 
+import static com.google.common.base.Preconditions.checkState;
+import static java.nio.channels.FileChannel.MapMode.READ_ONLY;
+
 import java.io.IOException;
+import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
+import java.nio.MappedByteBuffer;
 
-interface FileAccess {
+/**
+ * A wrapper around either memory mapped files or random access files, to allow
+ * reading from a file.
+ */
+abstract class FileAccess {
 
-    int length() throws IOException;
+    abstract boolean isMemoryMapped();
 
-    ByteBuffer read(int position, int length) throws IOException;
+    abstract int length() throws IOException;
 
-    void write(int position, byte[] b, int offset, int length)
-            throws IOException;
+    abstract ByteBuffer read(int position, int length) throws IOException;
 
-    void flush() throws IOException;
+    abstract void close() throws IOException;
 
-    void close() throws IOException;
+    //-----------------------------------------------------------< private >--
+
+    /**
+     * The implementation that uses memory mapped files.
+     */
+    static class Mapped extends FileAccess {
+
+        private final MappedByteBuffer buffer;
+
+        Mapped(RandomAccessFile file) throws IOException {
+            this.buffer = file.getChannel().map(READ_ONLY, 0, file.length());
+        }
+
+        @Override
+        boolean isMemoryMapped() {
+            return true;
+        }
+
+        @Override
+        public int length() {
+            return buffer.remaining();
+        }
+
+        @Override
+        public ByteBuffer read(int position, int length) {
+            ByteBuffer entry = buffer.asReadOnlyBuffer();
+            entry.position(entry.position() + position);
+            entry.limit(entry.position() + length);
+            return entry.slice();
+        }
+
+        @Override
+        public void close() {
+        }
+
+    }
+    
+    /**
+     * The implementation that uses random access file (reads are synchronized).
+     */    
+    static class Random extends FileAccess {
+
+        private final RandomAccessFile file;
+
+        Random(RandomAccessFile file) {
+            this.file = file;
+        }
+
+        @Override
+        boolean isMemoryMapped() {
+            return false;
+        }
+
+        @Override
+        public int length() throws IOException {
+            long length = file.length();
+            checkState(length < Integer.MAX_VALUE);
+            return (int) length;
+        }
+
+        @Override
+        public synchronized ByteBuffer read(int position, int length)
+                throws IOException {
+            ByteBuffer entry = ByteBuffer.allocate(length);
+            file.seek(position);
+            file.readFully(entry.array());
+            return entry;
+        }
+
+        @Override
+        public synchronized void close() throws IOException {
+            file.close();
+        }
+
+    }
 
 }

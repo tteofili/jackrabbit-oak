@@ -23,7 +23,6 @@ import static org.apache.jackrabbit.oak.api.Type.STRINGS;
 
 import java.text.ParseException;
 import java.util.Collections;
-import java.util.Map;
 import java.util.Set;
 
 import org.apache.jackrabbit.oak.api.PropertyState;
@@ -149,11 +148,6 @@ public class FullTextSearchImpl extends ConstraintImpl {
     public Set<SelectorImpl> getSelectors() {
         return Collections.singleton(selector);
     }
-    
-    @Override 
-    public Map<DynamicOperandImpl, Set<StaticOperandImpl>> getInMap() {
-        return Collections.emptyMap();
-    }    
 
     @Override
     public boolean evaluate() {
@@ -173,7 +167,10 @@ public class FullTextSearchImpl extends ConstraintImpl {
             }
             return true;
         }
-
+        // OAK-2050
+        if (!query.getSettings().getFullTextComparisonWithoutIndex()) {
+            return false;
+        }
         StringBuilder buff = new StringBuilder();
         if (relativePath == null && propertyName != null) {
             PropertyValue p = selector.currentProperty(propertyName);
@@ -213,13 +210,36 @@ public class FullTextSearchImpl extends ConstraintImpl {
         return getFullTextConstraint(selector).evaluate(buff.toString());
     }
     
+    @Override
+    public boolean evaluateStop() {
+        // if a fulltext index is used, then we are fine
+        if (selector.getIndex() instanceof FulltextQueryIndex) {
+            return false;
+        }
+        // OAK-2050
+        if (!query.getSettings().getFullTextComparisonWithoutIndex()) {
+            return true;
+        }
+        return false;
+    }
+
     private static void appendString(StringBuilder buff, PropertyValue p) {
         if (p.isArray()) {
-            for (String v : p.getValue(STRINGS)) {
-                buff.append(v).append(' ');
+            if (p.getType() == Type.BINARIES) {
+                // OAK-2050: don't try to load binaries as this would 
+                // run out of memory
+            } else {
+                for (String v : p.getValue(STRINGS)) {
+                    buff.append(v).append(' ');
+                }
             }
         } else {
-            buff.append(p.getValue(STRING)).append(' ');
+            if (p.getType() == Type.BINARY) {
+                // OAK-2050: don't try to load binaries as this would 
+                // run out of memory
+            } else {
+                buff.append(p.getValue(STRING)).append(' ');
+            }
         }
     }
 
@@ -231,8 +251,12 @@ public class FullTextSearchImpl extends ConstraintImpl {
     public void restrict(FilterImpl f) {
         if (propertyName != null) {
             if (f.getSelector().equals(selector)) {
-                String pn = normalizePropertyName(propertyName);
-                f.restrictProperty(pn, Operator.NOT_EQUAL, null);
+                String p = propertyName;
+                if (relativePath != null) {
+                    p = PathUtils.concat(p, relativePath);
+                }                
+                p = normalizePropertyName(p);
+                f.restrictProperty(p, Operator.NOT_EQUAL, null);
             }
         }
         f.restrictFulltextCondition(fullTextSearchExpression.currentValue().getValue(Type.STRING));

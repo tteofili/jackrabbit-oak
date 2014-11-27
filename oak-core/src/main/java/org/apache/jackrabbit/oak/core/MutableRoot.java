@@ -43,6 +43,7 @@ import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.plugins.index.diffindex.UUIDDiffIndexProviderWrapper;
 import org.apache.jackrabbit.oak.query.ExecutionContext;
 import org.apache.jackrabbit.oak.query.QueryEngineImpl;
+import org.apache.jackrabbit.oak.query.QueryEngineSettings;
 import org.apache.jackrabbit.oak.spi.commit.CommitHook;
 import org.apache.jackrabbit.oak.spi.commit.CommitInfo;
 import org.apache.jackrabbit.oak.spi.commit.CompositeEditorProvider;
@@ -76,6 +77,8 @@ class MutableRoot implements Root {
     private final Subject subject;
 
     private final SecurityProvider securityProvider;
+    
+    private final QueryEngineSettings queryEngineSettings;
 
     private final QueryIndexProvider indexProvider;
 
@@ -142,6 +145,7 @@ class MutableRoot implements Root {
                  String workspaceName,
                  Subject subject,
                  SecurityProvider securityProvider,
+                 QueryEngineSettings queryEngineSettings,
                  QueryIndexProvider indexProvider,
                  ContentSessionImpl session) {
         this.store = checkNotNull(store);
@@ -149,6 +153,7 @@ class MutableRoot implements Root {
         this.workspaceName = checkNotNull(workspaceName);
         this.subject = checkNotNull(subject);
         this.securityProvider = checkNotNull(securityProvider);
+        this.queryEngineSettings = queryEngineSettings;
         this.indexProvider = indexProvider;
         this.session = checkNotNull(session);
 
@@ -196,8 +201,8 @@ class MutableRoot implements Root {
 
         boolean success = source.moveTo(newParent, newName);
         if (success) {
-            getTree(getParentPath(sourcePath)).updateChildOrder();
-            getTree(getParentPath(destPath)).updateChildOrder();
+            getTree(getParentPath(sourcePath)).updateChildOrder(false);
+            getTree(getParentPath(destPath)).updateChildOrder(false);
             lastMove = lastMove.setMove(sourcePath, newParent, newName);
             updated();
             // remember all move operations for further processing in the commit hooks.
@@ -303,7 +308,7 @@ class MutableRoot implements Root {
                             provider, getBaseState(), getRootState());
                 }
                 return new ExecutionContext(
-                        getBaseState(), MutableRoot.this, provider);
+                        getBaseState(), MutableRoot.this, queryEngineSettings, provider);
             }
         };
     }
@@ -367,7 +372,7 @@ class MutableRoot implements Root {
      * The last entry in the list is always an empty slot to be filled in by calling
      * {@code setMove()}. This fills the slot with the source and destination of the move
      * and links this move to the next one which will be the new empty slot.
-     * <p/>
+     * <p>
      * Moves can be applied to {@code MutableTree} instances by calling {@code apply()},
      * which will execute all moves in the list on the passed tree instance
      */

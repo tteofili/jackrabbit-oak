@@ -35,7 +35,7 @@ public class SQL2ParserTest {
     private final NodeState types =
             INITIAL_CONTENT.getChildNode(JCR_SYSTEM).getChildNode(JCR_NODE_TYPES);
 
-    private final SQL2Parser p = new SQL2Parser(null, types);
+    private final SQL2Parser p = new SQL2Parser(null, types, new QueryEngineSettings());
 
     @Test
     public void testIgnoreSqlComment() throws ParseException {
@@ -59,7 +59,7 @@ public class SQL2ParserTest {
     public void testUnwrappedOr() throws ParseException {
         String q = new XPathToSQL2Converter()
                 .convert("/jcr:root/home//test/* [@type='t1' or @type='t2' or @type='t3']");
-        String token = "and (b.[type] = 't1' or b.[type] = 't2' or b.[type] = 't3')";
+        String token = "and b.[type] in('t1', 't2', 't3')";
         assertTrue(q.contains(token));
     }
     

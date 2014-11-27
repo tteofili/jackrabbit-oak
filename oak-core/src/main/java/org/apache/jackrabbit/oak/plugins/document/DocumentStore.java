@@ -21,10 +21,21 @@ import java.util.List;
 import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
 
-import org.apache.jackrabbit.mk.api.MicroKernelException;
-
 /**
  * The interface for the backend storage for documents.
+ * <p>
+ * In general atomicity of operations on a DocumentStore are limited to a single
+ * document. That is, an implementation does not have to guarantee atomicity of
+ * the entire effect of a method call. A method that fails with an exception may
+ * have modified just some documents and then abort. However, an implementation
+ * must not modify a document partially. Either the complete update operation
+ * is applied to a document or no modification is done at all.
+ * <p>
+ * Even though none of the methods declare an exception, they will still throw
+ * an implementation specific runtime exception when the operations fails (e.g.
+ * an I/O error occurs).
+ * <p>
+ * For keys, the maximum length is 512 bytes in the UTF-8 representation.
  */
 public interface DocumentStore {
 
@@ -34,7 +45,7 @@ public interface DocumentStore {
      * {@code maxCacheAge} of {@code Integer.MAX_VALUE}.
      * <p>
      * The returned document is immutable.
-     * 
+     *
      * @param <T> the document type
      * @param collection the collection
      * @param key the key
@@ -52,7 +63,7 @@ public interface DocumentStore {
      * newer version of the document.
      * <p>
      * The returned document is immutable.
-     * 
+     *
      * @param <T> the document type
      * @param collection the collection
      * @param key the key
@@ -67,7 +78,7 @@ public interface DocumentStore {
      * less than an end value, sorted by the key.
      * <p>
      * The returned documents are immutable.
-     * 
+     *
      * @param <T> the document type
      * @param collection the collection
      * @param fromKey the start value (excluding)
@@ -84,7 +95,7 @@ public interface DocumentStore {
     /**
      * Get a list of documents where the key is greater than a start value and
      * less than an end value. The returned documents are immutable.
-     * 
+     *
      * @param <T> the document type
      * @param collection the collection
      * @param fromKey the start value (excluding)
@@ -103,7 +114,8 @@ public interface DocumentStore {
                                        int limit);
 
     /**
-     * Remove a document.
+     * Remove a document. This method does nothing if there is no document
+     * with the given key.
      *
      * @param <T> the document type
      * @param collection the collection
@@ -112,8 +124,29 @@ public interface DocumentStore {
     <T extends Document> void remove(Collection<T> collection, String key);
 
     /**
-     * Try to create a list of documents.
-     * 
+     * Batch remove documents with given key. Keys for documents that do not
+     * exist are simply ignored. If this method fails with an exception, then
+     * only some of the documents identified by {@code keys} may have been
+     * removed.
+     *
+     * @param <T> the document type
+     * @param collection the collection
+     * @param keys list of keys
+     */
+    <T extends Document> void remove(Collection<T> collection, List<String> keys);
+
+    /**
+     * Try to create a list of documents. This method returns {@code code} iff
+     * none of the documents existed before and the create was successful. This
+     * method will return {@code false} if one of the documents already exists
+     * in the store. Some documents may still have been created in the store.
+     * An implementation does not have to guarantee an atomic create of all the
+     * documents described in the {@code updateOps}. It is the responsibility of
+     * the caller to check, which documents were created and take appropriate
+     * action. The same is true when this method throws an exception (e.g. when
+     * a communication error occurs). In this case only some documents may have
+     * been created.
+     *
      * @param <T> the document type
      * @param collection the collection
      * @param updateOps the list of documents to add
@@ -123,7 +156,10 @@ public interface DocumentStore {
 
     /**
      * Update documents with the given keys. Only existing documents are
-     * updated.
+     * updated and keys for documents that do not exist are simply ignored. If
+     * this method fails with an exception, then only some of the documents
+     * identified by {@code keys} may have been updated. There is no guarantee
+     * in which sequence the updates are performed.
      *
      * @param <T> the document type.
      * @param collection the collection.
@@ -133,7 +169,7 @@ public interface DocumentStore {
     <T extends Document> void update(Collection<T> collection,
                                      List<String> keys,
                                      UpdateOp updateOp);
-    
+
     /**
      * Create or update a document. For MongoDB, this is using "findAndModify" with
      * the "upsert" flag (insert or update). The returned document is immutable.
@@ -142,11 +178,9 @@ public interface DocumentStore {
      * @param collection the collection
      * @param update the update operation
      * @return the old document or <code>null</code> if it didn't exist before.
-     * @throws MicroKernelException if the operation failed.
      */
     @CheckForNull
-    <T extends Document> T createOrUpdate(Collection<T> collection, UpdateOp update)
-            throws MicroKernelException;
+    <T extends Document> T createOrUpdate(Collection<T> collection, UpdateOp update);
 
     /**
      * Performs a conditional update (e.g. using
@@ -159,11 +193,9 @@ public interface DocumentStore {
      * @param update the update operation with the condition
      * @return the old document or <code>null</code> if the condition is not met or
      *         if the document wasn't found
-     * @throws MicroKernelException if the operation failed.
      */
     @CheckForNull
-    <T extends Document> T findAndUpdate(Collection<T> collection, UpdateOp update)
-            throws MicroKernelException;
+    <T extends Document> T findAndUpdate(Collection<T> collection, UpdateOp update);
 
     /**
      * Invalidate the document cache.
@@ -172,7 +204,7 @@ public interface DocumentStore {
 
     /**
      * Invalidate the document cache for the given key.
-     * 
+     *
      * @param <T> the document type
      * @param collection the collection
      * @param key the key
@@ -197,9 +229,9 @@ public interface DocumentStore {
 
     /**
      * Set the level of guarantee for read and write operations, if supported by this backend.
-     * 
+     *
      * @param readWriteMode the read/write mode
      */
     void setReadWriteMode(String readWriteMode);
-    
+
 }
