@@ -421,8 +421,12 @@ public class SelectorImpl extends SourceImpl {
                 // where [a].[jcr:path] = $path"
                 // because not checking would reveal existence
                 // of the child node
-                Tree tree = getTree(currentRow.getPath());
-                if (tree == null || !tree.exists()) {
+                String path = currentRow.getPath();
+                Tree tree = getTree(path);
+                if (tree != null && path != null && path.startsWith("/facet")) {
+                    // do nothing
+                }
+                else if (tree == null || !tree.exists()) {
                     continue;
                 }
             }
@@ -619,10 +623,12 @@ public class SelectorImpl extends SourceImpl {
     
     private PropertyValue currentOakProperty(Tree t, String oakPropertyName, Integer propertyType) {
         PropertyValue result;
-        if (t == null || !t.exists()) {
+        if (oakPropertyName.startsWith("facet(") && oakPropertyName.endsWith(")")) {
+            result = currentRow.getValue(oakPropertyName);
+        } else if (t == null || !t.exists()) {
             return null;
         }
-        if (oakPropertyName.equals(QueryImpl.JCR_PATH)) {
+        else if (oakPropertyName.equals(QueryImpl.JCR_PATH)) {
             String path = currentPath();
             String local = getLocalPath(path);
             if (local == null) {

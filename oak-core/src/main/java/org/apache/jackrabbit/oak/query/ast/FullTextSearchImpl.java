@@ -18,9 +18,6 @@
  */
 package org.apache.jackrabbit.oak.query.ast;
 
-import static org.apache.jackrabbit.oak.api.Type.STRING;
-import static org.apache.jackrabbit.oak.api.Type.STRINGS;
-
 import java.text.ParseException;
 import java.util.Collections;
 import java.util.Set;
@@ -36,6 +33,9 @@ import org.apache.jackrabbit.oak.query.index.FilterImpl;
 import org.apache.jackrabbit.oak.spi.query.PropertyValues;
 import org.apache.jackrabbit.oak.spi.query.QueryIndex.FulltextQueryIndex;
 
+import static org.apache.jackrabbit.oak.api.Type.STRING;
+import static org.apache.jackrabbit.oak.api.Type.STRINGS;
+
 /**
  * A fulltext "contains(...)" condition.
  */
@@ -43,7 +43,7 @@ public class FullTextSearchImpl extends ConstraintImpl {
 
     /**
      * Compatibility for Jackrabbit 2.0 single quoted phrase queries.
-     * (contains(., "word ''hello world'' word") 
+     * (contains(., "word ''hello world'' word")
      * These are queries that delimit a phrase with a single quote
      * instead, as in the spec, using double quotes.
      */
@@ -76,7 +76,7 @@ public class FullTextSearchImpl extends ConstraintImpl {
         } else {
             this.propertyName = propertyName;
         }
-        
+
         this.fullTextSearchExpression = fullTextSearchExpression;
     }
 
@@ -143,7 +143,7 @@ public class FullTextSearchImpl extends ConstraintImpl {
             throw new IllegalArgumentException("Invalid expression: " + fullTextSearchExpression, e);
         }
     }
-    
+
     @Override
     public Set<SelectorImpl> getSelectors() {
         return Collections.singleton(selector);
@@ -160,6 +160,9 @@ public class FullTextSearchImpl extends ConstraintImpl {
             // condition checks out, this takes out some extra rows from the index
             // aggregation bits
             if (relativePath == null && propertyName != null) {
+                if (query.toString().contains("facet(" + propertyName + ")")) {
+                    return true;
+                }
                 PropertyValue p = selector.currentProperty(propertyName);
                 if (p == null) {
                     return false;
@@ -209,7 +212,7 @@ public class FullTextSearchImpl extends ConstraintImpl {
         }
         return getFullTextConstraint(selector).evaluate(buff.toString());
     }
-    
+
     @Override
     public boolean evaluateStop() {
         // if a fulltext index is used, then we are fine
@@ -254,7 +257,7 @@ public class FullTextSearchImpl extends ConstraintImpl {
                 String p = propertyName;
                 if (relativePath != null) {
                     p = PathUtils.concat(p, relativePath);
-                }                
+                }
                 p = normalizePropertyName(p);
                 f.restrictProperty(p, Operator.NOT_EQUAL, null);
             }
