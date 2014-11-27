@@ -29,6 +29,9 @@
 
 commit / + "test": { "a": { "name": "Hello" }, "b": { "name" : "World" }}
 
+select * from [nt:base] 
+  where [a] = 1 and [b] = 2 and [b] = 3 or [c] = 4
+
 select [jcr:path]
   from [nt:base]
   where [a/name] = 'Hello' or [b/name] = 'World'
@@ -72,15 +75,15 @@ commit / - "test"
 commit / + "test": { "a": { "x": "1", "yes": { } }, "b": { "yes" : { } }, "c": { "x": "1", "no" : { } }}
 
 xpath test//yes/..[@x]
-/test/a, null, null
+/test/a
 
-select b.[jcr:path] as [jcr:path], b.[jcr:score] as [jcr:score]
+select b.[jcr:path] as [jcr:path]
   from [nt:base] as a
   inner join [nt:base] as b on ischildnode(a, b)
   where name(a) = 'yes'
   and isdescendantnode(a, '/test')
   and b.[x] is not null
-/test/a, null
+/test/a
 
 commit / - "test"
 
@@ -167,22 +170,6 @@ select [jcr:path]
   from [nt:base]
   where id > '10'
 /test/b
-
-commit / - "test"
-
-# fulltext search
-
-commit / + "test": { "name": "hello world" }
-
-select [jcr:path]
-  from [nt:base]
-  where contains(name, 'hello')
-/test
-
-select [jcr:path]
-  from [nt:base]
-  where contains(*, 'hello')
-/test
 
 commit / - "test"
 

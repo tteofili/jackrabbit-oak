@@ -16,58 +16,57 @@
  */
 package org.apache.jackrabbit.oak.plugins.segment;
 
-import java.util.UUID;
-
 import javax.annotation.CheckForNull;
+import javax.annotation.Nonnull;
 
 import org.apache.jackrabbit.oak.api.Blob;
+import org.apache.jackrabbit.oak.spi.blob.BlobStore;
 
+/**
+ * The backend storage interface used by the segment node store.
+ */
 public interface SegmentStore {
 
-    SegmentWriter getWriter();
+    SegmentTracker getTracker();
 
     /**
-     * Returns the named journal.
+     * Returns the head state.
      *
-     * @param name journal name
-     * @return named journal, or {@code null} if not found
+     * @return head state
      */
-    @CheckForNull
-    Journal getJournal(String name);
+    @Nonnull
+    SegmentNodeState getHead();
+
+    boolean setHead(SegmentNodeState base, SegmentNodeState head);
+
+    /**
+     * Checks whether the identified segment exists in this store.
+     *
+     * @param id segment identifier
+     * @return {@code true} if the segment exists, {@code false} otherwise
+     */
+    boolean containsSegment(SegmentId id);
 
     /**
      * Reads the identified segment from this store.
      *
      * @param segmentId segment identifier
-     * @return identified segment, or {@code null} if not found
+     * @return identified segment, or a {@link SegmentNotFoundException} thrown if not found
      */
     @CheckForNull
-    Segment readSegment(UUID segmentId);
+    Segment readSegment(SegmentId segmentId);
 
     /**
      * Writes the given segment to the segment store.
      *
-     * @param segmentId segment identifier
+     * @param id segment identifier
      * @param bytes byte buffer that contains the raw contents of the segment
      * @param offset start offset within the byte buffer
      * @param length length of the segment
      */
-    void writeSegment(UUID segmentId, byte[] bytes, int offset, int length);
-
-    void deleteSegment(UUID segmentId);
+    void writeSegment(SegmentId id, byte[] bytes, int offset, int length);
 
     void close();
-
-    /**
-     * Checks whether the given object is a record of the given type and
-     * is stored in this segment store.
-     *
-     * @param object possible record object
-     * @param type record type
-     * @return {@code true} if the object is a record of the given type
-     *         from this store, {@code false} otherwise
-     */
-    boolean isInstance(Object object, Class<? extends Record> type);
 
     /**
      * Read a blob from external storage.
@@ -76,5 +75,16 @@ public interface SegmentStore {
      * @return external blob
      */
     Blob readBlob(String reference);
+
+    /**
+     * Returns the external BlobStore (if configured) with this store
+     */
+    @CheckForNull
+    BlobStore getBlobStore();
+
+    /**
+     * Triggers removal of segments that are no longer referenceable.
+     */
+    void gc();
 
 }

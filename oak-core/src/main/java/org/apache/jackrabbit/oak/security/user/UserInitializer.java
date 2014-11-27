@@ -28,10 +28,13 @@ import org.apache.jackrabbit.oak.core.SystemRoot;
 import org.apache.jackrabbit.oak.namepath.NamePathMapper;
 import org.apache.jackrabbit.oak.plugins.index.IndexConstants;
 import org.apache.jackrabbit.oak.plugins.index.IndexUtils;
+import org.apache.jackrabbit.oak.plugins.index.nodetype.NodeTypeIndexProvider;
+import org.apache.jackrabbit.oak.plugins.index.property.PropertyIndexProvider;
 import org.apache.jackrabbit.oak.plugins.memory.MemoryNodeStore;
-import org.apache.jackrabbit.oak.spi.commit.CommitHook;
+import org.apache.jackrabbit.oak.query.QueryEngineSettings;
+import org.apache.jackrabbit.oak.spi.commit.EmptyHook;
 import org.apache.jackrabbit.oak.spi.lifecycle.WorkspaceInitializer;
-import org.apache.jackrabbit.oak.spi.query.QueryIndexProvider;
+import org.apache.jackrabbit.oak.spi.query.CompositeQueryIndexProvider;
 import org.apache.jackrabbit.oak.spi.security.ConfigurationParameters;
 import org.apache.jackrabbit.oak.spi.security.SecurityProvider;
 import org.apache.jackrabbit.oak.spi.security.user.UserConfiguration;
@@ -49,9 +52,9 @@ import static com.google.common.base.Preconditions.checkNotNull;
  * Creates initial set of users to be present in a given workspace. This
  * implementation uses the {@code UserManager} such as defined by the
  * user configuration.
- * <p/>
+ * <p>
  * Currently the following users are created:
- * <p/>
+ * <p>
  * <ul>
  * <li>An administrator user using {@link UserConstants#PARAM_ADMIN_ID}
  * or {@link UserConstants#DEFAULT_ADMIN_ID} if the config option is missing.</li>
@@ -59,10 +62,10 @@ import static com.google.common.base.Preconditions.checkNotNull;
  * or {@link UserConstants#DEFAULT_ANONYMOUS_ID} if the config option is
  * missing.</li>
  * </ul>
- * <p/>
+ * <p>
  * In addition this initializer sets up index definitions for the following
  * user related properties:
- * <p/>
+ * <p>
  * <ul>
  * <li>{@link UserConstants#REP_AUTHORIZABLE_ID}</li>
  * <li>{@link UserConstants#REP_PRINCIPAL_NAME}</li>
@@ -85,13 +88,14 @@ class UserInitializer implements WorkspaceInitializer, UserConstants {
     //-----------------------------------------------< WorkspaceInitializer >---
 
     @Override
-    public void initialize(
-            NodeBuilder builder, String workspaceName,
-            QueryIndexProvider indexProvider, CommitHook commitHook) {
+    public void initialize(NodeBuilder builder, String workspaceName) {
         NodeState base = builder.getNodeState();
         MemoryNodeStore store = new MemoryNodeStore(base);
 
-        Root root = new SystemRoot(store, commitHook, workspaceName, securityProvider, indexProvider);
+        Root root = new SystemRoot(store, EmptyHook.INSTANCE, workspaceName,
+                securityProvider, new QueryEngineSettings(),
+                new CompositeQueryIndexProvider(new PropertyIndexProvider(),
+                        new NodeTypeIndexProvider()));
 
         UserConfiguration userConfiguration = securityProvider.getConfiguration(UserConfiguration.class);
         UserManager userManager = userConfiguration.getUserManager(root, NamePathMapper.DEFAULT);

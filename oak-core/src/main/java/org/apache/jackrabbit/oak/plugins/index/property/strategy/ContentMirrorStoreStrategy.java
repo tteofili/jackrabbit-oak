@@ -19,16 +19,20 @@ package org.apache.jackrabbit.oak.plugins.index.property.strategy;
 import static com.google.common.collect.Queues.newArrayDeque;
 import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.INDEX_CONTENT_NODE_NAME;
 import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.ENTRY_COUNT_PROPERTY_NAME;
+import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.KEY_COUNT_PROPERTY_NAME;
 
 import java.util.Deque;
 import java.util.Iterator;
 import java.util.Set;
+
+import javax.annotation.Nonnull;
 
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.plugins.memory.MemoryChildNodeEntry;
 import org.apache.jackrabbit.oak.query.FilterIterators;
+import org.apache.jackrabbit.oak.query.QueryEngineSettings;
 import org.apache.jackrabbit.oak.spi.query.Filter;
 import org.apache.jackrabbit.oak.spi.state.ChildNodeEntry;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
@@ -49,7 +53,7 @@ import com.google.common.collect.Sets;
  * <br>
  * For example for a node that is under {@code /test/node}, the index
  * structure will be {@code /oak:index/index/test/node}:
- *
+ * 
  * <pre>
  * {@code
  * /
@@ -66,6 +70,11 @@ import com.google.common.collect.Sets;
 public class ContentMirrorStoreStrategy implements IndexStoreStrategy {
 
     static final Logger LOG = LoggerFactory.getLogger(ContentMirrorStoreStrategy.class);
+    
+    /**
+     * logging a warning every {@code oak.traversing.warn} traversed nodes. Default {@code 10000}
+     */
+    static final int TRAVERSING_WARN = Integer.getInteger("oak.traversing.warn", 10000);
 
     @Override
     public void update(
@@ -79,7 +88,7 @@ public class ContentMirrorStoreStrategy implements IndexStoreStrategy {
         }
     }
 
-    private static void remove(NodeBuilder index, String key, String value) {
+    private void remove(NodeBuilder index, String key, String value) {
         NodeBuilder builder = index.getChildNode(key);
         if (builder.exists()) {
             // Collect all builders along the given path
@@ -98,18 +107,13 @@ public class ContentMirrorStoreStrategy implements IndexStoreStrategy {
             }
 
             // Prune all index nodes that are no longer needed
-            for (NodeBuilder node : builders) {
-                if (node.getBoolean("match") || node.getChildNodeCount(1) > 0) {
-                    return;
-                } else if (node.exists()) {
-                    node.remove();
-                }
-            }
+            prune(index, builders, key);
         }
     }
 
-    private static void insert(NodeBuilder index, String key, String value) {
-        NodeBuilder builder = index.child(key);
+    private void insert(NodeBuilder index, String key, String value) {
+        // NodeBuilder builder = index.child(key);
+        NodeBuilder builder = fetchKeyNode(index, key);
         for (String name : PathUtils.elements(value)) {
             builder = builder.child(name);
         }
@@ -123,10 +127,10 @@ public class ContentMirrorStoreStrategy implements IndexStoreStrategy {
         return new Iterable<String>() {
             @Override
             public Iterator<String> iterator() {
-                PathIterator it = new PathIterator(filter, indexName);
+                PathIterator it = new PathIterator(filter, indexName, "");
                 if (values == null) {
                     it.setPathContainsValue(true);
-                    it.enqueue(index.getChildNodeEntries().iterator());
+                    it.enqueue(getChildNodeEntries(index).iterator());
                 } else {
                     for (String p : values) {
                         NodeState property = index.getChildNode(p);
@@ -142,8 +146,14 @@ public class ContentMirrorStoreStrategy implements IndexStoreStrategy {
         };
     }
 
+    @Nonnull
+    Iterable<? extends ChildNodeEntry> getChildNodeEntries(@Nonnull
+    final NodeState index) {
+        return index.getChildNodeEntries();
+    }
+
     @Override
-    public Iterable<String> query(final Filter filter, final String indexName, 
+    public Iterable<String> query(final Filter filter, final String indexName,
             final NodeState indexMeta, final Iterable<String> values) {
         return query(filter, indexName, indexMeta, INDEX_CONTENT_NODE_NAME, values);
     }
@@ -153,7 +163,17 @@ public class ContentMirrorStoreStrategy implements IndexStoreStrategy {
         return count(indexMeta, INDEX_CONTENT_NODE_NAME, values, max);
     }
 
+    @Override
+    public long count(final Filter filter, NodeState indexMeta, Set<String> values, int max) {
+        return count(filter, indexMeta, INDEX_CONTENT_NODE_NAME, values, max);
+    }
+
     public long count(NodeState indexMeta, final String indexStorageNodeName,
+            Set<String> values, int max) {
+        return count(null, indexMeta, indexStorageNodeName, values, max);
+    }
+
+    public long count(Filter filter, NodeState indexMeta, final String indexStorageNodeName,
             Set<String> values, int max) {
         NodeState index = indexMeta.getChildNode(indexStorageNodeName);
         int count = 0;
@@ -165,15 +185,38 @@ public class ContentMirrorStoreStrategy implements IndexStoreStrategy {
             CountingNodeVisitor v = new CountingNodeVisitor(max);
             v.visit(index);
             count = v.getEstimatedCount();
-            // "is not null" queries typically read more data
-            count *= 10;
+            if (count >= max) {
+                // "is not null" queries typically read more data
+                count *= 10;
+            }
         } else {
             int size = values.size();
             if (size == 0) {
                 return 0;
             }
+            PropertyState ec = indexMeta.getProperty(ENTRY_COUNT_PROPERTY_NAME);       
+            if (ec != null) {
+                long entryCount = ec.getValue(Type.LONG);
+                // assume 10000 entries per key, so that this index is used
+                // instead of traversal, but not instead of a regular property index
+                long keyCount = entryCount / 10000;
+                ec = indexMeta.getProperty(KEY_COUNT_PROPERTY_NAME);
+                if (ec != null) {
+                    keyCount = ec.getValue(Type.LONG);
+                }
+                // cast to double to avoid overflow 
+                // (entryCount could be Long.MAX_VALUE)
+                // the cost is not multiplied by the size, 
+                // otherwise the traversing index might be used
+                return (long) ((double) entryCount / keyCount) + size;
+            }
             max = Math.max(10, max / size);
             int i = 0;
+            String filterRootPath = null;
+            if (filter != null &&
+                    filter.getPathRestriction().equals(Filter.PathRestriction.ALL_CHILDREN)) {
+                filterRootPath = filter.getPath();
+            }
             for (String p : values) {
                 if (count > max && i > 3) {
                     // the total count is extrapolated from the the number 
@@ -182,6 +225,16 @@ public class ContentMirrorStoreStrategy implements IndexStoreStrategy {
                     break;
                 }
                 NodeState s = index.getChildNode(p);
+                if (filterRootPath != null && s.exists()) {
+                    // Descend directly to path restriction inside index tree
+                    for (String pathFragment : PathUtils
+                            .elements(filterRootPath)) {
+                        s = s.getChildNode(pathFragment);
+                        if (!s.exists()) {
+                            break;
+                        }
+                    }
+                }
                 if (s.exists()) {
                     CountingNodeVisitor v = new CountingNodeVisitor(max);
                     v.visit(s);
@@ -205,6 +258,8 @@ public class ContentMirrorStoreStrategy implements IndexStoreStrategy {
         private int readCount;
         private boolean init;
         private boolean closed;
+        private String filterPath;
+        private String pathPrefix;
         private String parentPath;
         private String currentPath;
         private boolean pathContainsValue;
@@ -213,18 +268,30 @@ public class ContentMirrorStoreStrategy implements IndexStoreStrategy {
          * Keep the returned path, to avoid returning duplicate entries.
          */
         private final Set<String> knownPaths = Sets.newHashSet();
-        
-        PathIterator(Filter filter, String indexName) {
+        private final QueryEngineSettings settings;
+
+        PathIterator(Filter filter, String indexName, String pathPrefix) {
             this.filter = filter;
+            this.pathPrefix = pathPrefix;
             this.indexName = indexName;
+            boolean shouldDescendDirectly = filter.getPathRestriction().equals(Filter.PathRestriction.ALL_CHILDREN);
+            if (shouldDescendDirectly) {            
+                filterPath = filter.getPath();
+                if (PathUtils.denotesRoot(filterPath)) {
+                    filterPath = "";
+                }
+            } else {
+                filterPath = "";
+            }            
             parentPath = "";
             currentPath = "/";
+            this.settings = filter.getQueryEngineSettings();
         }
-        
+
         void enqueue(Iterator<? extends ChildNodeEntry> it) {
             nodeIterators.addLast(it);
         }
-        
+
         void setPathContainsValue(boolean pathContainsValue) {
             if (init) {
                 throw new IllegalStateException("This iterator is already initialized");
@@ -260,7 +327,7 @@ public class ContentMirrorStoreStrategy implements IndexStoreStrategy {
                 break;
             }
         }
-        
+
         private void fetchNextPossiblyDuplicate() {
             while (!nodeIterators.isEmpty()) {
                 Iterator<? extends ChildNodeEntry> iterator = nodeIterators.getLast();
@@ -268,8 +335,8 @@ public class ContentMirrorStoreStrategy implements IndexStoreStrategy {
                     ChildNodeEntry entry = iterator.next();
 
                     readCount++;
-                    if (readCount % 1000 == 0) {
-                        FilterIterators.checkReadLimit(readCount);
+                    if (readCount % TRAVERSING_WARN == 0) {
+                        FilterIterators.checkReadLimit(readCount, settings);
                         LOG.warn("Traversed " + readCount + " nodes using index " + indexName + " with filter " + filter);
                     }
 
@@ -281,13 +348,32 @@ public class ContentMirrorStoreStrategy implements IndexStoreStrategy {
                     }
                     currentPath = PathUtils.concat(parentPath, name);
 
+                    if (!"".equals(filterPath)) {
+                        String p = currentPath;
+                        if (pathContainsValue) {
+                            String value = PathUtils.elements(p).iterator().next();
+                            p = PathUtils.relativize(value, p);                        
+                        }
+                        if ("".equals(pathPrefix)) {
+                            p = PathUtils.concat("/", p);
+                        } else {
+                            p = PathUtils.concat(pathPrefix, p);
+                        }
+                        if (!"".equals(p) && 
+                                !p.equals(filterPath) && 
+                                !PathUtils.isAncestor(p, filterPath) && 
+                                !PathUtils.isAncestor(filterPath, p)) {
+                            continue;
+                        }
+                    }
+
                     nodeIterators.addLast(node.getChildNodeEntries().iterator());
                     parentPath = currentPath;
 
                     if (node.getBoolean("match")) {
                         return;
                     }
-                    
+
                 } else {
                     nodeIterators.removeLast();
                     parentPath = PathUtils.getParentPath(parentPath);
@@ -306,41 +392,41 @@ public class ContentMirrorStoreStrategy implements IndexStoreStrategy {
                 fetchNext();
                 init = true;
             }
-            String result = currentPath;
+            String result = PathUtils.concat(pathPrefix, currentPath);
             fetchNext();
             return result;
         }
-        
+
         @Override
         public void remove() {
             throw new UnsupportedOperationException();
         }
-        
+
     }
-    
+
     /**
      * A node visitor to recursively traverse a number of nodes.
      */
     interface NodeVisitor {
         void visit(NodeState state);
     }
-    
+
     /**
      * A node visitor that counts the number of matching nodes up to a given
      * maximum, in order to estimate the number of matches.
      */
     static class CountingNodeVisitor implements NodeVisitor {
-        
+
         /**
          * The maximum number of matching nodes to count.
          */
         final int maxCount;
-        
+
         /**
          * The current count of matching nodes.
          */
         int count;
-        
+
         /**
          * The current depth (number of parent nodes).
          */
@@ -351,7 +437,7 @@ public class ContentMirrorStoreStrategy implements IndexStoreStrategy {
          * calculate the average depth.
          */
         long depthTotal;
-        
+
         CountingNodeVisitor(int maxCount) {
             this.maxCount = maxCount;
         }
@@ -373,7 +459,7 @@ public class ContentMirrorStoreStrategy implements IndexStoreStrategy {
                 depth--;
             }
         }
-        
+
         /**
          * The number of matches (at most the maximum count).
          * 
@@ -382,7 +468,7 @@ public class ContentMirrorStoreStrategy implements IndexStoreStrategy {
         int getCount() {
             return count;
         }
-        
+
         /**
          * The number of estimated matches. This value might be higher than the
          * number of counted matches, if the maximum number of matches has been
@@ -402,7 +488,39 @@ public class ContentMirrorStoreStrategy implements IndexStoreStrategy {
             estimatedNodes = Math.min(estimatedNodes, Integer.MAX_VALUE);
             return Math.max(count, (int) estimatedNodes);
         }
-        
+
+    }
+    
+    /**
+     * fetch from the index the <i>key</i> node
+     * 
+     * @param index
+     *            the current index root
+     * @param key
+     *            the 'key' to fetch from the repo
+     * @return the node representing the key
+     */
+    NodeBuilder fetchKeyNode(@Nonnull NodeBuilder index, 
+                             @Nonnull String key) {
+        return index.child(key);
     }
 
+    /**
+     * Physically prune a list of nodes from the index
+     * 
+     * @param index
+     *            the current index
+     * @param builders
+     *            list of nodes to prune
+     * @param key the key of the index we're processing
+     */
+    void prune(final NodeBuilder index, final Deque<NodeBuilder> builders, final String key) {
+        for (NodeBuilder node : builders) {
+            if (node.getBoolean("match") || node.getChildNodeCount(1) > 0) {
+                return;
+            } else if (node.exists()) {
+                node.remove();
+            }
+        }
+    }
 }

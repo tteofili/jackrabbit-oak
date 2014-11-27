@@ -24,11 +24,13 @@ import javax.security.auth.login.LoginException;
 import org.apache.jackrabbit.api.security.user.Authorizable;
 import org.apache.jackrabbit.api.security.user.UserManager;
 import org.apache.jackrabbit.oak.api.ContentSession;
+import org.apache.jackrabbit.oak.namepath.NamePathMapper;
+import org.apache.jackrabbit.oak.plugins.value.ValueFactoryImpl;
 import org.junit.After;
 import org.junit.Before;
-import org.junit.Ignore;
 import org.junit.Test;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
@@ -41,7 +43,11 @@ public class ExternalLoginModuleTest extends ExternalLoginModuleTestBase {
 
     protected final HashMap<String, Object> options = new HashMap<String, Object>();
 
-    private String userId = "testUser";
+    private final String userId = "testUser";
+
+    private final static String TEST_CONSTANT_PROPERTY_NAME = "profile/constantProperty";
+
+    private final static String TEST_CONSTANT_PROPERTY_VALUE = "constant-value";
 
     @Before
     public void before() throws Exception {
@@ -55,6 +61,11 @@ public class ExternalLoginModuleTest extends ExternalLoginModuleTestBase {
 
     protected ExternalIdentityProvider createIDP() {
         return new TestIdentityProvider();
+    }
+
+    @Override
+    protected void destroyIDP(ExternalIdentityProvider idp) {
+    // ignore
     }
 
     @Test
@@ -88,6 +99,7 @@ public class ExternalLoginModuleTest extends ExternalLoginModuleTestBase {
             for (String prop : user.getProperties().keySet()) {
                 assertTrue(a.hasProperty(prop));
             }
+            assertEquals(TEST_CONSTANT_PROPERTY_VALUE, a.getProperty(TEST_CONSTANT_PROPERTY_NAME)[0].getString());
         } finally {
             if (cs != null) {
                 cs.close();
@@ -97,23 +109,71 @@ public class ExternalLoginModuleTest extends ExternalLoginModuleTestBase {
     }
 
     @Test
-    @Ignore("group sync not implemented yet")
+    public void testSyncCreateUserCaseInsensitive() throws Exception {
+        UserManager userManager = getUserManager(root);
+        ContentSession cs = null;
+        try {
+            assertNull(userManager.getAuthorizable(userId));
+
+            cs = login(new SimpleCredentials(userId.toUpperCase(), new char[0]));
+
+            root.refresh();
+
+            Authorizable a = userManager.getAuthorizable(userId);
+            assertNotNull(a);
+            ExternalUser user = idp.getUser(userId);
+            for (String prop : user.getProperties().keySet()) {
+                assertTrue(a.hasProperty(prop));
+            }
+            assertEquals(TEST_CONSTANT_PROPERTY_VALUE, a.getProperty(TEST_CONSTANT_PROPERTY_NAME)[0].getString());
+        } finally {
+            if (cs != null) {
+                cs.close();
+            }
+            options.clear();
+        }
+    }
+
+    @Test
     public void testSyncCreateGroup() throws Exception {
-//        UserManager userManager = getUserManager(root);
-//        ContentSession cs = null;
-//        try {
-//            cs = login(new SimpleCredentials(userId, new char[0]));
-//
-//            root.refresh();
-//            for (String id : ids) {
-//                assertNull(userManager.getAuthorizable(id));
-//            }
-//        } finally {
-//            if (cs != null) {
-//                cs.close();
-//            }
-//            options.clear();
-//        }
+        UserManager userManager = getUserManager(root);
+        ContentSession cs = null;
+        try {
+            cs = login(new SimpleCredentials(userId, new char[0]));
+
+            root.refresh();
+            for (String id : new String[]{"a", "b", "c"}) {
+                assertNotNull(userManager.getAuthorizable(id));
+            }
+            for (String id : new String[]{"aa", "aaa"}) {
+                assertNull(userManager.getAuthorizable(id));
+            }
+        } finally {
+            if (cs != null) {
+                cs.close();
+            }
+            options.clear();
+        }
+    }
+
+    @Test
+    public void testSyncCreateGroupNesting() throws Exception {
+        syncConfig.user().setMembershipNestingDepth(2);
+        UserManager userManager = getUserManager(root);
+        ContentSession cs = null;
+        try {
+            cs = login(new SimpleCredentials(userId, new char[0]));
+
+            root.refresh();
+            for (String id : new String[]{"a", "b", "c", "aa", "aaa"}) {
+                assertNotNull(userManager.getAuthorizable(id));
+            }
+        } finally {
+            if (cs != null) {
+                cs.close();
+            }
+            options.clear();
+        }
     }
 
     @Test
@@ -122,6 +182,7 @@ public class ExternalLoginModuleTest extends ExternalLoginModuleTestBase {
         UserManager userManager = getUserManager(root);
         ExternalUser externalUser = idp.getUser(userId);
         Authorizable user = userManager.createUser(externalUser.getId(), null);
+        user.setProperty("rep:externalId", new ValueFactoryImpl(root, NamePathMapper.DEFAULT).createValue(externalUser.getExternalId().getString()));
         root.commit();
 
         ContentSession cs = null;

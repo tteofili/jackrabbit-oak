@@ -16,6 +16,11 @@
  */
 package org.apache.jackrabbit.oak.security.authorization.permission;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
+
 import javax.annotation.Nullable;
 import javax.jcr.Credentials;
 import javax.jcr.NoSuchWorkspaceException;
@@ -29,7 +34,6 @@ import org.apache.jackrabbit.api.security.JackrabbitAccessControlList;
 import org.apache.jackrabbit.api.security.user.User;
 import org.apache.jackrabbit.api.security.user.UserManager;
 import org.apache.jackrabbit.commons.jackrabbit.authorization.AccessControlUtils;
-import org.apache.jackrabbit.oak.spi.blob.MemoryBlobStore;
 import org.apache.jackrabbit.oak.Oak;
 import org.apache.jackrabbit.oak.api.ContentRepository;
 import org.apache.jackrabbit.oak.api.ContentSession;
@@ -38,14 +42,15 @@ import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.namepath.NamePathMapper;
 import org.apache.jackrabbit.oak.plugins.document.DocumentMK;
 import org.apache.jackrabbit.oak.plugins.document.DocumentNodeStore;
+import org.apache.jackrabbit.oak.plugins.document.memory.MemoryDocumentStore;
 import org.apache.jackrabbit.oak.plugins.index.property.PropertyIndexEditorProvider;
 import org.apache.jackrabbit.oak.plugins.index.property.PropertyIndexProvider;
 import org.apache.jackrabbit.oak.plugins.index.reference.ReferenceEditorProvider;
 import org.apache.jackrabbit.oak.plugins.index.reference.ReferenceIndexProvider;
-import org.apache.jackrabbit.oak.plugins.document.memory.MemoryDocumentStore;
 import org.apache.jackrabbit.oak.plugins.nodetype.TypeEditorProvider;
 import org.apache.jackrabbit.oak.plugins.nodetype.write.InitialContent;
 import org.apache.jackrabbit.oak.security.SecurityProviderImpl;
+import org.apache.jackrabbit.oak.spi.blob.MemoryBlobStore;
 import org.apache.jackrabbit.oak.spi.security.ConfigurationParameters;
 import org.apache.jackrabbit.oak.spi.security.SecurityProvider;
 import org.apache.jackrabbit.oak.spi.security.authentication.ConfigurationUtil;
@@ -55,11 +60,6 @@ import org.apache.jackrabbit.oak.spi.security.user.UserConfiguration;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
-
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
 
 public class ClusterPermissionsTest {
 
@@ -87,10 +87,10 @@ public class ClusterPermissionsTest {
         DocumentMK.Builder builder;
 
         builder = new DocumentMK.Builder();
-        builder.setDocumentStore(ds).setBlobStore(bs).setAsyncDelay(1);
+        builder.setDocumentStore(ds).setBlobStore(bs).setAsyncDelay(0);
         ns1 = builder.setClusterId(1).getNodeStore();
         builder = new DocumentMK.Builder();
-        builder.setDocumentStore(ds).setBlobStore(bs).setAsyncDelay(1);
+        builder.setDocumentStore(ds).setBlobStore(bs).setAsyncDelay(0);
         ns2 = builder.setClusterId(2).getNodeStore();
 
         Oak oak = new Oak(ns1)
@@ -106,6 +106,9 @@ public class ClusterPermissionsTest {
         root1 = adminSession1.getLatestRoot();
         userManager1 = securityProvider1.getConfiguration(UserConfiguration.class).getUserManager(root1, namePathMapper);
         aclMgr1 = securityProvider1.getConfiguration(AuthorizationConfiguration.class).getAccessControlManager(root1, namePathMapper);
+
+        // make sure initial content is visible to ns2
+        syncClusterNodes();
 
         oak = new Oak(ns2)
                 .with(new InitialContent())
@@ -155,7 +158,7 @@ public class ClusterPermissionsTest {
     public void testCreateUser() throws Exception {
         userManager1.createUser("testUser", "testUser");
         root1.commit();
-        Thread.sleep(100);
+        syncClusterNodes();
         root2.refresh();
         assertNotNull("testUser must exist on 2nd cluster node", userManager2.getAuthorizable("testUser"));
     }
@@ -170,7 +173,7 @@ public class ClusterPermissionsTest {
         aclMgr1.setPolicy("/testNode", acl1);
         root1.commit();
 
-        Thread.sleep(100);
+        syncClusterNodes();
         root2.refresh();
         JackrabbitAccessControlList acl2 = AccessControlUtils.getAccessControlList(aclMgr2, "/testNode");
         AccessControlEntry[] aces = acl2.getAccessControlEntries();
@@ -197,7 +200,7 @@ public class ClusterPermissionsTest {
         aclMgr1.setPolicy("/testNode", acl1);
         root1.commit();
 
-        Thread.sleep(100);
+        syncClusterNodes();
         root2.refresh();
 
         // login with testUser1 and testUser2 (on cluster node 2)
@@ -216,7 +219,7 @@ public class ClusterPermissionsTest {
         aclMgr1.setPolicy("/testNode", acl1);
         root1.commit();
 
-        Thread.sleep(100);
+        syncClusterNodes();
         root2.refresh();
 
         // testUser1 can read /testNode
@@ -224,6 +227,11 @@ public class ClusterPermissionsTest {
 
         // testUser2 can also read /testNode
         assertTrue(session2.getLatestRoot().getTree("/testNode").exists());
+    }
+
+    private void syncClusterNodes() {
+        ns1.runBackgroundOperations();
+        ns2.runBackgroundOperations();
     }
 
 }

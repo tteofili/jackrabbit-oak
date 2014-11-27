@@ -16,6 +16,8 @@
  */
 package org.apache.jackrabbit.oak.plugins.index.solr.configuration;
 
+import java.util.Collection;
+
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.spi.query.Filter;
 
@@ -31,14 +33,14 @@ public interface OakSolrConfiguration {
      * @param propertyType the {@link org.apache.jackrabbit.oak.api.Type} to be indexed / searched
      * @return a <code>String</code> representing the Solr field to be used for the given {@link org.apache.jackrabbit.oak.api.Type}.
      */
-    public String getFieldNameFor(Type<?> propertyType);
+    String getFieldNameFor(Type<?> propertyType);
 
     /**
      * Provide the field name for indexing / searching paths
      *
      * @return a <code>String</code> representing the Solr field to be used for paths.
      */
-    public String getPathField();
+    String getPathField();
 
     /**
      * Provide a field name to search over for the given {@link org.apache.jackrabbit.oak.spi.query.Filter.PathRestriction}
@@ -46,7 +48,7 @@ public interface OakSolrConfiguration {
      * @param pathRestriction the {@link org.apache.jackrabbit.oak.spi.query.Filter.PathRestriction} used for filtering search results
      * @return the field name as a <code>String</code> to be used by Solr for the given restriction
      */
-    public String getFieldForPathRestriction(Filter.PathRestriction pathRestriction);
+    String getFieldForPathRestriction(Filter.PathRestriction pathRestriction);
 
     /**
      * Provide a field name to search over for the given {@link org.apache.jackrabbit.oak.spi.query.Filter.PropertyRestriction}
@@ -54,13 +56,57 @@ public interface OakSolrConfiguration {
      * @param propertyRestriction the {@link org.apache.jackrabbit.oak.spi.query.Filter.PropertyRestriction} used for filtering search results
      * @return the field name as a <code>String</code> to be used by Solr for the given restriction
      */
-    public String getFieldForPropertyRestriction(Filter.PropertyRestriction propertyRestriction);
+    String getFieldForPropertyRestriction(Filter.PropertyRestriction propertyRestriction);
 
     /**
      * Provide the commit policy to be used with the underlying Solr instance
      *
      * @return a {@link org.apache.jackrabbit.oak.plugins.index.solr.configuration.CommitPolicy}
      */
-    public CommitPolicy getCommitPolicy();
+    CommitPolicy getCommitPolicy();
 
+    /**
+     * Provide a field name that is used as the default "catch all" field for searching over all the data
+     *
+     * @return a <code>String</code> representing the Solr field to be used as "catch all" field
+     */
+    String getCatchAllField();
+
+    /**
+     * Provide the number of documents (rows) to be fetched for each Solr query
+     *
+     * @return an <code>int</code> for the setting of Solr rows parameter
+     */
+    int getRows();
+
+    /**
+     * Define if the Solr index should be used to address property restrictions
+     *
+     * @return <code>true</code> if {@link org.apache.jackrabbit.oak.plugins.index.solr.query.SolrQueryIndex} should be used
+     * for {@link org.apache.jackrabbit.oak.spi.query.Filter.PropertyRestriction}s
+     */
+    boolean useForPropertyRestrictions();
+
+    /**
+     * Define if the Solr index should be used to filter by primary types
+     *
+     * @return <code>true</code> if {@link org.apache.jackrabbit.oak.plugins.index.solr.query.SolrQueryIndex} should be used
+     * for filtering by primary types
+     */
+    boolean useForPrimaryTypes();
+
+    /**
+     * Define if the Solr index should be used to filter by path restrictions
+     *
+     * @return <code>true</code> if {@link org.apache.jackrabbit.oak.plugins.index.solr.query.SolrQueryIndex} should be used
+     * for filtering by {@link org.apache.jackrabbit.oak.spi.query.Filter.PathRestriction}s
+     */
+    boolean useForPathRestrictions();
+
+    /**
+     * Provide the collection of properties that should be neither indexed nor searched by the Solr index
+     *
+     * @return a {@link java.util.Collection} of names of properties to be ignored
+     */
+    Collection<String> getIgnoredProperties();
 }

@@ -26,7 +26,6 @@ import org.apache.jackrabbit.oak.plugins.index.IndexUpdateProvider;
 import org.apache.jackrabbit.oak.spi.commit.CommitHook;
 import org.apache.jackrabbit.oak.spi.commit.CommitInfo;
 import org.apache.jackrabbit.oak.spi.commit.EditorHook;
-import org.apache.jackrabbit.oak.spi.query.QueryIndexProvider;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeStore;
 
@@ -52,12 +51,10 @@ public final class OakInitializer {
     public static void initialize(@Nonnull Iterable<WorkspaceInitializer> initializer,
                                   @Nonnull NodeStore store,
                                   @Nonnull String workspaceName,
-                                  @Nonnull IndexEditorProvider indexEditor,
-                                  @Nonnull QueryIndexProvider indexProvider,
-                                  @Nonnull CommitHook commitHook) {
+                                  @Nonnull IndexEditorProvider indexEditor) {
         NodeBuilder builder = store.getRoot().builder();
         for (WorkspaceInitializer wspInit : initializer) {
-            wspInit.initialize(builder, workspaceName, indexProvider, commitHook);
+            wspInit.initialize(builder, workspaceName);
         }
         try {
             CommitHook hook = new EditorHook(new IndexUpdateProvider(indexEditor));

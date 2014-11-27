@@ -35,6 +35,7 @@ import org.apache.jackrabbit.oak.plugins.index.property.PropertyIndexProvider;
 import org.apache.jackrabbit.oak.plugins.tree.ImmutableTree;
 import org.apache.jackrabbit.oak.query.ExecutionContext;
 import org.apache.jackrabbit.oak.query.QueryEngineImpl;
+import org.apache.jackrabbit.oak.query.QueryEngineSettings;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 
 /**
@@ -52,8 +53,8 @@ public final class ImmutableRoot implements Root {
     }
 
     public ImmutableRoot(@Nonnull Root root) {
-        if (root instanceof AbstractRoot) {
-            rootTree = new ImmutableTree(((AbstractRoot) root).getBaseState());
+        if (root instanceof MutableRoot) {
+            rootTree = new ImmutableTree(((MutableRoot) root).getBaseState());
         } else if (root instanceof ImmutableRoot) {
             rootTree = ((ImmutableRoot) root).getTree("/");
         } else {
@@ -64,6 +65,14 @@ public final class ImmutableRoot implements Root {
     public ImmutableRoot(@Nonnull ImmutableTree rootTree) {
         checkArgument(rootTree.isRoot());
         this.rootTree = rootTree;
+    }
+
+    public static ImmutableRoot getInstance(@Nonnull Root root) {
+        if (root instanceof ImmutableRoot) {
+            return (ImmutableRoot) root;
+        } else {
+            return new ImmutableRoot(root);
+        }
     }
 
     //---------------------------------------------------------------< Root >---
@@ -100,11 +109,6 @@ public final class ImmutableRoot implements Root {
     }
 
     @Override
-    public void commit(String path) {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
     public void commit() {
         throw new UnsupportedOperationException();
     }
@@ -122,6 +126,7 @@ public final class ImmutableRoot implements Root {
             protected ExecutionContext getExecutionContext() {
                 return new ExecutionContext(
                         rootTree.getNodeState(), ImmutableRoot.this,
+                        new QueryEngineSettings(),
                         new PropertyIndexProvider());
             }
         };

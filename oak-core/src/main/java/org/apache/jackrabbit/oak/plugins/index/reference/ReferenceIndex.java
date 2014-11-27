@@ -65,6 +65,10 @@ class ReferenceIndex implements QueryIndex {
             // not an appropriate index for full-text search
             return POSITIVE_INFINITY;
         }
+        if (filter.containsNativeConstraint()) {
+            // not an appropriate index for native search
+            return Double.POSITIVE_INFINITY;
+        }
         for (PropertyRestriction pr : filter.getPropertyRestrictions()) {
             if (pr.propertyType == REFERENCE
                     || pr.propertyType == WEAKREFERENCE) {
@@ -81,23 +85,23 @@ class ReferenceIndex implements QueryIndex {
             if (pr.propertyType == REFERENCE) {
                 String uuid = pr.first.getValue(STRING);
                 String name = pr.propertyName;
-                return lookup(root, uuid, name, REF_NAME);
+                return lookup(root, uuid, name, REF_NAME, filter);
             }
             if (pr.propertyType == WEAKREFERENCE) {
                 String uuid = pr.first.getValue(STRING);
                 String name = pr.propertyName;
-                return lookup(root, uuid, name, WEAK_REF_NAME);
+                return lookup(root, uuid, name, WEAK_REF_NAME, filter);
             }
         }
-        return newPathCursor(new ArrayList<String>());
+        return newPathCursor(new ArrayList<String>(), filter.getQueryEngineSettings());
     }
 
     private static Cursor lookup(NodeState root, String uuid,
-            final String name, String index) {
+            final String name, String index, Filter filter) {
         NodeState indexRoot = root.getChildNode(INDEX_DEFINITIONS_NAME)
                 .getChildNode(NAME);
         if (!indexRoot.exists()) {
-            return newPathCursor(new ArrayList<String>());
+            return newPathCursor(new ArrayList<String>(), filter.getQueryEngineSettings());
         }
         Iterable<String> paths = STORE.query(new FilterImpl(), index + "("
                 + uuid + ")", indexRoot, index, ImmutableSet.of(uuid));
@@ -116,7 +120,7 @@ class ReferenceIndex implements QueryIndex {
                 return getParentPath(path);
             }
         });
-        return newPathCursor(paths);
+        return newPathCursor(paths, filter.getQueryEngineSettings());
     }
 
     @Override

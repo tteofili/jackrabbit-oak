@@ -19,13 +19,12 @@
 
 package org.apache.jackrabbit.oak.spi.commit;
 
-import static com.google.common.collect.Iterables.concat;
 import static java.util.concurrent.Executors.newFixedThreadPool;
 import static org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState.EMPTY_NODE;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
-import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -35,15 +34,15 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import com.google.common.collect.Lists;
-
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.junit.Test;
 
 public class BackgroundObserverTest {
     private static final CommitInfo COMMIT_INFO = new CommitInfo("no-session", null);
+    public static final int CHANGE_COUNT = 1024;
 
-    private final List<List<Runnable>> assertionLists = Lists.newArrayList();
+    private final List<Runnable> assertions = Lists.newArrayList();
     private CountDownLatch doneCounter;
 
     /**
@@ -52,16 +51,16 @@ public class BackgroundObserverTest {
      */
     @Test
     public void concurrentObservers() throws InterruptedException {
-        Observer observer = createCompositeObserver(newFixedThreadPool(32), 128);
+        Observer observer = createCompositeObserver(newFixedThreadPool(16), 128);
 
-        for (int k = 0; k < 1024; k++) {
+        for (int k = 0; k < CHANGE_COUNT; k++) {
             contentChanged(observer, k);
         }
         done(observer);
 
         assertTrue(doneCounter.await(5, TimeUnit.SECONDS));
 
-        for (Runnable assertion : concat(assertionLists)) {
+        for (Runnable assertion : assertions) {
             assertion.run();
         }
     }
@@ -86,22 +85,27 @@ public class BackgroundObserverTest {
         return observer;
     }
 
+    private synchronized void done(List<Runnable> assertions) {
+        this.assertions.addAll(assertions);
+        doneCounter.countDown();
+    }
+
     private Observer createBackgroundObserver(ExecutorService executor) {
+        // Ensure the observation revision queue is sufficiently large to hold
+        // all revisions. Otherwise waiting for events might block since pending
+        // events would only be released on a subsequent commit. See OAK-1491
+        int queueLength = CHANGE_COUNT + 1;
+
         return new BackgroundObserver(new Observer() {
-            final List<Runnable> assertions = newAssertionList();
-
-            private List<Runnable> newAssertionList() {
-                ArrayList<Runnable> assertionList = Lists.newArrayList();
-                assertionLists.add(assertionList);
-                return assertionList;
-            }
-
-            NodeState previous;
+            // Need synchronised list here to maintain correct memory barrier
+            // when this is passed on to done(List<Runnable>)
+            final List<Runnable> assertions = Collections.synchronizedList(Lists.<Runnable>newArrayList());
+            volatile NodeState previous;
 
             @Override
             public void contentChanged(@Nonnull final NodeState root, @Nullable CommitInfo info) {
                 if (root.hasProperty("done")) {
-                    doneCounter.countDown();
+                    done(assertions);
                 } else if (previous != null) {
                     // Copy previous to avoid closing over it
                     final NodeState p = previous;
@@ -119,7 +123,7 @@ public class BackgroundObserverTest {
             private Long getP(NodeState previous) {
                 return previous.getProperty("p").getValue(Type.LONG);
             }
-        }, executor, 1024);
+        }, executor, queueLength);
     }
 
 }

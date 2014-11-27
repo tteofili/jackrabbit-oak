@@ -18,41 +18,67 @@ package org.apache.jackrabbit.oak.plugins.segment;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
+import static java.lang.Integer.parseInt;
+import static org.apache.jackrabbit.oak.plugins.segment.Segment.RECORD_ALIGN_BITS;
 
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
+/**
+ * The record id. This includes the segment id and the offset within the
+ * segment.
+ */
 public final class RecordId implements Comparable<RecordId> {
+
+    private static final Pattern PATTERN = Pattern.compile(
+            "([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"
+            + "(:(0|[1-9][0-9]*)|\\.([0-9a-f]{4}))");
 
     public static RecordId[] EMPTY_ARRAY = new RecordId[0];
 
-    public static RecordId fromString(String id) {
-        int colon = id.indexOf(':');
-        if (colon != -1) {
-            return new RecordId(
-                    UUID.fromString(id.substring(0, colon)),
-                    Integer.parseInt(id.substring(colon + 1)));
+    public static RecordId fromString(SegmentTracker factory, String id) {
+        Matcher matcher = PATTERN.matcher(id);
+        if (matcher.matches()) {
+            UUID uuid = UUID.fromString(matcher.group(1));
+            SegmentId segmentId = factory.getSegmentId(
+                    uuid.getMostSignificantBits(),
+                    uuid.getLeastSignificantBits());
+
+            int offset;
+            if (matcher.group(3) != null) {
+                offset = parseInt(matcher.group(3));
+            } else {
+                offset = parseInt(matcher.group(4), 16) << RECORD_ALIGN_BITS;
+            }
+
+            return new RecordId(segmentId, offset);
         } else {
-            throw new IllegalArgumentException("Bad RecordId: " + id);
+            throw new IllegalArgumentException("Bad record identifier: " + id);
         }
     }
 
-    private final UUID segmentId;
+    private final SegmentId segmentId;
 
     private final int offset;
 
-    public RecordId(UUID segmentId, int offset) {
+    public RecordId(SegmentId segmentId, int offset) {
         checkArgument(offset < Segment.MAX_SEGMENT_SIZE);
-        checkArgument(offset == Segment.align(offset));
+        checkArgument((offset % (1 << RECORD_ALIGN_BITS)) == 0);
         this.segmentId = checkNotNull(segmentId);
         this.offset = offset;
     }
 
-    public UUID getSegmentId() {
+    public SegmentId getSegmentId() {
         return segmentId;
     }
 
     public int getOffset() {
         return offset;
+    }
+
+    public Segment getSegment() {
+        return segmentId.getSegment();
     }
 
     //--------------------------------------------------------< Comparable >--
@@ -71,7 +97,14 @@ public final class RecordId implements Comparable<RecordId> {
 
     @Override
     public String toString() {
-        return segmentId + ":" + offset;
+        return String.format("%s.%04x", segmentId, offset >> RECORD_ALIGN_BITS);
+    }
+
+    /**
+     * Returns the record id string representation used in Oak 1.0.
+     */
+    public String toString10() {
+        return String.format("%s:%d", segmentId, offset);
     }
 
     @Override

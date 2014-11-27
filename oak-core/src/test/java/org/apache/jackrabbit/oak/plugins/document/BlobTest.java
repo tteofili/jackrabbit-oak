@@ -18,9 +18,17 @@ package org.apache.jackrabbit.oak.plugins.document;
 
 import static org.junit.Assert.assertEquals;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Random;
 
+import org.apache.jackrabbit.oak.api.Blob;
+import org.apache.jackrabbit.oak.kernel.BlobSerializer;
+import org.apache.jackrabbit.oak.plugins.blob.BlobStoreBlob;
+import org.apache.jackrabbit.oak.plugins.memory.ArrayBasedBlob;
+import org.apache.jackrabbit.oak.spi.blob.MemoryBlobStore;
 import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,7 +39,7 @@ import com.mongodb.DB;
  * Tests the blob store.
  */
 public class BlobTest {
-    
+
     private static final Logger LOG = LoggerFactory.getLogger(RandomizedClusterTest.class);
 
 //     private static final boolean MONGO_DB = true;
@@ -41,11 +49,11 @@ public class BlobTest {
     private static final boolean MONGO_DB = false;
     private static final long TOTAL_SIZE = 1 * 1024 * 1024;
     private static final int DOCUMENT_COUNT = 10;
-    
+
     DB openMongoConnection() {
         return MONGO_DB ? MongoUtils.getConnection().getDB() : null;
     }
-    
+
     void dropCollections() {
         if (MONGO_DB) {
             MongoUtils.dropCollections(MongoUtils.getConnection().getDB());
@@ -58,7 +66,7 @@ public class BlobTest {
                 setMongoDB(openMongoConnection()).open();
         long blobSize = TOTAL_SIZE / DOCUMENT_COUNT;
         ArrayList<String> blobIds = new ArrayList<String>();
-        // use a new seed each time, to allow running the test multiple times 
+        // use a new seed each time, to allow running the test multiple times
         Random r = new Random();
         for (int i = 0; i < DOCUMENT_COUNT; i++) {
             log("writing " + i + "/" + DOCUMENT_COUNT);
@@ -70,9 +78,59 @@ public class BlobTest {
         }
         mk.dispose();
     }
-    
+
+    @Test
+    public void testBlobSerialization() throws Exception{
+        TestBlobStore blobStore = new TestBlobStore();
+        DocumentMK mk = new DocumentMK.Builder().setBlobStore(blobStore).open();
+        BlobSerializer blobSerializer = mk.getNodeStore().getBlobSerializer();
+
+        Blob blob = new BlobStoreBlob(blobStore, "foo");
+        assertEquals("foo", blobSerializer.serialize(blob));
+        assertEquals(0, blobStore.writeCount);
+
+        blob = new ArrayBasedBlob("foo".getBytes());
+        blobSerializer.serialize(blob);
+        assertEquals(1, blobStore.writeCount);
+
+        byte[] bytes = "foo".getBytes();
+        String blobId = blobStore.writeBlob(new ByteArrayInputStream(bytes));
+        String reference = blobStore.getReference(blobId);
+        blob = new ReferencedBlob("foo".getBytes(), reference);
+
+        blobStore.writeCount = 0;
+        blobSerializer.serialize(blob);
+
+        //Using reference so no reference should be written
+        assertEquals(0, blobStore.writeCount);
+    }
+
     private static void log(String s) {
         LOG.info(s);
     }
-    
+
+
+    private static class TestBlobStore extends MemoryBlobStore {
+        int writeCount;
+
+        @Override
+        public String writeBlob(InputStream in) throws IOException {
+            writeCount++;
+            return super.writeBlob(in);
+        }
+    }
+
+    private static class ReferencedBlob extends ArrayBasedBlob {
+        private final String reference;
+
+        public ReferencedBlob(byte[] value, String reference) {
+            super(value);
+            this.reference = reference;
+        }
+
+        @Override
+        public String getReference() {
+            return reference;
+        }
+    }
 }

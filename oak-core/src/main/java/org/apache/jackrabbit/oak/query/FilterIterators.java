@@ -20,39 +20,34 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 /**
  * Filtering iterators that are useful for queries with limit, offset, order by,
  * or distinct.
  */
 public class FilterIterators {
-
-    /**
-     * How many nodes a query may read at most into memory, for "order by" and
-     * "distinct" queries. If this limit is exceeded, the query throws an
-     * exception.
-     */
-    public static final int QUERY_LIMIT_IN_MEMORY = 
-            Integer.getInteger("oak.queryLimitInMemory", 10000);
-
-    /**
-     * How many nodes a query may read at most (raw read operations, including
-     * skipped nodes). If this limit is exceeded, the query throws an exception.
-     */
-    public static final int QUERY_LIMIT_READS = 
-            Integer.getInteger("oak.queryLimitReads", 100000);
     
+    private static final Logger LOG = LoggerFactory.getLogger(FilterIterators.class);    
+
     /**
      * Verify the number of in-memory nodes is below the limit.
      * 
      * @param count the number of nodes
+     * @param settings the query engine settings
      * @throws UnsupportedOperationException if the limit was exceeded
      */
-    public static void checkMemoryLimit(long count) {
-        if (count > QUERY_LIMIT_IN_MEMORY) {
-            throw new UnsupportedOperationException(
-                    "The query read more than " + 
-                            QUERY_LIMIT_IN_MEMORY + " nodes in memory. " + 
-                            "To avoid running out of memory, processing was stopped.");
+    public static void checkMemoryLimit(long count, QueryEngineSettings settings) {
+        long maxMemoryEntries = settings.getLimitInMemory();
+        if (count > maxMemoryEntries) {
+            String message = "The query read more than " + 
+                    maxMemoryEntries + " nodes in memory.";
+            UnsupportedOperationException e = new UnsupportedOperationException(
+                    message + 
+                    " To avoid running out of memory, processing was stopped.");
+            LOG.warn(message, e);
+            throw e;
         }
     }
     
@@ -60,29 +55,34 @@ public class FilterIterators {
      * Verify the number of node read operations is below the limit.
      * 
      * @param count the number of read operations
+     * @param settings the query engine settings
      * @throws UnsupportedOperationException if the limit was exceeded
      */
-    public static void checkReadLimit(long count) {
-        if (count > QUERY_LIMIT_READS) {
-            throw new UnsupportedOperationException(
-                    "The query read or traversed more than " + 
-                            QUERY_LIMIT_READS + " nodes. " + 
-                            "To avoid affecting other tasks, processing was stopped.");
+    public static void checkReadLimit(long count, QueryEngineSettings settings) {
+        long maxReadEntries = settings.getLimitReads();
+        if (count > maxReadEntries) {
+            String message = "The query read or traversed more than " + 
+                    maxReadEntries + " nodes.";
+            UnsupportedOperationException e = new UnsupportedOperationException(
+                    message + 
+                    " To avoid affecting other tasks, processing was stopped.");
+            LOG.warn(message, e);
+            throw e;
         }
     }
 
     public static <K> Iterator<K> newCombinedFilter(
             Iterator<K> it, boolean distinct, long limit, long offset, 
-            Comparator<K> orderBy) {
+            Comparator<K> orderBy, QueryEngineSettings settings) {
         if (distinct) {
-            it = FilterIterators.newDistinct(it);
+            it = FilterIterators.newDistinct(it, settings);
         }
         if (orderBy != null) {
             // avoid overflow (both offset and limit could be Long.MAX_VALUE)
             int max = (int) Math.min(Integer.MAX_VALUE, 
                     Math.min(Integer.MAX_VALUE, offset) + 
                     Math.min(Integer.MAX_VALUE, limit));
-            it = FilterIterators.newSort(it, orderBy, max);
+            it = FilterIterators.newSort(it, orderBy, max, settings);
         }
         if (offset != 0) {
             it = FilterIterators.newOffset(it, offset);
@@ -93,8 +93,8 @@ public class FilterIterators {
         return it;
     }
     
-    public static <K> DistinctIterator<K> newDistinct(Iterator<K> it) {
-        return new DistinctIterator<K>(it);
+    public static <K> DistinctIterator<K> newDistinct(Iterator<K> it, QueryEngineSettings settings) {
+        return new DistinctIterator<K>(it, settings);
     }
     
     public static <K> Iterator<K> newLimit(Iterator<K> it, long limit) {
@@ -105,8 +105,8 @@ public class FilterIterators {
         return new OffsetIterator<K>(it, offset);
     }
     
-    public static <K> Iterator<K> newSort(Iterator<K> it, Comparator<K> orderBy, int max) {
-        return new SortIterator<K>(it, orderBy, max);
+    public static <K> Iterator<K> newSort(Iterator<K> it, Comparator<K> orderBy, int max, QueryEngineSettings settings) {
+        return new SortIterator<K>(it, orderBy, max, settings);
     }
 
     /**
@@ -119,12 +119,14 @@ public class FilterIterators {
     static class DistinctIterator<K> implements Iterator<K> {
 
         private final Iterator<K> source;
+        private final QueryEngineSettings settings;
         private final HashSet<K> distinctSet;
         private K current;
         private boolean end;
 
-        DistinctIterator(Iterator<K> source) {
+        DistinctIterator(Iterator<K> source, QueryEngineSettings settings) {
             this.source = source;
+            this.settings = settings;
             distinctSet = new HashSet<K>();
         }
 
@@ -135,7 +137,7 @@ public class FilterIterators {
             while (source.hasNext()) {
                 current = source.next();
                 if (distinctSet.add(current)) {
-                    checkMemoryLimit(distinctSet.size());
+                    checkMemoryLimit(distinctSet.size(), settings);
                     return;
                 }
             }
@@ -181,14 +183,16 @@ public class FilterIterators {
     static class SortIterator<K> implements Iterator<K> {
 
         private final Iterator<K> source;
+        private final QueryEngineSettings settings;
         private final Comparator<K> orderBy;
         private Iterator<K> result;
         private final int max;
 
-        SortIterator(Iterator<K> source, Comparator<K> orderBy, int max) {
+        SortIterator(Iterator<K> source, Comparator<K> orderBy, int max, QueryEngineSettings settings) {
             this.source = source;
             this.orderBy = orderBy;
             this.max = max;
+            this.settings = settings;
         }
         
         private void init() {
@@ -199,7 +203,7 @@ public class FilterIterators {
             while (source.hasNext()) {
                 K x = source.next();
                 list.add(x);
-                checkMemoryLimit(list.size());
+                checkMemoryLimit(list.size(), settings);
                 // from time to time, sort and truncate
                 // this should results in O(n*log(2*keep)) operations,
                 // which is close to the optimum O(n*log(keep))

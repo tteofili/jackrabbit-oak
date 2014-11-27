@@ -16,6 +16,9 @@
  */
 package org.apache.jackrabbit.oak.jcr.lock;
 
+import static java.lang.Boolean.TRUE;
+import static org.apache.jackrabbit.oak.jcr.repository.RepositoryImpl.RELAXED_LOCKING;
+
 import java.util.Set;
 
 import javax.annotation.Nonnull;
@@ -27,6 +30,8 @@ import javax.jcr.lock.Lock;
 import javax.jcr.lock.LockException;
 import javax.jcr.lock.LockManager;
 
+import org.apache.jackrabbit.api.security.user.Authorizable;
+import org.apache.jackrabbit.api.security.user.User;
 import org.apache.jackrabbit.oak.api.Tree.Status;
 import org.apache.jackrabbit.oak.jcr.session.SessionContext;
 import org.apache.jackrabbit.oak.jcr.delegate.NodeDelegate;
@@ -51,7 +56,7 @@ public class LockManagerImpl implements LockManager {
 
     @Override @Nonnull
     public String[] getLockTokens() throws RepositoryException {
-        return perform(new SessionOperation<String[]>() {
+        return perform(new SessionOperation<String[]>("getLockTokens") {
             @Override @Nonnull
             public String[] perform() {
                 Set<String> tokens = sessionContext.getOpenScopedLocks();
@@ -64,7 +69,7 @@ public class LockManagerImpl implements LockManager {
     public void addLockToken(final String lockToken)
             throws RepositoryException {
         try {
-            perform(new LockOperation<String>(sessionContext, lockToken) {
+            perform(new LockOperation<String>(sessionContext, lockToken, "addLockToken") {
                 @Override
                 protected String perform(NodeDelegate node)
                         throws LockException {
@@ -86,7 +91,7 @@ public class LockManagerImpl implements LockManager {
     @Override
     public void removeLockToken(final String lockToken)
             throws RepositoryException {
-        if (!perform(new SessionOperation<Boolean>() {
+        if (!perform(new SessionOperation<Boolean>("removeLockToken") {
             @Override @Nonnull
             public Boolean perform() {
                 // TODO: name mapping?
@@ -100,7 +105,7 @@ public class LockManagerImpl implements LockManager {
 
     @Override
     public boolean isLocked(String absPath) throws RepositoryException {
-        return perform(new LockOperation<Boolean>(sessionContext, absPath) {
+        return perform(new LockOperation<Boolean>(sessionContext, absPath, "isLocked") {
             @Override
             protected Boolean perform(NodeDelegate node) {
                 return node.isLocked();
@@ -110,7 +115,7 @@ public class LockManagerImpl implements LockManager {
 
     @Override
     public boolean holdsLock(String absPath) throws RepositoryException {
-        return perform(new LockOperation<Boolean>(sessionContext, absPath) {
+        return perform(new LockOperation<Boolean>(sessionContext, absPath, "holdsLock") {
             @Override
             protected Boolean perform(NodeDelegate node) {
                 return node.holdsLock(false);
@@ -121,7 +126,7 @@ public class LockManagerImpl implements LockManager {
     @Override @Nonnull
     public Lock getLock(String absPath) throws RepositoryException {
         NodeDelegate lock = perform(
-                new LockOperation<NodeDelegate>(sessionContext, absPath) {
+                new LockOperation<NodeDelegate>(sessionContext, absPath, "getLock") {
                     @Override
                     protected NodeDelegate perform(NodeDelegate node) {
                         return node.getLock();
@@ -139,7 +144,7 @@ public class LockManagerImpl implements LockManager {
             String absPath, final boolean isDeep, final boolean isSessionScoped,
             long timeoutHint, String ownerInfo) throws RepositoryException {
         return new LockImpl(sessionContext, perform(
-                new LockOperation<NodeDelegate>(sessionContext, absPath) {
+                new LockOperation<NodeDelegate>(sessionContext, absPath, "lock") {
                     @Override
                     protected NodeDelegate perform(NodeDelegate node)
                             throws RepositoryException {
@@ -162,13 +167,12 @@ public class LockManagerImpl implements LockManager {
 
     @Override
     public void unlock(String absPath) throws RepositoryException {
-        perform(new LockOperation<Void>(sessionContext, absPath) {
+        perform(new LockOperation<Void>(sessionContext, absPath, "unlock") {
             @Override
             protected Void perform(NodeDelegate node)
                     throws RepositoryException {
                 String path = node.getPath();
-                if (sessionContext.getSessionScopedLocks().contains(path)
-                        || sessionContext.getOpenScopedLocks().contains(path)) {
+                if (canUnlock(path, node)) {
                     node.unlock();
                     sessionContext.getSessionScopedLocks().remove(path);
                     sessionContext.getOpenScopedLocks().remove(path);
@@ -178,7 +182,31 @@ public class LockManagerImpl implements LockManager {
                     throw new LockException("Not an owner of the lock " + path);
                 }
             }
+            private boolean canUnlock(String path, NodeDelegate node) {
+                if (sessionContext.getSessionScopedLocks().contains(path)
+                        || sessionContext.getOpenScopedLocks().contains(path)) {
+                    return true;
+                } else if (sessionContext.getAttributes().get(RELAXED_LOCKING) == TRUE) {
+                    String user = sessionContext.getSessionDelegate().getAuthInfo().getUserID();
+                    return node.isLockOwner(user) || isAdmin(sessionContext, user);
+                } else {
+                    return false;
+                }
+            }
         });
+    }
+
+    private boolean isAdmin(SessionContext sessionContext, String user) {
+        try {
+            Authorizable a = sessionContext.getUserManager().getAuthorizable(
+                    user);
+            if (a != null && !a.isGroup()) {
+                return ((User) a).isAdmin();
+            }
+        } catch (RepositoryException e) {
+            // ?
+        }
+        return false;
     }
 
     private <T> T perform(SessionOperation<T> operation)

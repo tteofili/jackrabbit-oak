@@ -51,6 +51,7 @@ import org.slf4j.LoggerFactory;
  * to just one change.
  */
 public class BackgroundObserver implements Observer, Closeable {
+
     /**
      * Signal for the background thread to stop processing changes.
      */
@@ -165,6 +166,12 @@ public class BackgroundObserver implements Observer, Closeable {
     }
 
     /**
+     * Called when ever an item has been added to the queue
+     * @param queueSize  size of the queue
+     */
+    protected void added(int queueSize) { }
+
+    /**
      * Clears the change queue and signals the background thread to stop
      * without making any further {@link #contentChanged(NodeState, CommitInfo)}
      * calls to the background observer. If the thread is currently in the
@@ -225,6 +232,7 @@ public class BackgroundObserver implements Observer, Closeable {
         // to onComplete are not a problem here since we always pass the same value.
         // Thus there is no question as to which of the handlers will effectively run.
         currentTask.onComplete(completionHandler);
+        added(queue.size());
     }
 
     //------------------------------------------------------------< internal >---
@@ -237,9 +245,9 @@ public class BackgroundObserver implements Observer, Closeable {
      * A future task with a on complete handler.
      */
     private static class ListenableFutureTask extends FutureTask<Void> {
-        private final AtomicBoolean ran = new AtomicBoolean(false);
+        private final AtomicBoolean completed = new AtomicBoolean(false);
 
-        private volatile Runnable task;
+        private volatile Runnable onComplete;
 
         public ListenableFutureTask(Callable<Void> callable) {
             super(callable);
@@ -256,23 +264,23 @@ public class BackgroundObserver implements Observer, Closeable {
          * <p>
          * Note: there is no guarantee to which handler will run when the method
          * is called multiple times with different arguments.
-         * @param task
+         * @param onComplete
          */
-        public void onComplete(Runnable task) {
-            this.task = task;
+        public void onComplete(Runnable onComplete) {
+            this.onComplete = onComplete;
             if (isDone()) {
-                run(task);
+                run(onComplete);
             }
         }
 
         @Override
         protected void done() {
-            run(task);
+            run(onComplete);
         }
 
-        private void run(Runnable runnable) {
-            if (runnable != null && ran.compareAndSet(false, true)) {
-                runnable.run();
+        private void run(Runnable onComplete) {
+            if (onComplete != null && completed.compareAndSet(false, true)) {
+                onComplete.run();
             }
         }
 

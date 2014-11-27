@@ -19,16 +19,21 @@ package org.apache.jackrabbit.oak.plugins.segment;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.base.Preconditions.checkPositionIndexes;
+import static com.google.common.base.Preconditions.checkState;
 import static org.apache.jackrabbit.oak.plugins.segment.SegmentWriter.BLOCK_SIZE;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.List;
 
 import javax.annotation.CheckForNull;
 
 import com.google.common.base.Charsets;
 import com.google.common.io.ByteStreams;
 
+/**
+ * For reading any record of type "VALUE" as binary streams.
+ */
 public class SegmentStream extends InputStream {
 
     @CheckForNull
@@ -36,14 +41,14 @@ public class SegmentStream extends InputStream {
             InputStream stream, SegmentStore store) {
         if (stream instanceof SegmentStream) {
             SegmentStream sstream = (SegmentStream) stream;
-            if (sstream.position == 0 && sstream.store == store) {
-                return sstream.recordId;
+            RecordId id = sstream.recordId;
+            if (sstream.position == 0
+                    && store.containsSegment(id.getSegmentId())) {
+                return id;
             }
         }
         return null;
     }
-
-    private final SegmentStore store;
 
     private final RecordId recordId;
 
@@ -57,10 +62,7 @@ public class SegmentStream extends InputStream {
 
     private long mark = 0;
 
-    SegmentStream(
-            SegmentStore store, RecordId recordId,
-            ListRecord blocks, long length) {
-        this.store = checkNotNull(store);
+    SegmentStream(RecordId recordId, ListRecord blocks, long length) {
         this.recordId = checkNotNull(recordId);
         this.inline = null;
         this.blocks = checkNotNull(blocks);
@@ -69,7 +71,6 @@ public class SegmentStream extends InputStream {
     }
 
     SegmentStream(RecordId recordId, byte[] inline) {
-        this.store = null;
         this.recordId = checkNotNull(recordId);
         this.inline = checkNotNull(inline);
         this.blocks = null;
@@ -86,8 +87,7 @@ public class SegmentStream extends InputStream {
         } else if (length > Integer.MAX_VALUE) {
             throw new IllegalStateException("Too long value: " + length);
         } else {
-            SegmentStream stream =
-                    new SegmentStream(store, recordId, blocks, length);
+            SegmentStream stream = new SegmentStream(recordId, blocks, length);
             try {
                 byte[] data = new byte[(int) length];
                 ByteStreams.readFully(stream, data);
@@ -118,7 +118,7 @@ public class SegmentStream extends InputStream {
     @Override
     public int read() {
         byte[] b = new byte[1];
-        if (read(b) != -1) {
+        if (read(b, 0, 1) != -1) {
             return b[0] & 0xff;
         } else {
             return -1;
@@ -126,44 +126,62 @@ public class SegmentStream extends InputStream {
     }
 
     @Override
-    public int read(byte[] b) {
-        return read(b, 0, b.length);
-    }
-
-    @Override
     public int read(byte[] b, int off, int len) {
         checkNotNull(b);
         checkPositionIndexes(off, off + len, b.length);
+
         if (len == 0) {
             return 0;
         } else if (position == length) {
             return -1;
-        } else if (inline != null) {
-            if (position + len > length) {
-                len = (int) (length - position);
-            }
-            System.arraycopy(inline, (int) position, b, off, len);
-            position += len;
-            return len;
-        } else {
-            int blockIndex = (int) (position / SegmentWriter.BLOCK_SIZE);
-            int blockOffset = (int) (position % SegmentWriter.BLOCK_SIZE);
-
-            if (blockOffset + len > SegmentWriter.BLOCK_SIZE) {
-                len = SegmentWriter.BLOCK_SIZE - blockOffset;
-            }
-            if (position + len > length) {
-                len = (int) (length - position);
-            }
-
-            BlockRecord block = new BlockRecord(
-                    blocks.getSegment(),
-                    blocks.getEntry(blockIndex),
-                    BLOCK_SIZE);
-            len = block.read(blockOffset, b, off, len);
-            position += len;
-            return len;
         }
+
+        if (position + len > length) {
+            len = (int) (length - position); // > 0 given the earlier check
+        }
+
+        if (inline != null) {
+            System.arraycopy(inline, (int) position, b, off, len);
+        } else {
+            int blockIndex = (int) (position / BLOCK_SIZE);
+            int blockOffset = (int) (position % BLOCK_SIZE);
+            int blockCount =
+                    (blockOffset + len + BLOCK_SIZE - 1) // round up
+                    / BLOCK_SIZE;
+
+            int remaining = len;
+            List<RecordId> ids = blocks.getEntries(blockIndex, blockCount);
+            RecordId first = ids.get(0); // guaranteed to contain at least one
+            int count = 1;
+            for (int i = 1; i <= ids.size(); i++) {
+                RecordId id = null;
+                if (i < ids.size()) {
+                    id = ids.get(i);
+                }
+
+                if (id != null
+                        && id.getSegmentId() == first.getSegmentId()
+                        && id.getOffset() == first.getOffset() + count * BLOCK_SIZE) {
+                    count++;
+                } else {
+                    int blockSize = Math.min(
+                            blockOffset + remaining, count * BLOCK_SIZE);
+                    BlockRecord block = new BlockRecord(first, blockSize);
+                    int n = blockSize - blockOffset;
+                    checkState(block.read(blockOffset, b, off, n) == n);
+                    off += n;
+                    remaining -= n;
+
+                    first = id;
+                    count = 1;
+                    blockOffset = 0;
+                }
+            }
+            checkState(remaining == 0);
+        }
+
+        position += len;
+        return len;
     }
 
     @Override

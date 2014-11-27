@@ -16,13 +16,17 @@
  */
 package org.apache.jackrabbit.oak.security.authorization.restriction;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import javax.jcr.security.AccessControlException;
+import javax.jcr.security.AccessControlManager;
 
 import com.google.common.collect.ImmutableList;
-
 import org.apache.jackrabbit.JcrConstants;
+import org.apache.jackrabbit.api.security.JackrabbitAccessControlList;
+import org.apache.jackrabbit.commons.jackrabbit.authorization.AccessControlUtils;
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.api.Type;
@@ -32,6 +36,7 @@ import org.apache.jackrabbit.oak.spi.security.authorization.accesscontrol.Access
 import org.apache.jackrabbit.oak.spi.security.authorization.restriction.CompositePattern;
 import org.apache.jackrabbit.oak.spi.security.authorization.restriction.RestrictionDefinition;
 import org.apache.jackrabbit.oak.spi.security.authorization.restriction.RestrictionPattern;
+import org.apache.jackrabbit.oak.spi.security.privilege.PrivilegeConstants;
 import org.apache.jackrabbit.oak.util.NodeUtil;
 import org.junit.Before;
 import org.junit.Test;
@@ -89,7 +94,7 @@ public class RestrictionProviderImplTest extends AbstractAccessControlTest imple
         map.put(PropertyStates.createProperty(REP_NT_NAMES, ntNames, Type.NAMES), new NodeTypePattern(ntNames));
 
         NodeUtil tree = new NodeUtil(root.getTree("/")).getOrAddTree("testPath", JcrConstants.NT_UNSTRUCTURED);
-        Tree restrictions = tree.addChild("restrictions", NT_REP_RESTRICTIONS).getTree();
+        Tree restrictions = tree.addChild(REP_RESTRICTIONS, NT_REP_RESTRICTIONS).getTree();
 
         // test restrictions individually
         for (Map.Entry<PropertyState, RestrictionPattern> entry : map.entrySet()) {
@@ -107,5 +112,81 @@ public class RestrictionProviderImplTest extends AbstractAccessControlTest imple
         }
         RestrictionPattern pattern = provider.getPattern("/testPath", restrictions);
         assertTrue(pattern instanceof CompositePattern);
+    }
+
+    @Test
+    public void testGetPatternForAllSupported() throws Exception {
+        Map<PropertyState, RestrictionPattern> map = newHashMap();
+        map.put(PropertyStates.createProperty(REP_GLOB, "/*/jcr:content"), GlobPattern.create("/testPath", "/*/jcr:content"));
+        List<String> ntNames = ImmutableList.of(JcrConstants.NT_FOLDER, JcrConstants.NT_LINKEDFILE);
+        map.put(PropertyStates.createProperty(REP_NT_NAMES, ntNames, Type.NAMES), new NodeTypePattern(ntNames));
+        List<String> prefixes = ImmutableList.of("rep", "jcr");
+        map.put(PropertyStates.createProperty(REP_PREFIXES, prefixes, Type.STRINGS), new PrefixPattern(prefixes));
+
+        NodeUtil tree = new NodeUtil(root.getTree("/")).getOrAddTree("testPath", JcrConstants.NT_UNSTRUCTURED);
+        Tree restrictions = tree.addChild(REP_RESTRICTIONS, NT_REP_RESTRICTIONS).getTree();
+        for (Map.Entry<PropertyState, RestrictionPattern> entry : map.entrySet()) {
+            restrictions.setProperty(entry.getKey());
+        }
+
+        RestrictionPattern pattern = provider.getPattern("/testPath", restrictions);
+        assertTrue(pattern instanceof CompositePattern);
+    }
+
+    @Test
+    public void testGetPatternFromRestrictions() throws Exception {
+        Map<PropertyState, RestrictionPattern> map = newHashMap();
+        map.put(PropertyStates.createProperty(REP_GLOB, "/*/jcr:content"), GlobPattern.create("/testPath", "/*/jcr:content"));
+        List<String> ntNames = ImmutableList.of(JcrConstants.NT_FOLDER, JcrConstants.NT_LINKEDFILE);
+        map.put(PropertyStates.createProperty(REP_NT_NAMES, ntNames, Type.NAMES), new NodeTypePattern(ntNames));
+        List<String> prefixes = ImmutableList.of("rep", "jcr");
+        map.put(PropertyStates.createProperty(REP_PREFIXES, prefixes, Type.STRINGS), new PrefixPattern(prefixes));
+
+        NodeUtil tree = new NodeUtil(root.getTree("/")).getOrAddTree("testPath", JcrConstants.NT_UNSTRUCTURED);
+        Tree restrictions = tree.addChild(REP_RESTRICTIONS, NT_REP_RESTRICTIONS).getTree();
+
+        // test restrictions individually
+        for (Map.Entry<PropertyState, RestrictionPattern> entry : map.entrySet()) {
+            restrictions.setProperty(entry.getKey());
+
+            RestrictionPattern pattern = provider.getPattern("/testPath", provider.readRestrictions("/testPath", tree.getTree()));
+            assertEquals(entry.getValue(), pattern);
+            restrictions.removeProperty(entry.getKey().getName());
+        }
+
+        // test combination on multiple restrictions
+        for (Map.Entry<PropertyState, RestrictionPattern> entry : map.entrySet()) {
+            restrictions.setProperty(entry.getKey());
+        }
+        RestrictionPattern pattern = provider.getPattern("/testPath", provider.readRestrictions("/testPath", tree.getTree()));
+        assertTrue(pattern instanceof CompositePattern);
+    }
+
+    @Test
+    public void testValidateGlobRestriction() throws Exception {
+        Tree t = new NodeUtil(root.getTree("/")).addChild("testTree", "nt:unstructured").getTree();
+        String path = t.getPath();
+
+        AccessControlManager acMgr = getAccessControlManager(root);
+
+        List<String> globs = ImmutableList.of(
+                "/1*/2*/3*/4*/5*/6*/7*/8*/9*/10*/11*/12*/13*/14*/15*/16*/17*/18*/19*/20*/21*",
+                "*********************");
+        for (String glob : globs) {
+            JackrabbitAccessControlList acl = AccessControlUtils.getAccessControlList(acMgr, path);
+            acl.addEntry(getTestPrincipal(),
+                    AccessControlUtils.privilegesFromNames(acMgr, PrivilegeConstants.JCR_READ),
+                    true, Collections.singletonMap(REP_GLOB, getValueFactory().createValue(glob)));
+            acMgr.setPolicy(path, acl);
+
+            try {
+                provider.validateRestrictions(path, t.getChild(REP_POLICY).getChild("allow"));
+                fail("AccessControlException expected.");
+            } catch (AccessControlException e) {
+                // success
+            } finally {
+                acMgr.removePolicy(path, acl);
+            }
+        }
     }
 }

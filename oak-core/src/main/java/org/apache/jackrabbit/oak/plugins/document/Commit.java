@@ -20,6 +20,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -28,7 +29,6 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import com.google.common.collect.Sets;
-import org.apache.jackrabbit.mk.api.MicroKernelException;
 import org.apache.jackrabbit.oak.commons.json.JsopStream;
 import org.apache.jackrabbit.oak.commons.json.JsopWriter;
 import org.apache.jackrabbit.oak.plugins.document.util.Utils;
@@ -52,17 +52,20 @@ public class Commit {
     private final Revision revision;
     private HashMap<String, UpdateOp> operations = new LinkedHashMap<String, UpdateOp>();
     private JsopWriter diff = new JsopStream();
-    private List<Revision> collisions = new ArrayList<Revision>();
+    private Set<Revision> collisions = new LinkedHashSet<Revision>();
 
     /**
      * List of all node paths which have been modified in this commit. In addition to the nodes
      * which are actually changed it also contains there parent node paths
      */
     private HashSet<String> modifiedNodes = new HashSet<String>();
-    
+
     private HashSet<String> addedNodes = new HashSet<String>();
     private HashSet<String> removedNodes = new HashSet<String>();
-    
+
+    /** Set of all nodes which have binary properties. **/
+    private HashSet<String> nodesWithBinaries = Sets.newHashSet();
+
     Commit(DocumentNodeStore nodeStore, Revision baseRevision, Revision revision) {
         this.baseRevision = baseRevision;
         this.revision = revision;
@@ -78,11 +81,6 @@ public class Commit {
             operations.put(path, op);
         }
         return op;
-    }
-
-    public static long getModified(long timestamp) {
-        // 5 second resolution
-        return timestamp / 1000 / 5;
     }
 
     /**
@@ -108,7 +106,7 @@ public class Commit {
     Revision getBaseRevision() {
         return baseRevision;
     }
-    
+
     void addNodeDiff(DocumentNodeState n) {
         diff.tag('+').key(n.getPath());
         diff.object();
@@ -116,22 +114,15 @@ public class Commit {
         diff.endObject();
         diff.newline();
     }
-    
-    /**
-     * Update the "lastRev" and "modified" properties for the specified node
-     * document.
-     * 
-     * @param path the path
-     */
-    public void touchNode(String path) {
-        UpdateOp op = getUpdateOperationForNode(path);
-        NodeDocument.setLastRev(op, revision);
-    }
-    
+
     void updateProperty(String path, String propertyName, String value) {
         UpdateOp op = getUpdateOperationForNode(path);
         String key = Utils.escapePropertyName(propertyName);
         op.setMapEntry(key, revision, value);
+    }
+
+    void markNodeHavingBinary(String path) {
+        this.nodesWithBinaries.add(path);
     }
 
     void addNode(DocumentNodeState n) {
@@ -139,7 +130,7 @@ public class Commit {
         if (operations.containsKey(path)) {
             String msg = "Node already added: " + path;
             LOG.error(msg);
-            throw new MicroKernelException(msg);
+            throw new DocumentStoreException(msg);
         }
         operations.put(path, n.asOperation(true));
         addedNodes.add(path);
@@ -153,16 +144,15 @@ public class Commit {
      * Applies this commit to the store.
      *
      * @return the commit revision.
-     * @throws MicroKernelException if the commit cannot be applied.
-     *              TODO: use non-MK exception type
+     * @throws DocumentStoreException if the commit cannot be applied.
      */
     @Nonnull
-    Revision apply() throws MicroKernelException {
+    Revision apply() throws DocumentStoreException {
         boolean success = false;
         Revision baseRev = getBaseRevision();
         boolean isBranch = baseRev != null && baseRev.isBranch();
         Revision rev = getRevision();
-        if (isBranch) {
+        if (isBranch && !nodeStore.isDisableBranches()) {
             rev = rev.asBranchRevision();
             // remember branch commit
             Branch b = nodeStore.getBranches().getBranch(baseRev);
@@ -187,6 +177,9 @@ public class Commit {
         } else {
             applyInternal();
         }
+        if (isBranch) {
+            rev = rev.asBranchRevision();
+        }
         return rev;
     }
 
@@ -196,6 +189,7 @@ public class Commit {
     private void applyInternal() {
         if (!operations.isEmpty()) {
             updateParentChildStatus();
+            updateBinaryStatus();
             applyToDocumentStore();
         }
     }
@@ -203,7 +197,23 @@ public class Commit {
     private void prepare(Revision baseRevision) {
         if (!operations.isEmpty()) {
             updateParentChildStatus();
+            updateBinaryStatus();
             applyToDocumentStore(baseRevision);
+        }
+    }
+
+    /**
+     * Update the binary status in the update op.
+     */
+    private void updateBinaryStatus() {
+        DocumentStore store = this.nodeStore.getDocumentStore();
+
+        for (String path : this.nodesWithBinaries) {
+            NodeDocument nd = store.getIfCached(Collection.NODES, Utils.getIdFromPath(path));
+            if ((nd == null) || !nd.hasBinary()) {
+                UpdateOp updateParentOp = getUpdateOperationForNode(path);
+                NodeDocument.setHasBinary(updateParentOp);
+            }
         }
     }
 
@@ -253,6 +263,8 @@ public class Commit {
             }
         }
         int commitRootDepth = PathUtils.getDepth(commitRootPath);
+        // check if there are real changes on the commit root
+        boolean commitRootHasChanges = operations.containsKey(commitRootPath);
         // create a "root of the commit" if there is none
         UpdateOp commitRoot = getUpdateOperationForNode(commitRootPath);
         for (String p : operations.keySet()) {
@@ -261,7 +273,10 @@ public class Commit {
                 NodeDocument.setDeleted(op, revision, false);
             }
             if (op == commitRoot) {
-                // apply at the end
+                if (!op.isNew() && commitRootHasChanges) {
+                    // commit root already exists and this is an update
+                    changedNodes.add(op);
+                }
             } else {
                 NodeDocument.setCommitRoot(op, revision, commitRootDepth);
                 if (op.isNew()) {
@@ -282,6 +297,7 @@ public class Commit {
             // it is the root of a subtree added in a commit.
             // so we try to add the root like all other nodes
             NodeDocument.setRevision(commitRoot, revision, commitValue);
+            NodeDocument.setLastRev(commitRoot, revision);
             newNodes.add(commitRoot);
         }
         try {
@@ -305,11 +321,10 @@ public class Commit {
                 }
             }
             for (UpdateOp op : changedNodes) {
-                // set commit root on changed nodes unless it's the
-                // commit root itself
-                if (op != commitRoot) {
-                    NodeDocument.setCommitRoot(op, revision, commitRootDepth);
-                }
+                // set commit root on changed nodes. this may even apply
+                // to the commit root. the _commitRoot entry is removed
+                // again when the _revisions entry is set at the end
+                NodeDocument.setCommitRoot(op, revision, commitRootDepth);
                 opLog.add(op);
                 createOrUpdateNode(store, op);
             }
@@ -318,7 +333,12 @@ public class Commit {
             // first to check if there was a conflict, and only then to commit
             // the revision, with the revision property set)
             if (changedNodes.size() > 0 || !commitRoot.isNew()) {
+                // set revision to committed
                 NodeDocument.setRevision(commitRoot, revision, commitValue);
+                if (commitRootHasChanges) {
+                    // remove previously added commit root
+                    NodeDocument.removeCommitRoot(commitRoot, revision);
+                }
                 opLog.add(commitRoot);
                 if (baseBranchRevision == null) {
                     // create a clone of the commitRoot in order
@@ -334,7 +354,7 @@ public class Commit {
                     if (before == null) {
                         String msg = "Conflicting concurrent change. " +
                                 "Update operation failed: " + commitRoot;
-                        throw new MicroKernelException(msg);
+                        throw new DocumentStoreException(msg);
                     } else {
                         // if we get here the commit was successful and
                         // the commit revision is set on the commitRoot
@@ -352,14 +372,13 @@ public class Commit {
                 }
                 operations.put(commitRootPath, commitRoot);
             }
-        } catch (MicroKernelException e) {
+        } catch (DocumentStoreException e) {
             rollback(newNodes, opLog, commitRoot);
             throw e;
         }
     }
 
     private void updateParentChildStatus() {
-        final DocumentStore store = nodeStore.getDocumentStore();
         final Set<String> processedParents = Sets.newHashSet();
         for (String path : addedNodes) {
             if (PathUtils.denotesRoot(path)) {
@@ -373,54 +392,33 @@ public class Commit {
             }
 
             processedParents.add(parentPath);
-            final UpdateOp op = operations.get(parentPath);
-            if (op != null) {
-                //Parent node all ready part of modification list
-                //Update it in place
-                if (op.isNew()) {
-                    NodeDocument.setChildrenFlag(op, true);
-                } else {
-                    NodeDocument nd = store.getIfCached(NODES, Utils.getIdFromPath(parentPath));
-                    if (nd != null && nd.hasChildren()) {
-                        continue;
-                    }
-                    NodeDocument.setChildrenFlag(op, true);
-                }
-            } else {
-                NodeDocument nd = store.getIfCached(NODES, Utils.getIdFromPath(parentPath));
-                if (nd != null && nd.hasChildren()) {
-                    //Flag already set to true. Nothing to do
-                    continue;
-                } else {
-                    UpdateOp updateParentOp = getUpdateOperationForNode(parentPath);
-                    NodeDocument.setChildrenFlag(updateParentOp, true);
-                }
-            }
+            UpdateOp op = getUpdateOperationForNode(parentPath);
+            NodeDocument.setChildrenFlag(op, true);
         }
     }
-    
+
     private void rollback(List<UpdateOp> newDocuments,
                           List<UpdateOp> changed,
                           UpdateOp commitRoot) {
         DocumentStore store = nodeStore.getDocumentStore();
         for (UpdateOp op : changed) {
             UpdateOp reverse = op.getReverseOperation();
-            store.createOrUpdate(NODES, reverse);
+            store.findAndUpdate(NODES, reverse);
         }
         for (UpdateOp op : newDocuments) {
             UpdateOp reverse = op.getReverseOperation();
             NodeDocument.unsetLastRev(reverse, revision.getClusterId());
-            store.createOrUpdate(NODES, reverse);
+            store.findAndUpdate(NODES, reverse);
         }
         UpdateOp removeCollision = new UpdateOp(commitRoot.getId(), false);
         NodeDocument.removeCollision(removeCollision, revision);
-        store.createOrUpdate(NODES, removeCollision);
+        store.findAndUpdate(NODES, removeCollision);
     }
 
     /**
      * Try to create or update the node. If there was a conflict, this method
      * throws an exception, even though the change is still applied.
-     * 
+     *
      * @param store the store
      * @param op the operation
      */
@@ -508,7 +506,7 @@ public class Commit {
                 conflictMessage += ", before\n" + revision +
                         "; document:\n" + (before == null ? "" : before.format()) +
                         ",\nrevision order:\n" + nodeStore.getRevisionComparator();
-                throw new MicroKernelException(conflictMessage);
+                throw new DocumentStoreException(conflictMessage);
             }
         }
     }
@@ -532,12 +530,12 @@ public class Commit {
             // or document did not exist before
             return false;
         }
-        return doc.isConflicting(op, baseRevision, nodeStore);
+        return doc.isConflicting(op, baseRevision, revision, nodeStore);
     }
 
     /**
      * Apply the changes to the DocumentNodeStore (to update the cache).
-     * 
+     *
      * @param before the revision right before this commit.
      * @param isBranchCommit whether this is a commit to a branch
      */
@@ -555,6 +553,7 @@ public class Commit {
             }
             list.add(p);
         }
+        DiffCache.Entry cacheEntry = nodeStore.getDiffCache().newEntry(before, revision);
         List<String> added = new ArrayList<String>();
         List<String> removed = new ArrayList<String>();
         List<String> changed = new ArrayList<String>();
@@ -578,16 +577,16 @@ public class Commit {
             boolean isNew = op != null && op.isNew();
             boolean pendingLastRev = op == null
                     || !NodeDocument.hasLastRev(op, revision.getClusterId());
-            boolean isDelete = op != null && op.isDelete();
-            nodeStore.applyChanges(revision, before, path, isNew, isDelete,
-                    pendingLastRev, isBranchCommit, added, removed, changed);
+            nodeStore.applyChanges(revision, path, isNew, pendingLastRev,
+                    isBranchCommit, added, removed, changed, cacheEntry);
         }
+        cacheEntry.done();
     }
 
     public void moveNode(String sourcePath, String targetPath) {
         diff.tag('>').key(sourcePath).value(targetPath);
     }
-    
+
     public void copyNode(String sourcePath, String targetPath) {
         diff.tag('*').key(sourcePath).value(targetPath);
     }
@@ -610,7 +609,7 @@ public class Commit {
     public void updatePropertyDiff(String path, String propertyName, String value) {
         diff.tag('^').key(PathUtils.concat(path, propertyName)).value(value);
     }
-    
+
     public void removeNodeDiff(String path) {
         diff.tag('-').value(path).newline();
     }

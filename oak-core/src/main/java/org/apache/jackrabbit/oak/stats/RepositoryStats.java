@@ -35,13 +35,7 @@ import static org.apache.jackrabbit.api.stats.RepositoryStatistics.Type.SESSION_
 import static org.apache.jackrabbit.api.stats.RepositoryStatistics.Type.SESSION_WRITE_COUNTER;
 import static org.apache.jackrabbit.api.stats.RepositoryStatistics.Type.SESSION_WRITE_DURATION;
 
-import javax.management.openmbean.ArrayType;
 import javax.management.openmbean.CompositeData;
-import javax.management.openmbean.CompositeDataSupport;
-import javax.management.openmbean.CompositeType;
-import javax.management.openmbean.OpenDataException;
-import javax.management.openmbean.OpenType;
-import javax.management.openmbean.SimpleType;
 
 import org.apache.jackrabbit.api.stats.RepositoryStatistics;
 import org.apache.jackrabbit.api.stats.TimeSeries;
@@ -53,9 +47,11 @@ public class RepositoryStats implements RepositoryStatsMBean {
     private static final Logger LOG = LoggerFactory.getLogger(RepositoryStats.class);
 
     private final RepositoryStatistics repoStats;
+    private final TimeSeries maxQueueLength;
 
-    public RepositoryStats(RepositoryStatistics repoStats) {
+    public RepositoryStats(RepositoryStatistics repoStats, TimeSeries maxQueueLength) {
         this.repoStats = repoStats;
+        this.maxQueueLength = maxQueueLength;
     }
 
     @Override
@@ -128,30 +124,18 @@ public class RepositoryStats implements RepositoryStatsMBean {
         return asCompositeData(OBSERVATION_EVENT_AVERAGE);
     }
 
-    public static final String[] ITEM_NAMES = new String[] {
-            "per second", "per minute", "per hour", "per week"};
-
-    private CompositeData asCompositeData(Type type) {
-        try {
-            TimeSeries timeSeries = repoStats.getTimeSeries(type);
-            long[][] values = new long[][] {
-                timeSeries.getValuePerSecond(),
-                timeSeries.getValuePerMinute(),
-                timeSeries.getValuePerHour(),
-                timeSeries.getValuePerWeek()};
-            return new CompositeDataSupport(getCompositeType(type), ITEM_NAMES, values);
-        } catch (Exception e) {
-            LOG.error("Error creating CompositeData instance from TimeSeries", e);
-            return null;
-        }
+    @Override
+    public CompositeData getObservationQueueMaxLength() {
+        return TimeSeriesStatsUtil
+            .asCompositeData(maxQueueLength, "maximal length of observation queue");
     }
 
-    private static CompositeType getCompositeType(Type type) throws OpenDataException {
-        ArrayType<int[]> longArrayType = new ArrayType<int[]>(SimpleType.LONG, true);
-        OpenType<?>[] itemTypes = new OpenType[] {
-                longArrayType, longArrayType, longArrayType, longArrayType};
-        String name = type.toString();
-        return new CompositeType(name, name + " time series", ITEM_NAMES, ITEM_NAMES, itemTypes);
+    private TimeSeries getTimeSeries(Type type) {
+        return repoStats.getTimeSeries(type);
+    }
+
+    private CompositeData asCompositeData(Type type) {
+        return TimeSeriesStatsUtil.asCompositeData(getTimeSeries(type), type.name());
     }
 
 }

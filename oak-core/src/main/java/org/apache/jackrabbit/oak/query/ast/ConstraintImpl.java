@@ -16,7 +16,6 @@
  */
 package org.apache.jackrabbit.oak.query.ast;
 
-import java.util.Map;
 import java.util.Set;
 
 import org.apache.jackrabbit.oak.query.fulltext.FullTextExpression;
@@ -43,6 +42,19 @@ public abstract class ConstraintImpl extends AstElement {
      * @return true if the constraint matches
      */
     public abstract boolean evaluate();
+    
+    /**
+     * Whether this condition will, from now on, always evaluate to false. This
+     * is the case for example for full-text constraints if there is no
+     * full-text index (unless FullTextComparisonWithoutIndex is enabled). This
+     * will also allow is to add conditions that stop further processing for
+     * other reasons, similar to "WHERE ROWNUM < 10" in Oracle.
+     * 
+     * @return true if further processing should be stopped
+     */
+    public boolean evaluateStop() {
+        return false;
+    }
     
     /**
      * Get the set of property existence conditions that can be derived for this
@@ -76,13 +88,6 @@ public abstract class ConstraintImpl extends AstElement {
      * @return the set of selectors (possibly empty)
      */
     public abstract Set<SelectorImpl> getSelectors();
-    
-    /**
-     * Get the map of "in(..)" conditions.
-     * 
-     * @return the map
-     */
-    public abstract Map<DynamicOperandImpl, Set<StaticOperandImpl>> getInMap();
 
     /**
      * Apply the condition to the filter, further restricting the filter if

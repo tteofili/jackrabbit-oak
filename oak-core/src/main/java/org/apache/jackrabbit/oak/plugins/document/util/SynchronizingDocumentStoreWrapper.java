@@ -20,7 +20,6 @@ import java.util.List;
 
 import javax.annotation.Nonnull;
 
-import org.apache.jackrabbit.mk.api.MicroKernelException;
 import org.apache.jackrabbit.oak.plugins.document.Collection;
 import org.apache.jackrabbit.oak.plugins.document.Document;
 import org.apache.jackrabbit.oak.plugins.document.DocumentStore;
@@ -68,6 +67,13 @@ public class SynchronizingDocumentStoreWrapper implements DocumentStore {
     }
 
     @Override
+    public synchronized <T extends Document> void remove(Collection<T> collection, List<String> keys) {
+        for(String key : keys){
+            remove(collection, key);
+        }
+    }
+
+    @Override
     public synchronized <T extends Document> boolean create(final Collection<T> collection, final List<UpdateOp> updateOps) {
         return store.create(collection, updateOps);
     }
@@ -80,14 +86,12 @@ public class SynchronizingDocumentStoreWrapper implements DocumentStore {
 
     @Nonnull
     @Override
-    public synchronized <T extends Document> T createOrUpdate(final Collection<T> collection, final UpdateOp update)
-            throws MicroKernelException {
+    public synchronized <T extends Document> T createOrUpdate(final Collection<T> collection, final UpdateOp update) {
         return store.createOrUpdate(collection, update);
     }
 
     @Override
-    public synchronized <T extends Document> T findAndUpdate(final Collection<T> collection, final UpdateOp update)
-            throws MicroKernelException {
+    public synchronized <T extends Document> T findAndUpdate(final Collection<T> collection, final UpdateOp update) {
         return store.findAndUpdate(collection, update);
     }
 
@@ -110,10 +114,10 @@ public class SynchronizingDocumentStoreWrapper implements DocumentStore {
     public synchronized <T extends Document> T getIfCached(final Collection<T> collection, final String key) {
         return store.getIfCached(collection, key);
     }
-    
+
     @Override
     public synchronized void setReadWriteMode(String readWriteMode) {
         store.setReadWriteMode(readWriteMode);
-    }    
-    
+    }
+
 }

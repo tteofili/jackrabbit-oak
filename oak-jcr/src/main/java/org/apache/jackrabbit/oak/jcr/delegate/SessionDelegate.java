@@ -17,6 +17,9 @@
 package org.apache.jackrabbit.oak.jcr.delegate;
 
 import static com.google.common.base.Preconditions.checkNotNull;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
+import static java.util.concurrent.TimeUnit.NANOSECONDS;
+import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.apache.jackrabbit.api.stats.RepositoryStatistics.Type.SESSION_READ_COUNTER;
 import static org.apache.jackrabbit.api.stats.RepositoryStatistics.Type.SESSION_READ_DURATION;
 import static org.apache.jackrabbit.api.stats.RepositoryStatistics.Type.SESSION_WRITE_COUNTER;
@@ -25,8 +28,11 @@ import static org.apache.jackrabbit.oak.commons.PathUtils.denotesRoot;
 
 import java.io.IOException;
 import java.util.Iterator;
-import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
@@ -35,7 +41,7 @@ import javax.jcr.PathNotFoundException;
 import javax.jcr.RepositoryException;
 import javax.jcr.nodetype.ConstraintViolationException;
 
-import com.google.common.collect.Maps;
+import com.google.common.collect.ImmutableMap;
 import org.apache.jackrabbit.oak.api.AuthInfo;
 import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.api.ContentSession;
@@ -46,8 +52,13 @@ import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.jcr.observation.EventFactory;
 import org.apache.jackrabbit.oak.jcr.session.RefreshStrategy;
 import org.apache.jackrabbit.oak.jcr.session.SessionStats;
+import org.apache.jackrabbit.oak.jcr.session.SessionStats.Counters;
 import org.apache.jackrabbit.oak.jcr.session.operation.SessionOperation;
 import org.apache.jackrabbit.oak.plugins.identifier.IdentifierManager;
+import org.apache.jackrabbit.oak.spi.security.SecurityProvider;
+import org.apache.jackrabbit.oak.spi.security.authorization.AuthorizationConfiguration;
+import org.apache.jackrabbit.oak.spi.security.authorization.permission.PermissionProvider;
+import org.apache.jackrabbit.oak.stats.Clock;
 import org.apache.jackrabbit.oak.stats.StatisticManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -59,15 +70,39 @@ import org.slf4j.MarkerFactory;
  */
 public class SessionDelegate {
     static final Logger log = LoggerFactory.getLogger(SessionDelegate.class);
-    static final Logger operationLogger = LoggerFactory.getLogger("org.apache.jackrabbit.oak.jcr.operations");
+    static final Logger readOperationLogger = LoggerFactory.getLogger("org.apache.jackrabbit.oak.jcr.operations.reads");
+    static final Logger writeOperationLogger = LoggerFactory.getLogger("org.apache.jackrabbit.oak.jcr.operations.writes");
 
     private final ContentSession contentSession;
+    private final SecurityProvider securityProvider;
     private final RefreshStrategy refreshStrategy;
+    private boolean refreshAtNextAccess = false;
+
+    /**
+     * The repository-wide {@link ThreadLocal} that keeps track of the number
+     * of saves performed in each thread.
+     */
+    private final ThreadLocal<Long> threadSaveCount;
+
+    /**
+     * Local copy of the {@link #threadSaveCount} for the current thread.
+     * If the repository-wide counter differs from our local copy, then
+     * some other session would have done a commit or this session is
+     * being accessed from some other thread. In either case it's best to
+     * refresh this session to avoid unexpected behaviour.
+     */
+    private long sessionSaveCount;
 
     private final Root root;
     private final IdentifierManager idManager;
     private final SessionStats sessionStats;
 
+    private final Clock clock;
+
+    // access time stamps and counters for statistics about this session
+    Counters sessionCounters;
+
+    // repository-wide counters for statistics about all sessions
     private final AtomicLong readCounter;
     private final AtomicLong readDuration;
     private final AtomicLong writeCounter;
@@ -79,6 +114,16 @@ public class SessionDelegate {
 
     private String userData = null;
 
+    private PermissionProvider permissionProvider;
+
+    /**
+     * The lock used to guarantee synchronized execution of repository
+     * operations. An explicit lock is used instead of normal Java
+     * synchronization in order to be able to log attempts to concurrently
+     * use a session.
+     */
+    private final WarningLock lock = new WarningLock(new ReentrantLock());
+
     /**
      * Create a new session delegate for a {@code ContentSession}. The refresh behaviour of the
      * session is governed by the value of the {@code refreshInterval} argument: if the session
@@ -88,18 +133,28 @@ public class SessionDelegate {
      * dispatcher in order.
      *
      * @param contentSession  the content session
+     * @param securityProvider the security provider
      * @param refreshStrategy  the refresh strategy used for auto refreshing this session
      * @param statisticManager the statistics manager for tracking session operations
      */
     public SessionDelegate(
             @Nonnull ContentSession contentSession,
+            @Nonnull SecurityProvider securityProvider,
             @Nonnull RefreshStrategy refreshStrategy,
-            @Nonnull StatisticManager statisticManager) {
+            @Nonnull ThreadLocal<Long> threadSaveCount,
+            @Nonnull StatisticManager statisticManager,
+            @Nonnull Clock clock) {
         this.contentSession = checkNotNull(contentSession);
+        this.securityProvider = checkNotNull(securityProvider);
         this.refreshStrategy = checkNotNull(refreshStrategy);
+        this.threadSaveCount = checkNotNull(threadSaveCount);
+        this.sessionSaveCount = getThreadSaveCount();
         this.root = contentSession.getLatestRoot();
         this.idManager = new IdentifierManager(root);
-        this.sessionStats = new SessionStats(this);
+        this.clock = checkNotNull(clock);
+        this.sessionStats = new SessionStats(contentSession.toString(),
+                contentSession.getAuthInfo(), clock);
+        this.sessionCounters = sessionStats.getCounters();
         checkNotNull(statisticManager);
         readCounter = statisticManager.getCounter(SESSION_READ_COUNTER);
         readDuration = statisticManager.getCounter(SESSION_READ_DURATION);
@@ -112,8 +167,18 @@ public class SessionDelegate {
         return sessionStats;
     }
 
+    private long getThreadSaveCount() {
+        Long c = threadSaveCount.get();
+        return c == null ? 0 : c;
+    }
+
     public void refreshAtNextAccess() {
-        refreshStrategy.refreshAtNextAccess();
+        lock.lock();
+        try {
+            refreshAtNextAccess = true;
+        } finally {
+            lock.unlock();
+        }
     }
 
     /**
@@ -124,7 +189,7 @@ public class SessionDelegate {
      * @return  synchronized iterator
      */
     public <T> Iterator<T> sync(Iterator<T> iterator) {
-        return new SynchronizedIterator<T>(iterator);
+        return new SynchronizedIterator<T>(iterator, lock);
     }
 
     /**
@@ -139,42 +204,66 @@ public class SessionDelegate {
      * @throws RepositoryException
      * @see #getRoot()
      */
-    public synchronized <T> T perform(SessionOperation<T> sessionOperation)
+    public <T> T perform(SessionOperation<T> sessionOperation)
             throws RepositoryException {
-        // Synchronize to avoid conflicting refreshes from concurrent JCR API calls
-        if (sessionOpCount == 0) {
-            // Refresh and precondition checks only for non re-entrant session operations
-            if (refreshStrategy.needsRefresh(sessionOperation)) {
-                refresh(true);
-                refreshStrategy.refreshed();
-                updateCount++;
-            }
-            sessionOperation.checkPreconditions();
-        }
-        long t0 = System.nanoTime();
+        long t0 = clock.getTime();
+
+        // Acquire the exclusive lock for accessing session internals.
+        // No other session should be holding the lock, so we log a
+        // message to let the user know of such cases.
+        lock.lock(sessionOperation);
         try {
-            sessionOpCount++;
-            T result =  sessionOperation.perform();
-            logOperationDetails(sessionOperation);
-            return result;
+            if (sessionOpCount == 0) {
+                // Refresh and precondition checks only for non re-entrant
+                // session operations. Don't refresh if this operation is a
+                // refresh operation itself or a save operation, which does an
+                // implicit refresh, or logout for obvious reasons.
+                if (!sessionOperation.isRefresh()
+                        && !sessionOperation.isSave()
+                        && !sessionOperation.isLogout()
+                        && (refreshAtNextAccess
+                        || sessionSaveCount != getThreadSaveCount()
+                        || refreshStrategy.needsRefresh(
+                        SECONDS.convert(t0 - sessionCounters.accessTime, MILLISECONDS)))) {
+                    refresh(true);
+                    refreshAtNextAccess = false;
+                    sessionSaveCount = getThreadSaveCount();
+                    updateCount++;
+                }
+                sessionOperation.checkPreconditions();
+            }
+            try {
+                sessionOpCount++;
+                T result = sessionOperation.perform();
+                logOperationDetails(contentSession, sessionOperation);
+                return result;
+            } finally {
+                sessionCounters.accessTime = t0;
+                long dt = NANOSECONDS.convert(clock.getTime() - t0, MILLISECONDS);
+                sessionOpCount--;
+                if (sessionOperation.isUpdate()) {
+                    sessionCounters.writeTime = t0;
+                    sessionCounters.writeCount++;
+                    writeCounter.incrementAndGet();
+                    writeDuration.addAndGet(dt);
+                    updateCount++;
+                } else {
+                    sessionCounters.readTime = t0;
+                    sessionCounters.readCount++;
+                    readCounter.incrementAndGet();
+                    readDuration.addAndGet(dt);
+                }
+                if (sessionOperation.isSave()) {
+                    refreshAtNextAccess = false;
+                    // Force refreshing on access through other sessions on the same thread
+                    threadSaveCount.set(sessionSaveCount = (getThreadSaveCount() + 1));
+                } else if (sessionOperation.isRefresh()) {
+                    refreshAtNextAccess = false;
+                    sessionSaveCount = getThreadSaveCount();
+                }
+            }
         } finally {
-            long dt = System.nanoTime() - t0;
-            sessionOpCount--;
-            if (sessionOperation.isUpdate()) {
-                sessionStats.write();
-                writeCounter.incrementAndGet();
-                writeDuration.addAndGet(dt);
-                updateCount++;
-            } else {
-                sessionStats.read();
-                readCounter.incrementAndGet();
-                readDuration.addAndGet(dt);
-            }
-            if (sessionOperation.isSave()) {
-                refreshStrategy.saved();
-            } else if (sessionOperation.isRefresh()) {
-                refreshStrategy.refreshed();
-            }
+            lock.unlock();
         }
     }
 
@@ -234,6 +323,20 @@ public class SessionDelegate {
         this.userData = userData;
     }
 
+    private void commit(Root root, String path) throws CommitFailedException {
+        ImmutableMap.Builder<String, Object> info = ImmutableMap.builder();
+        if (path != null && !denotesRoot(path)) {
+            info.put(Root.COMMIT_PATH, path);
+        }
+        if (userData != null) {
+            info.put(EventFactory.USER_DATA, userData);
+        }
+        root.commit(info.build());
+        if (permissionProvider != null) {
+            permissionProvider.refresh();
+        }
+    }
+
     /**
      * Commits the changes currently in the transient space.
      * TODO: Consolidate with save().
@@ -241,7 +344,7 @@ public class SessionDelegate {
      * @throws CommitFailedException if the commit failed
      */
     public void commit() throws CommitFailedException {
-        commit(root);
+        commit(root, null);
     }
 
     /**
@@ -253,9 +356,7 @@ public class SessionDelegate {
      * @throws CommitFailedException if the commit failed
      */
     public void commit(Root root) throws CommitFailedException {
-        Map<String, Object> info = Maps.newHashMap();
-        info.put(EventFactory.USER_DATA, userData);
-        root.commit(info);
+        commit(root, null);
     }
 
     public void checkProtectedNode(String path) throws RepositoryException {
@@ -325,12 +426,12 @@ public class SessionDelegate {
             return getRootNode();
         } else {
             Tree parent = root.getTree(PathUtils.getParentPath(path));
-            if (parent.hasProperty(name)) {
-                return new PropertyDelegate(this, parent, name);
-            }
+
             Tree child = parent.getChild(name);
             if (child.exists()) {
                 return new NodeDelegate(this, child);
+            } else if (parent.hasProperty(name)) {
+                return new PropertyDelegate(this, parent, name);
             } else {
                 return null;
             }
@@ -361,10 +462,22 @@ public class SessionDelegate {
         return root.hasPendingChanges();
     }
 
-    public void save() throws RepositoryException {
-        sessionStats.save();
+    /**
+     * Save the subtree rooted at the given {@code path}, or the entire
+     * transient space if given the root path or {@code null}.
+     * <p>
+     * This implementation only performs the save if the subtree rooted
+     * at {@code path} contains all transient changes and will throw an
+     * {@link javax.jcr.UnsupportedRepositoryOperationException} otherwise.
+     *
+     * @param path
+     * @throws RepositoryException
+     */
+    public void save(String path) throws RepositoryException {
+        sessionCounters.saveTime = clock.getTime();
+        sessionCounters.saveCount++;
         try {
-            commit();
+            commit(root, path);
         } catch (CommitFailedException e) {
             RepositoryException repositoryException = newRepositoryException(e);
             sessionStats.failedSave(repositoryException);
@@ -372,37 +485,16 @@ public class SessionDelegate {
         }
     }
 
-    /**
-     * Save the subtree rooted at the given {@code path}.
-     * <p>
-     * This implementation only performs the save if the subtree rooted at {@code path} contains
-     * all transient changes and will throw an
-     * {@link javax.jcr.UnsupportedRepositoryOperationException} otherwise.
-     *
-     * @param path
-     * @throws RepositoryException
-     */
-    public void save(final String path) throws RepositoryException {
-        sessionStats.save();
-        if (denotesRoot(path)) {
-            save();
-        } else {
-            try {
-                root.commit(path);
-            } catch (CommitFailedException e) {
-                RepositoryException repositoryException = newRepositoryException(e);
-                sessionStats.failedSave(repositoryException);
-                throw repositoryException;
-            }
-        }
-    }
-
     public void refresh(boolean keepChanges) {
-        sessionStats.refresh();
+        sessionCounters.refreshTime = clock.getTime();
+        sessionCounters.refreshCount++;
         if (keepChanges && hasPendingChanges()) {
             root.rebase();
         } else {
             root.refresh();
+        }
+        if (permissionProvider != null) {
+            permissionProvider.refresh();
         }
     }
 
@@ -450,7 +542,8 @@ public class SessionDelegate {
                 throw new RepositoryException("Cannot move node at " + srcPath + " to " + destPath);
             }
             if (!transientOp) {
-                sessionStats.save();
+                sessionCounters.saveTime = clock.getTime();
+                sessionCounters.saveCount++;
                 commit(moveRoot);
                 refresh(true);
             }
@@ -462,6 +555,16 @@ public class SessionDelegate {
     @Nonnull
     public QueryEngine getQueryEngine() {
         return root.getQueryEngine();
+    }
+
+    @Nonnull
+    public PermissionProvider getPermissionProvider() {
+        if (permissionProvider == null) {
+            permissionProvider = checkNotNull(securityProvider)
+                    .getConfiguration(AuthorizationConfiguration.class)
+                    .getPermissionProvider(root, getWorkspaceName(), getAuthInfo().getPrincipals());
+        }
+        return permissionProvider;
     }
 
     /**
@@ -484,13 +587,12 @@ public class SessionDelegate {
 
     //------------------------------------------------------------< internal >---
 
-    private <T> void logOperationDetails(SessionOperation<T> ops)  throws RepositoryException {
-        if(operationLogger.isDebugEnabled()){
-            String desc = ops.description();
-            if(desc != null){
-                Marker sessionMarker = MarkerFactory.getMarker(this.toString());
-                operationLogger.debug(sessionMarker,String.format("[%s] %s",toString(),desc));
-            }
+    private static <T> void logOperationDetails(ContentSession session, SessionOperation<T> ops) {
+        if (readOperationLogger.isTraceEnabled()
+                || writeOperationLogger.isTraceEnabled()) {
+            Marker sessionMarker = MarkerFactory.getMarker(session.toString());
+            Logger log = ops.isUpdate() ? writeOperationLogger : readOperationLogger;
+            log.trace(sessionMarker, "[{}] {}", session, ops);
         }
     }
 
@@ -511,38 +613,150 @@ public class SessionDelegate {
 
     /**
      * This iterator delegates to a backing iterator and synchronises
-     * all calls to the backing iterator on this {@code SessionDelegate}
-     * instance.
-     *
+     * all calls wrt. the lock passed to its constructor.
      * @param <T>
      */
-    private final class SynchronizedIterator<T> implements Iterator<T> {
+    private static final class SynchronizedIterator<T> implements Iterator<T> {
         private final Iterator<T> iterator;
+        private final WarningLock lock;
 
-        SynchronizedIterator(Iterator<T> iterator) {
+        SynchronizedIterator(Iterator<T> iterator, WarningLock lock) {
             this.iterator = iterator;
+            this.lock = lock;
         }
 
         @Override
         public boolean hasNext() {
-            synchronized (SessionDelegate.this) {
+            lock.lock(false, "hasNext()");
+            try {
                 return iterator.hasNext();
+            } finally {
+                lock.unlock();
             }
         }
 
         @Override
         public T next() {
-            synchronized (SessionDelegate.this) {
+            lock.lock(false, "next()");
+            try {
                 return iterator.next();
+            } finally {
+                lock.unlock();
             }
         }
 
         @Override
         public void remove() {
-            synchronized (SessionDelegate.this) {
+            lock.lock(true, "remove()");
+            try {
                 iterator.remove();
+            } finally {
+                lock.unlock();
             }
         }
     }
 
+    /**
+     * A {@link Lock} implementation that has additional methods
+     * for acquiring the lock, which log a warning if the lock is
+     * already held by another thread and was also acquired through
+     * such a method.
+     */
+    private static final class WarningLock implements Lock {
+        private final Lock lock;
+
+        // All access to members only *after* the lock has been acquired
+        private boolean isUpdate;
+        private Exception holderTrace;
+        private String holderThread;
+
+        private WarningLock(Lock lock) {
+            this.lock = lock;
+        }
+
+        public void lock(boolean isUpdate, String opName) {
+            if (!lock.tryLock()) {
+                // Acquire the lock before logging the warnings. As otherwise race conditions
+                // on the involved fields might lead to wrong warnings.
+                lock.lock();
+                if (holderThread != null) {
+                    if (this.isUpdate) {
+                        warn(log, "Attempted to perform " + opName + " while thread " + holderThread +
+                                " was concurrently writing to this session. Blocked until the " +
+                                "other thread finished using this session. Please review your code " +
+                                "to avoid concurrent use of a session.", holderTrace);
+                    } else if (log.isDebugEnabled()) {
+                        log.debug("Attempted to perform " + opName + " while thread " + holderThread +
+                                " was concurrently reading from this session. Blocked until the " +
+                                "other thread finished using this session. Please review your code " +
+                                "to avoid concurrent use of a session.", holderTrace);
+                    }
+                }
+            }
+            this.isUpdate = isUpdate;
+            if (log.isDebugEnabled()) {
+                holderTrace = new Exception("Stack trace of concurrent access to session");
+            }
+            holderThread = Thread.currentThread().getName();
+        }
+
+        private static void warn(Logger logger, String message, Exception stackTrace) {
+            if (stackTrace != null) {
+                logger.warn(message, stackTrace);
+            } else {
+                logger. warn(message);
+            }
+        }
+
+        public void lock(SessionOperation<?> sessionOperation) {
+            lock(sessionOperation.isUpdate(), sessionOperation.toString());
+        }
+
+        @Override
+        public void lock() {
+            lock.lock();
+            holderTrace = null;
+            holderThread = null;
+        }
+
+        @Override
+        public void lockInterruptibly() throws InterruptedException {
+            lock.lockInterruptibly();
+            holderTrace = null;
+            holderThread = null;
+        }
+
+        @Override
+        public boolean tryLock() {
+            if (lock.tryLock()) {
+                holderTrace = null;
+                holderThread = null;
+                return true;
+            } else {
+                return false;
+            }
+        }
+
+        @Override
+        public boolean tryLock(long time, TimeUnit unit) throws InterruptedException {
+            if (lock.tryLock(time, unit)) {
+                holderTrace = null;
+                holderThread = null;
+                return true;
+            } else {
+                return false;
+            }
+        }
+
+        @Override
+        public void unlock() {
+            lock.unlock();
+        }
+
+        @Override
+        public Condition newCondition() {
+            return lock.newCondition();
+        }
+
+    }
 }

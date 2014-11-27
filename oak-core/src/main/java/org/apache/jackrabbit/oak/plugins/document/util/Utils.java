@@ -16,22 +16,31 @@
  */
 package org.apache.jackrabbit.oak.plugins.document.util;
 
+import java.io.Closeable;
+import java.io.IOException;
+import java.nio.charset.Charset;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.sql.Timestamp;
 import java.util.Comparator;
-import java.util.HashSet;
 import java.util.Map;
 import java.util.Map.Entry;
-import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeMap;
 
+import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import com.mongodb.BasicDBObject;
 
+import org.apache.commons.codec.binary.Hex;
 import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.plugins.document.Revision;
+import org.apache.jackrabbit.oak.plugins.document.RevisionContext;
 import org.bson.types.ObjectId;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 
@@ -39,6 +48,7 @@ import static com.google.common.base.Preconditions.checkNotNull;
  * Utility methods.
  */
 public class Utils {
+    private static final Logger LOG = LoggerFactory.getLogger(Utils.class);
 
     /**
      * Approximate length of a Revision string.
@@ -47,20 +57,41 @@ public class Utils {
             new Revision(System.currentTimeMillis(), 0, 0).toString().length();
 
     /**
+     * The length of path (in characters), whose UTF-8 representation can not
+     * possibly be too large to be used for the primary key for the document
+     * store.
+     */
+    static final int PATH_SHORT = Integer.getInteger("oak.pathShort", 165);
+
+    /**
+     * The maximum length of the parent path, in bytes. If the parent path is
+     * longer, then the id of a document is no longer the path, but the hash of
+     * the parent, and then the node name.
+     */
+    static final int PATH_LONG = Integer.getInteger("oak.pathLong", 350);
+
+    /**
+     * The maximum size a node name, in bytes. This is only a problem for long path.
+     */
+    private static final int NODE_NAME_LIMIT = Integer.getInteger("oak.nodeNameLimit", 150);
+
+    private static final Charset UTF_8 = Charset.forName("UTF-8");
+
+    /**
      * Make sure the name string does not contain unnecessary baggage (shared
      * strings).
      * <p>
      * This is only needed for older versions of Java (before Java 7 update 6).
      * See also
      * http://mail.openjdk.java.net/pipermail/core-libs-dev/2012-May/010257.html
-     * 
+     *
      * @param x the string
      * @return the new string
      */
     public static String unshareString(String x) {
         return new String(x);
     }
-    
+
     public static int pathDepth(String path) {
         if (path.equals("/")) {
             return 0;
@@ -72,14 +103,6 @@ public class Utils {
             }
         }
         return depth;
-    }
-    
-    public static <K, V> Map<K, V> newMap() {
-        return new TreeMap<K, V>();
-    }
-
-    public static <E> Set<E> newSet() {
-        return new HashSet<E>();
     }
 
     @SuppressWarnings("unchecked")
@@ -120,16 +143,16 @@ public class Utils {
         } else {
             // overhead for some other kind of map
             // TreeMap (80) + unmodifiable wrapper (32)
-            size += 112; 
+            size += 112;
             // 64 bytes per entry
-            size += map.size() * 64; 
+            size += map.size() * 64;
         }
         return size;
     }
 
     /**
      * Generate a unique cluster id, similar to the machine id field in MongoDB ObjectId objects.
-     * 
+     *
      * @return the unique machine id
      */
     public static int getUniqueClusterId() {
@@ -175,7 +198,7 @@ public class Utils {
         }
         return buff == null ? propertyName : buff.toString();
     }
-    
+
     public static String unescapePropertyName(String key) {
         int len = key.length();
         if (key.startsWith("_")
@@ -204,41 +227,109 @@ public class Utils {
         }
         return buff == null ? key : buff.toString();
     }
-    
+
     public static boolean isPropertyName(String key) {
         return !key.startsWith("_") || key.startsWith("__") || key.startsWith("_$");
     }
 
     public static String getIdFromPath(String path) {
+        if (isLongPath(path)) {
+            MessageDigest digest;
+            try {
+                digest = MessageDigest.getInstance("SHA-256");
+            } catch (NoSuchAlgorithmException e) {
+                throw new RuntimeException(e);
+            }
+            int depth = Utils.pathDepth(path);
+            String parent = PathUtils.getParentPath(path);
+            byte[] hash = digest.digest(parent.getBytes(UTF_8));
+            String name = PathUtils.getName(path);
+            return depth + ":h" + Hex.encodeHexString(hash) + "/" + name;
+        }
         int depth = Utils.pathDepth(path);
         return depth + ":" + path;
     }
+
+    /**
+     * Returns the parent id for given id if possible
+     *
+     * <p>It would return null in following cases
+     * <ul>
+     *     <li>If id is from long path</li>
+     *     <li>If id is for root path</li>
+     *     <li>If id is for an invalid path</li>
+     * </ul>
+     *</p>
+     * @param id id for which parent id needs to be determined
+     * @return parent id. null if parent id cannot be determined
+     */
+    @CheckForNull
+    public static String getParentId(String id){
+        if(Utils.isIdFromLongPath(id)){
+            return null;
+        }
+        String path = Utils.getPathFromId(id);
+        if (!PathUtils.isValid(path)) {
+            return null;
+        }
+        if(PathUtils.denotesRoot(path)){
+            return null;
+        }
+        String parentPath = PathUtils.getParentPath(path);
+        return Utils.getIdFromPath(parentPath);
+    }
+
+    public static boolean isLongPath(String path) {
+        // the most common case: a short path
+        // avoid calculating the parent path
+        if (path.length() < PATH_SHORT) {
+            return false;
+        }
+        // check if the parent path is long
+        byte[] parent = PathUtils.getParentPath(path).getBytes(UTF_8);
+        if (parent.length < PATH_LONG) {
+            return false;
+        }
+        String name = PathUtils.getName(path);
+        if (name.getBytes(UTF_8).length > NODE_NAME_LIMIT) {
+            throw new IllegalArgumentException("Node name is too long: " + path);
+        }
+        return true;
+    }
     
+    public static boolean isIdFromLongPath(String id) {
+        int index = id.indexOf(':');
+        return id.charAt(index + 1) == 'h';
+    }
+
     public static String getPathFromId(String id) {
+        if (isIdFromLongPath(id)) {
+            throw new IllegalArgumentException("Id is hashed: " + id);
+        }
         int index = id.indexOf(':');
         return id.substring(index + 1);
     }
 
-    public static String getPreviousIdFor(String id, Revision r) {
-        StringBuilder sb = new StringBuilder(id.length() + REVISION_LENGTH + 3);
-        int index = id.indexOf(':');
-        int depth = 0;
-        for (int i = 0; i < index; i++) {
-            depth *= 10;
-            depth += Character.digit(id.charAt(i), 10);
+    public static String getPreviousPathFor(String path, Revision r, int height) {
+        if (!PathUtils.isAbsolute(path)) {
+            throw new IllegalArgumentException("path must be absolute: " + path);
         }
-        sb.append(depth + 1).append(":p");
-        sb.append(id, index + 1, id.length());
+        StringBuilder sb = new StringBuilder(path.length() + REVISION_LENGTH + 3);
+        sb.append("p").append(path);
         if (sb.charAt(sb.length() - 1) != '/') {
             sb.append('/');
         }
-        r.toStringBuilder(sb);
+        r.toStringBuilder(sb).append("/").append(height);
         return sb.toString();
+    }
+
+    public static String getPreviousIdFor(String path, Revision r, int height) {
+        return getIdFromPath(getPreviousPathFor(path, r, height));
     }
 
     /**
      * Deep copy of a map that may contain map values.
-     * 
+     *
      * @param source the source map
      * @param target the target map
      * @param <K> the type of the map key
@@ -262,7 +353,7 @@ public class Utils {
             target.put(e.getKey(), value);
         }
     }
-    
+
     /**
      * Returns the lower key limit to retrieve the children of the given
      * <code>path</code>.
@@ -292,6 +383,23 @@ public class Utils {
     }
 
     /**
+     * Returns parentId extracted from the fromKey. fromKey is usually constructed
+     * using Utils#getKeyLowerLimit
+     *
+     * @param fromKey key used as start key in queries
+     * @return parentId if possible.
+     */
+    @CheckForNull
+    public static String getParentIdFromLowerLimit(String fromKey){
+        //If key just ends with slash 2:/foo/ then append a fake
+        //name to create a proper id
+        if(fromKey.endsWith("/")){
+            fromKey = fromKey + "a";
+        }
+        return getParentId(fromKey);
+    }
+
+    /**
      * Returns <code>true</code> if a revision tagged with the given revision
      * should be considered committed, <code>false</code> otherwise. Committed
      * revisions have a tag, which equals 'c' or starts with 'c-'.
@@ -317,4 +425,41 @@ public class Utils {
         return checkNotNull(tag).startsWith("c-") ?
                 Revision.fromString(tag.substring(2)) : rev;
     }
+
+    /**
+     * Closes the obj its of type {@link java.io.Closeable}. It is mostly
+     * used to close Iterator/Iterables which are backed by say DBCursor
+     *
+     * @param obj object to close
+     */
+    public static void closeIfCloseable(Object obj){
+        if(obj instanceof Closeable){
+            try{
+                ((Closeable) obj).close();
+            } catch (IOException e) {
+                LOG.warn("Error occurred while closing {}", obj, e);
+            }
+        }
+    }
+
+    /**
+     * Provides a readable string for given timestamp
+     */
+    public static String timestampToString(long timestamp){
+        return (new Timestamp(timestamp) + "00").substring(0, 23);
+    }
+
+    /**
+     * Checks that revision x is newer than another revision.
+     *
+     * @param x the revision to check
+     * @param previous the presumed earlier revision
+     * @return true if x is newer
+     */
+    public static boolean isRevisionNewer(@Nonnull RevisionContext context,
+                                          @Nonnull Revision x,
+                                          @Nonnull Revision previous) {
+        return context.getRevisionComparator().compare(x, previous) > 0;
+    }
+
 }

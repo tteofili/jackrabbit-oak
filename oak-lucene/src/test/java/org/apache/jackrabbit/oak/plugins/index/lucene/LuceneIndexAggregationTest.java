@@ -31,14 +31,18 @@ import org.apache.jackrabbit.oak.Oak;
 import org.apache.jackrabbit.oak.api.ContentRepository;
 import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.api.Type;
-import org.apache.jackrabbit.oak.plugins.index.aggregate.AggregateIndexProvider;
 import org.apache.jackrabbit.oak.plugins.index.aggregate.NodeAggregator;
 import org.apache.jackrabbit.oak.plugins.index.aggregate.SimpleNodeAggregator;
+
+import static org.apache.jackrabbit.oak.plugins.index.lucene.TestUtil.newNodeAggregator;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.TestUtil.useV2;
 import static org.apache.jackrabbit.oak.plugins.memory.BinaryPropertyState.binaryProperty;
+
 import org.apache.jackrabbit.oak.plugins.nodetype.write.InitialContent;
 import org.apache.jackrabbit.oak.query.AbstractQueryTest;
+import org.apache.jackrabbit.oak.spi.commit.Observer;
+import org.apache.jackrabbit.oak.spi.query.QueryIndexProvider;
 import org.apache.jackrabbit.oak.spi.security.OpenSecurityProvider;
-import org.junit.Ignore;
 import org.junit.Test;
 
 import com.google.common.collect.ImmutableList;
@@ -48,18 +52,28 @@ public class LuceneIndexAggregationTest extends AbstractQueryTest {
     @Override
     protected void createTestIndexNode() throws Exception {
         Tree index = root.getTree("/");
-        createTestIndexNode(index, LuceneIndexConstants.TYPE_LUCENE);
+        Tree indexDefn = createTestIndexNode(index, LuceneIndexConstants.TYPE_LUCENE);
+        useV2(indexDefn);
+        //Aggregates
+        newNodeAggregator(indexDefn)
+                .newRuleWithName(NT_FILE, newArrayList(JCR_CONTENT, JCR_CONTENT + "/*"))
+                .newRuleWithName(NT_FOLDER, newArrayList("myFile", "subfolder/subsubfolder/file"));
+
+        //Include all properties
+        Tree props = TestUtil.newRulePropTree(indexDefn, "nt:base");
+        TestUtil.enableForFullText(props, LuceneIndexConstants.REGEX_ALL_PROPS, true);
+
         root.commit();
     }
 
     @Override
     protected ContentRepository createRepository() {
+        LowCostLuceneIndexProvider provider = new LowCostLuceneIndexProvider();
         return new Oak()
                 .with(new InitialContent())
                 .with(new OpenSecurityProvider())
-                .with(AggregateIndexProvider
-                        .wrap(new LowCostLuceneIndexProvider()
-                                .with(getNodeAggregator())))
+                .with((QueryIndexProvider)provider.with(getNodeAggregator()))
+                .with((Observer) provider)
                 .with(new LuceneIndexEditorProvider())
                 .createContentRepository();
     }
@@ -75,9 +89,9 @@ public class LuceneIndexAggregationTest extends AbstractQueryTest {
      * 
      */
     private static NodeAggregator getNodeAggregator() {
-        return new SimpleNodeAggregator().newRuleWithName(NT_FILE,
-                newArrayList(JCR_CONTENT, JCR_CONTENT + "/*")).newRuleWithName(
-                NT_FOLDER, newArrayList("myFile"));
+        return new SimpleNodeAggregator()
+            .newRuleWithName(NT_FILE, newArrayList(JCR_CONTENT, JCR_CONTENT + "/*"))
+            .newRuleWithName(NT_FOLDER, newArrayList("myFile", "subfolder/subsubfolder/file"));
     }
 
     /**
@@ -255,6 +269,38 @@ public class LuceneIndexAggregationTest extends AbstractQueryTest {
     }
 
     @Test
+    public void testNodeTypesDeep() throws Exception {
+
+        Tree folder = root.getTree("/").addChild("myFolder");
+        folder.setProperty(JCR_PRIMARYTYPE, NT_FOLDER, Type.NAME);
+
+        Tree folder2 = folder.addChild("subfolder");
+        folder2.setProperty(JCR_PRIMARYTYPE, "nt:unstructured", Type.NAME);
+
+        Tree folder3 = folder2.addChild("subsubfolder");
+        folder3.setProperty(JCR_PRIMARYTYPE, "nt:unstructured", Type.NAME);
+        file(folder3, "file");
+
+        root.commit();
+
+        String xpath = "//element(*, nt:folder)[jcr:contains(., 'dog')]";
+        assertQuery(xpath, "xpath", ImmutableList.of("/myFolder"));
+    }
+
+    private static void file(Tree parent, String name) {
+        Tree file = parent.addChild(name);
+        file.setProperty(JCR_PRIMARYTYPE, NT_FILE, Type.NAME);
+
+        Tree resource = file.addChild(JCR_CONTENT);
+        resource.setProperty(JCR_PRIMARYTYPE, "nt:resource", Type.NAME);
+        resource.setProperty("jcr:lastModified", Calendar.getInstance());
+        resource.setProperty("jcr:encoding", "UTF-8");
+        resource.setProperty("jcr:mimeType", "text/plain");
+        resource.setProperty(binaryProperty(JCR_DATA,
+                "the quick brown fox jumps over the lazy dog."));
+    }
+
+    @Test
     public void testChildNodeProperty() throws Exception {
         Tree file = root.getTree("/").addChild("myFile");
         file.setProperty(JCR_PRIMARYTYPE, NT_FILE, Type.NAME);
@@ -279,6 +325,35 @@ public class LuceneIndexAggregationTest extends AbstractQueryTest {
 
     }
 
+
+    @Test
+    public void testChildNodeProperty2() throws Exception {
+
+        Tree file = root.getTree("/").addChild("myFile");
+        file.setProperty(JCR_PRIMARYTYPE, NT_FILE, Type.NAME);
+        Tree resource = file.addChild(JCR_CONTENT);
+        resource.setProperty(JCR_PRIMARYTYPE, "nt:resource", Type.NAME);
+        resource.setProperty(binaryProperty(JCR_DATA,
+                "the quick brown fox jumps over the lazy dog."));
+        resource.setProperty("jcr:title", "title");
+        resource.setProperty("jcr:description", "description");
+
+        Tree file2 = root.getTree("/").addChild("myFile2");
+        file2.setProperty(JCR_PRIMARYTYPE, NT_FILE, Type.NAME);
+        Tree resource2 = file2.addChild(JCR_CONTENT);
+        resource2.setProperty(JCR_PRIMARYTYPE, "nt:resource", Type.NAME);
+        resource2.setProperty(binaryProperty(JCR_DATA,
+                "the quick brown fox jumps over the lazy dog."));
+        resource2.setProperty("jcr:title", "other");
+        resource.setProperty("jcr:description", "title");
+
+        root.commit();
+
+        String matchChildSimple = "//*[( jcr:contains(jcr:content/@jcr:title, 'title') )]";
+        assertQuery(matchChildSimple, "xpath", ImmutableList.of("/myFile"));
+
+    }
+
     @Test
     public void testPreventDoubleAggregation() throws Exception {
         Tree file = root.getTree("/").addChild("myFile");
@@ -300,7 +375,6 @@ public class LuceneIndexAggregationTest extends AbstractQueryTest {
     }
 
     @Test
-     @Ignore("OAK-828")
     public void testDifferentNodes() throws Exception {
 
         Tree folder = root.getTree("/").addChild("myFolder");
@@ -332,6 +406,10 @@ public class LuceneIndexAggregationTest extends AbstractQueryTest {
                 "//element(*, nt:file)[jcr:contains(., 'dog') and jcr:contains(., 'title')]", 
                 "xpath", ImmutableList.of("/myFolder/myFile"));
 
+        // double aggregation dupes
+        assertQuery(
+                    "//*[(jcr:contains(., 'dog') or jcr:contains(jcr:content, 'dog') )]",
+                    "xpath", ImmutableList.of("/myFolder", "/myFolder/myFile", "/myFolder/myFile/jcr:content"));
     }
 
 }

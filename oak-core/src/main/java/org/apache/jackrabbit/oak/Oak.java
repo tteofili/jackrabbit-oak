@@ -18,9 +18,13 @@ package org.apache.jackrabbit.oak;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.collect.Lists.newArrayList;
+import static org.apache.jackrabbit.oak.spi.whiteboard.WhiteboardUtils.registerMBean;
+import static org.apache.jackrabbit.oak.spi.whiteboard.WhiteboardUtils.registerObserver;
+import static org.apache.jackrabbit.oak.spi.whiteboard.WhiteboardUtils.scheduleWithFixedDelay;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executor;
@@ -43,20 +47,27 @@ import javax.security.auth.login.LoginException;
 
 import com.google.common.base.Function;
 import com.google.common.collect.Iterables;
+import com.google.common.collect.Lists;
 import com.google.common.io.Closer;
 
 import org.apache.jackrabbit.oak.api.ContentRepository;
 import org.apache.jackrabbit.oak.api.ContentSession;
 import org.apache.jackrabbit.oak.api.Root;
 import org.apache.jackrabbit.oak.api.jmx.IndexStatsMBean;
+import org.apache.jackrabbit.oak.api.jmx.QueryEngineSettingsMBean;
+import org.apache.jackrabbit.oak.api.jmx.RepositoryManagementMBean;
 import org.apache.jackrabbit.oak.core.ContentRepositoryImpl;
+import org.apache.jackrabbit.oak.management.RepositoryManager;
 import org.apache.jackrabbit.oak.plugins.commit.ConflictHook;
 import org.apache.jackrabbit.oak.plugins.index.AsyncIndexUpdate;
 import org.apache.jackrabbit.oak.plugins.index.CompositeIndexEditorProvider;
+import org.apache.jackrabbit.oak.plugins.index.IndexConstants;
 import org.apache.jackrabbit.oak.plugins.index.IndexEditorProvider;
 import org.apache.jackrabbit.oak.plugins.index.IndexUpdateProvider;
+import org.apache.jackrabbit.oak.plugins.index.property.jmx.PropertyIndexAsyncReindex;
+import org.apache.jackrabbit.oak.plugins.index.property.jmx.PropertyIndexAsyncReindexMBean;
 import org.apache.jackrabbit.oak.plugins.memory.MemoryNodeStore;
-import org.apache.jackrabbit.oak.spi.commit.BackgroundObserver;
+import org.apache.jackrabbit.oak.query.QueryEngineSettings;
 import org.apache.jackrabbit.oak.spi.commit.CommitHook;
 import org.apache.jackrabbit.oak.spi.commit.CommitInfo;
 import org.apache.jackrabbit.oak.spi.commit.CompositeEditorProvider;
@@ -78,6 +89,7 @@ import org.apache.jackrabbit.oak.spi.security.SecurityProvider;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.apache.jackrabbit.oak.spi.state.NodeStore;
+import org.apache.jackrabbit.oak.spi.whiteboard.CompositeRegistration;
 import org.apache.jackrabbit.oak.spi.whiteboard.DefaultWhiteboard;
 import org.apache.jackrabbit.oak.spi.whiteboard.Registration;
 import org.apache.jackrabbit.oak.spi.whiteboard.Whiteboard;
@@ -103,8 +115,10 @@ public class Oak {
     public static final String DEFAULT_WORKSPACE_NAME = "default";
 
     private final NodeStore store;
-
+    
     private final List<RepositoryInitializer> initializers = newArrayList();
+
+    private QueryEngineSettings queryEngineSettings = new QueryEngineSettings();
 
     private final List<QueryIndexProvider> queryIndexProviders = newArrayList();
 
@@ -112,13 +126,15 @@ public class Oak {
 
     private final List<CommitHook> commitHooks = newArrayList();
 
+    private final List<Observer> observers = Lists.newArrayList();
+
     private List<EditorProvider> editorProviders = newArrayList();
 
     private SecurityProvider securityProvider;
 
-    private ScheduledExecutorService scheduledExecutor = defaultScheduledExecutor();
+    private ScheduledExecutorService scheduledExecutor;
 
-    private Executor executor = defaultExecutorService();
+    private Executor executor;
 
     /**
      * Default {@code ScheduledExecutorService} used for scheduling background tasks.
@@ -174,6 +190,20 @@ public class Oak {
         return executor;
     }
 
+    private synchronized ScheduledExecutorService getScheduledExecutor() {
+        if (scheduledExecutor == null) {
+            scheduledExecutor = defaultScheduledExecutor();
+        }
+        return scheduledExecutor;
+    }
+
+    private synchronized Executor getExecutor() {
+        if (executor == null) {
+            executor = defaultExecutorService();
+        }
+        return executor;
+    }
+
     private MBeanServer mbeanServer;
 
     private String defaultWorkspaceName = DEFAULT_WORKSPACE_NAME;
@@ -203,7 +233,7 @@ public class Oak {
 
             final Closer observerSubscription = Closer.create();
             Future<?> future = null;
-            if (scheduledExecutor != null && type == Runnable.class) {
+            if (type == Runnable.class) {
                 Runnable runnable = (Runnable) service;
                 Long period = getValue(properties, "scheduler.period", Long.class);
                 if (period != null) {
@@ -211,18 +241,15 @@ public class Oak {
                             properties, "scheduler.concurrent",
                             Boolean.class, Boolean.FALSE);
                     if (concurrent) {
-                        future = scheduledExecutor.scheduleAtFixedRate(
+                        future = getScheduledExecutor().scheduleAtFixedRate(
                                 runnable, period, period, TimeUnit.SECONDS);
                     } else {
-                        future = scheduledExecutor.scheduleWithFixedDelay(
+                        future = getScheduledExecutor().scheduleWithFixedDelay(
                                 runnable, period, period, TimeUnit.SECONDS);
                     }
                 }
             } else if (type == Observer.class && store instanceof Observable) {
-                BackgroundObserver backgroundObserver =
-                        new BackgroundObserver((Observer) service, executor);
-                observerSubscription.register(backgroundObserver);
-                observerSubscription.register(((Observable) store).addObserver(backgroundObserver));
+                observerSubscription.register(((Observable) store).addObserver((Observer) service));
             }
 
             ObjectName objectName = null;
@@ -301,6 +328,12 @@ public class Oak {
     @Nonnull
     public Oak with(@Nonnull RepositoryInitializer initializer) {
         initializers.add(checkNotNull(initializer));
+        return this;
+    }
+
+    @Nonnull
+    public Oak with(@Nonnull QueryEngineSettings queryEngineSettings) {
+        this.queryEngineSettings = queryEngineSettings;
         return this;
     }
 
@@ -444,17 +477,26 @@ public class Oak {
         if (securityProvider instanceof WhiteboardAware) {
             ((WhiteboardAware) securityProvider).setWhiteboard(whiteboard);
         }
+        QueryEngineSettings queryEngineSettings = WhiteboardUtils.getService(whiteboard, QueryEngineSettings.class);
+        if (queryEngineSettings != null) {
+            this.queryEngineSettings = queryEngineSettings;
+        }
+        return this;
+    }
 
+    @Nonnull
+    public Oak with(@Nonnull Observer observer) {
+        observers.add(checkNotNull(observer));
         return this;
     }
 
     /**
      * Enable the asynchronous (background) indexing behavior.
-     * 
+     *
      * Please not that when enabling the background indexer, you need to take
      * care of calling
      * <code>#shutdown<code> on the <code>executor<code> provided for this Oak instance.
-     * 
+     *
      */
     public Oak withAsyncIndexing() {
         this.asyncIndexing = true;
@@ -467,6 +509,9 @@ public class Oak {
     }
 
     public ContentRepository createContentRepository() {
+        final List<Registration> regs = Lists.newArrayList();
+        regs.add(whiteboard.register(Executor.class, getExecutor(), Collections.emptyMap()));
+
         IndexEditorProvider indexEditors = CompositeIndexEditorProvider.compose(indexEditorProviders);
         OakInitializer.initialize(store, new CompositeInitializer(initializers), indexEditors);
 
@@ -480,10 +525,23 @@ public class Oak {
             String name = "async";
             AsyncIndexUpdate task = new AsyncIndexUpdate(name, store,
                     indexEditors);
-            WhiteboardUtils.scheduleWithFixedDelay(whiteboard, task, 5, true);
-            WhiteboardUtils.registerMBean(whiteboard, IndexStatsMBean.class,
-                    task.getIndexStats(), IndexStatsMBean.TYPE, name);
+            regs.add(scheduleWithFixedDelay(whiteboard, task, 5, true));
+            regs.add(registerMBean(whiteboard, IndexStatsMBean.class,
+                    task.getIndexStats(), IndexStatsMBean.TYPE, name));
+            // Register AsyncIndexStats for execution stats update
+            regs.add(
+                scheduleWithFixedDelay(whiteboard, task.getIndexStats(), 1, false));
+
+            PropertyIndexAsyncReindex asyncPI = new PropertyIndexAsyncReindex(
+                    new AsyncIndexUpdate(IndexConstants.ASYNC_REINDEX_VALUE,
+                            store, indexEditors, true), getExecutor());
+            regs.add(registerMBean(whiteboard,
+                    PropertyIndexAsyncReindexMBean.class, asyncPI,
+                    PropertyIndexAsyncReindexMBean.TYPE, name));
         }
+
+        regs.add(registerMBean(whiteboard, QueryEngineSettingsMBean.class,
+                queryEngineSettings, QueryEngineSettingsMBean.TYPE, "settings"));
 
         // FIXME: OAK-810 move to proper workspace initialization
         // initialize default workspace
@@ -495,31 +553,46 @@ public class Oak {
                                 return sc.getWorkspaceInitializer();
                             }
                         });
-        OakInitializer.initialize(workspaceInitializers, store,
-                defaultWorkspaceName, indexEditors, indexProvider,
-                CompositeHook.compose(initHooks));
+        OakInitializer.initialize(
+                workspaceInitializers, store, defaultWorkspaceName, indexEditors);
 
         // add index hooks later to prevent the OakInitializer to do excessive indexing
         with(new IndexUpdateProvider(indexEditors));
         withEditorHook();
-        CommitHook commitHook = CompositeHook.compose(commitHooks);
+
+        // Register observer last to prevent sending events while initialising
+        for (Observer observer : observers) {
+            regs.add(registerObserver(whiteboard, observer));
+        }
+
+        RepositoryManager repositoryManager = new RepositoryManager(whiteboard);
+        regs.add(registerMBean(whiteboard, RepositoryManagementMBean.class, repositoryManager,
+                RepositoryManagementMBean.TYPE, repositoryManager.getName()));
+
         return new ContentRepositoryImpl(
                 store,
-                commitHook,
+                CompositeHook.compose(commitHooks),
                 defaultWorkspaceName,
+                queryEngineSettings,
                 indexProvider,
-                securityProvider);
+                securityProvider) {
+            @Override
+            public void close() throws IOException {
+                super.close();
+                new CompositeRegistration(regs).unregister();
+            }
+        };
     }
 
     /**
      * Creates a content repository with the given configuration
      * and logs in to the default workspace with no credentials,
      * returning the resulting content session.
-     * <p/>
+     * <p>
      * This method exists mostly as a convenience for one-off tests,
      * as there's no way to create other sessions for accessing the
      * same repository.
-     * <p/>
+     * <p>
      * There is typically no need to explicitly close the returned
      * session unless the repository has explicitly been configured
      * to reserve some resources until all sessions have been closed.
@@ -542,11 +615,11 @@ public class Oak {
      * Creates a content repository with the given configuration
      * and returns a {@link Root} instance after logging in to the
      * default workspace with no credentials.
-     * <p/>
+     * <p>
      * This method exists mostly as a convenience for one-off tests, as
      * the returned root is the only way to access the session or the
      * repository.
-     * <p/>
+     * <p>
      * Note that since there is no way to close the underlying content
      * session, this method should only be used when no components that
      * require sessions to be closed have been configured. The repository

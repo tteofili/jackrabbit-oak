@@ -104,7 +104,7 @@ public abstract class AbstractBlob implements Blob {
 
     /**
      * This hash code implementation returns the hash code of the underlying stream
-     * @return
+     * @return a byte array of the hash
      */
     protected byte[] sha256() {
         return getSha256().asBytes();
@@ -117,13 +117,17 @@ public abstract class AbstractBlob implements Blob {
         return null;
     }
 
-    //------------------------------------------------------------< Object >--
+    @Override
+    public String getContentIdentity() {
+        return null;
+    }
+
+//------------------------------------------------------------< Object >--
 
     /**
      * To {@code Blob} instances are considered equal iff they have the
      * same SHA-256 hash code  are equal.
      * @param other
-     * @return
      */
     @Override
     public boolean equals(Object other) {

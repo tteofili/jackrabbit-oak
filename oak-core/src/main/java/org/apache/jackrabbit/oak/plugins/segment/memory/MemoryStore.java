@@ -19,32 +19,43 @@ package org.apache.jackrabbit.oak.plugins.segment.memory;
 import static org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState.EMPTY_NODE;
 
 import java.nio.ByteBuffer;
-import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.ConcurrentMap;
 
 import javax.annotation.Nonnull;
 
-import org.apache.jackrabbit.oak.plugins.segment.AbstractStore;
-import org.apache.jackrabbit.oak.plugins.segment.Journal;
+import org.apache.jackrabbit.oak.api.Blob;
 import org.apache.jackrabbit.oak.plugins.segment.Segment;
+import org.apache.jackrabbit.oak.plugins.segment.SegmentId;
+import org.apache.jackrabbit.oak.plugins.segment.SegmentNotFoundException;
+import org.apache.jackrabbit.oak.plugins.segment.SegmentTracker;
+import org.apache.jackrabbit.oak.plugins.segment.SegmentNodeState;
+import org.apache.jackrabbit.oak.plugins.segment.SegmentStore;
+import org.apache.jackrabbit.oak.plugins.segment.SegmentWriter;
+import org.apache.jackrabbit.oak.spi.blob.BlobStore;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 
 import com.google.common.collect.Maps;
 
-public class MemoryStore extends AbstractStore {
+/**
+ * A store used for in-memory operations.
+ */
+public class MemoryStore implements SegmentStore {
 
-    private final Map<String, Journal> journals = Maps.newHashMap();
+    private final SegmentTracker tracker = new SegmentTracker(this);
 
-    private final ConcurrentMap<UUID, Segment> segments =
+    private SegmentNodeState head;
+
+    private final ConcurrentMap<SegmentId, Segment> segments =
             Maps.newConcurrentMap();
 
     public MemoryStore(NodeState root) {
-        super(0);
         NodeBuilder builder = EMPTY_NODE.builder();
         builder.setChildNode("root", root);
-        journals.put("root", new MemoryJournal(this, builder.getNodeState()));
+
+        SegmentWriter writer = tracker.getWriter();
+        this.head = writer.writeNode(builder.getNodeState());
+        writer.flush();
     }
 
     public MemoryStore() {
@@ -52,47 +63,69 @@ public class MemoryStore extends AbstractStore {
     }
 
     @Override
-    public void close() {
+    public SegmentTracker getTracker() {
+        return tracker;
     }
 
     @Override
-    public synchronized Journal getJournal(final String name) {
-        Journal journal = journals.get(name);
-        if (journal == null) {
-            journal = new MemoryJournal(this, "root");
-            journals.put(name, journal);
+    public synchronized SegmentNodeState getHead() {
+        return head;
+    }
+
+    @Override
+    public synchronized boolean setHead(SegmentNodeState base, SegmentNodeState head) {
+        if (this.head.getRecordId().equals(base.getRecordId())) {
+            this.head = head;
+            return true;
+        } else {
+            return false;
         }
-        return journal;
+    }
+
+    @Override
+    public boolean containsSegment(SegmentId id) {
+        return id.getTracker() == tracker || segments.containsKey(id);
     }
 
     @Override @Nonnull
-    protected Segment loadSegment(UUID id) {
+    public Segment readSegment(SegmentId id) {
         Segment segment = segments.get(id);
         if (segment != null) {
             return segment;
-        } else {
-            throw new IllegalArgumentException("Segment not found: " + id);
         }
+        throw new SegmentNotFoundException(id);
     }
 
     @Override
     public void writeSegment(
-            UUID segmentId, byte[] data, int offset, int length) {
+            SegmentId id, byte[] data, int offset, int length) {
         ByteBuffer buffer = ByteBuffer.allocate(length);
         buffer.put(data, offset, length);
         buffer.rewind();
-        Segment segment = createSegment(segmentId, buffer);
-        if (segments.putIfAbsent(segment.getSegmentId(), segment) != null) {
-            throw new IllegalStateException(
-                    "Segment override: " + segment.getSegmentId());
+        Segment segment = new Segment(tracker, id, buffer);
+        if (segments.putIfAbsent(id, segment) != null) {
+            throw new IllegalStateException("Segment override: " + id);
         }
     }
 
     @Override
-    public void deleteSegment(UUID segmentId) {
-        if (segments.remove(segmentId) == null) {
-            throw new IllegalStateException("Missing segment: " + segmentId);
-        }
+    public void close() {
+    }
+
+    @Override
+    public Blob readBlob(String reference) {
+        return null;
+    }
+
+    @Override
+    public BlobStore getBlobStore() {
+        return null;
+    }
+
+    @Override
+    public void gc() {
+        System.gc();
+        segments.keySet().retainAll(tracker.getReferencedSegmentIds());
     }
 
 }

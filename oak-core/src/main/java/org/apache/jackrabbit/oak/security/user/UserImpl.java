@@ -28,6 +28,7 @@ import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.namepath.NamePathMapper;
 import org.apache.jackrabbit.oak.spi.security.user.AuthorizableType;
 import org.apache.jackrabbit.oak.spi.security.user.UserConstants;
+import org.apache.jackrabbit.oak.spi.security.user.UserIdCredentials;
 import org.apache.jackrabbit.oak.spi.security.user.util.PasswordUtil;
 import org.apache.jackrabbit.oak.spi.security.user.util.UserUtil;
 import org.apache.jackrabbit.oak.util.TreeUtil;
@@ -44,7 +45,7 @@ class UserImpl extends AuthorizableImpl implements User {
     UserImpl(String id, Tree tree, UserManagerImpl userManager) throws RepositoryException {
         super(id, tree, userManager);
 
-        isAdmin = UserUtil.getAdminId(userManager.getConfig()).equals(id);
+        isAdmin = UserUtil.isAdmin(userManager.getConfig(), id);
     }
 
     //---------------------------------------------------< AuthorizableImpl >---
@@ -80,8 +81,18 @@ class UserImpl extends AuthorizableImpl implements User {
     }
 
     @Override
+    public boolean isSystemUser() {
+        return false;
+    }
+
+    @Override
     public Credentials getCredentials() {
-        return new CredentialsImpl(getID(), getPasswordHash());
+        String pwHash = getPasswordHash();
+        if (pwHash == null) {
+            return new UserIdCredentials(getID());
+        } else {
+            return new CredentialsImpl(getID(), pwHash);
+        }
     }
 
     @Override
@@ -96,7 +107,7 @@ class UserImpl extends AuthorizableImpl implements User {
         }
         UserManagerImpl userManager = getUserManager();
         userManager.onPasswordChange(this, password);
-        userManager.setPassword(getTree(), password, true);
+        userManager.setPassword(getTree(), getID(),  password, true);
     }
 
     @Override

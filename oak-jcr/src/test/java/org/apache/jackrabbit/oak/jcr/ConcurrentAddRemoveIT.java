@@ -16,6 +16,8 @@
  */
 package org.apache.jackrabbit.oak.jcr;
 
+import static org.junit.Assert.fail;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -27,8 +29,6 @@ import javax.jcr.RepositoryException;
 import javax.jcr.Session;
 
 import org.junit.Test;
-
-import static org.junit.Assert.fail;
 
 /**
  * Concurrently adds and removes the same node. Either the operation must

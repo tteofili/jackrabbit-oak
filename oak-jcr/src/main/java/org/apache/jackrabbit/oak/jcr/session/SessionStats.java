@@ -16,8 +16,10 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.jackrabbit.oak.jcr.session;
+
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
+import static java.util.concurrent.TimeUnit.SECONDS;
 
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -26,68 +28,107 @@ import java.util.Collections;
 import java.util.Date;
 import java.util.Map;
 import java.util.Map.Entry;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import javax.jcr.RepositoryException;
 
 import org.apache.jackrabbit.oak.api.AuthInfo;
 import org.apache.jackrabbit.oak.api.jmx.SessionMBean;
-import org.apache.jackrabbit.oak.jcr.delegate.SessionDelegate;
+import org.apache.jackrabbit.oak.stats.Clock;
 
 public class SessionStats implements SessionMBean {
-    private static final long EPS = TimeUnit.MILLISECONDS.convert(1, TimeUnit.SECONDS);
-
     private final Exception initStackTrace = new Exception("The session was opened here:");
-    private final Date loginTimeStamp = new Date();
-    private final AtomicReference<Date> lastReadAccess = new AtomicReference<Date>();
-    private final AtomicLong readCount = new AtomicLong();
-    private final AtomicReference<Date> lastWriteAccess = new AtomicReference<Date>();
-    private final AtomicLong writeCount = new AtomicLong();
-    private final AtomicReference<Date> lastRefresh = new AtomicReference<Date>();
-    private final AtomicLong refreshCount = new AtomicLong();
-    private final AtomicReference<Date> lastSave = new AtomicReference<Date>();
-    private final AtomicLong saveCount = new AtomicLong();
+
     private final AtomicReference<RepositoryException> lastFailedSave =
             new AtomicReference<RepositoryException>();
 
+    private final Counters counters;
     private final String sessionId;
     private final AuthInfo authInfo;
 
     private Map<String, Object> attributes = Collections.emptyMap();
 
-    public SessionStats(SessionDelegate sessionDelegate) {
-        this.sessionId = sessionDelegate.toString();
-        this.authInfo = sessionDelegate.getAuthInfo();
+    public SessionStats(String sessionId, AuthInfo authInfo, Clock clock) {
+        this.counters = new Counters(clock);
+        this.sessionId = sessionId;
+        this.authInfo = authInfo;
+    }
+
+    public static class Counters {
+        private final Clock clock;
+        private final long loginTime;
+        public long accessTime;
+        public long readTime = 0;
+        public long writeTime = 0;
+        public long refreshTime = 0;
+        public long saveTime = 0;
+        public long readCount = 0;
+        public long writeCount = 0;
+        public long refreshCount = 0;
+        public long saveCount = 0;
+
+        public Counters(Clock clock) {
+            long time = clock.getTime();
+            this.clock = clock;
+            this.loginTime = time;
+            this.accessTime = time;
+        }
+
+        public Date getLoginTime() {
+            return new Date(loginTime);
+        }
+
+        public Date getReadTime() {
+            return getTime(readTime);
+        }
+
+        public long getReadCount() {
+            return readCount;
+        }
+
+        public Date getWriteTime() {
+            return getTime(writeTime);
+        }
+
+        public long getWriteCount() {
+            return writeCount;
+        }
+
+        public Date getRefreshTime() {
+            return getTime(refreshTime);
+        }
+
+        public long getRefreshCount() {
+            return refreshCount;
+        }
+
+        public Date getSaveTime() {
+            return getTime(saveTime);
+        }
+
+        public long getSaveCount() {
+            return saveCount;
+        }
+
+        public long getSecondsSinceLogin() {
+            return SECONDS.convert(clock.getTime() - loginTime, MILLISECONDS);
+        }
+
+        private static Date getTime(long timestamp) {
+            if (timestamp != 0) {
+                return new Date(timestamp);
+            } else {
+                return null;
+            }
+        }
+    }
+
+    public Counters getCounters() {
+        return counters;
     }
 
     public void setAttributes(Map<String, Object> attributes) {
         this.attributes = attributes;
-    }
-
-    public void read() {
-        // There is a small race here and in the following methods, which might lead to
-        // a small window of inconsistency between the date and the count. Since the
-        // effect is small and the provided information is for information purposes
-        // this is preferable to synchronizing the method.
-        lastReadAccess.set(new Date());
-        readCount.incrementAndGet();
-    }
-
-    public void write() {
-        lastWriteAccess.set(new Date());
-        writeCount.incrementAndGet();
-    }
-
-    public void refresh() {
-        lastRefresh.set(new Date());
-        refreshCount.incrementAndGet();
-    }
-
-    public void save() {
-        lastSave.set(new Date());
-        saveCount.incrementAndGet();
     }
 
     public void failedSave(RepositoryException repositoryException) {
@@ -113,17 +154,17 @@ public class SessionStats implements SessionMBean {
 
     @Override
     public String getLoginTimeStamp() {
-        return formatDate(loginTimeStamp);
+        return formatDate(counters.getLoginTime());
     }
 
     @Override
     public String getLastReadAccess() {
-        return formatDate(lastReadAccess.get());
+        return formatDate(counters.getReadTime());
     }
 
     @Override
     public long getReadCount() {
-        return readCount.get();
+        return counters.getReadCount();
     }
 
     @Override
@@ -133,12 +174,12 @@ public class SessionStats implements SessionMBean {
 
     @Override
     public String getLastWriteAccess() {
-        return formatDate(lastWriteAccess.get());
+        return formatDate(counters.getWriteTime());
     }
 
     @Override
     public long getWriteCount() {
-        return writeCount.get();
+        return counters.getWriteCount();
     }
 
     @Override
@@ -148,12 +189,12 @@ public class SessionStats implements SessionMBean {
 
     @Override
     public String getLastRefresh() {
-        return formatDate(lastRefresh.get());
+        return formatDate(counters.getRefreshTime());
     }
 
     @Override
     public long getRefreshCount() {
-        return refreshCount.get();
+        return counters.getRefreshCount();
     }
 
     @Override
@@ -163,12 +204,12 @@ public class SessionStats implements SessionMBean {
 
     @Override
     public String getLastSave() {
-        return formatDate(lastSave.get());
+        return formatDate(counters.getSaveTime());
     }
 
     @Override
     public long getSaveCount() {
-        return saveCount.get();
+        return counters.getSaveCount();
     }
 
     @Override
@@ -181,7 +222,7 @@ public class SessionStats implements SessionMBean {
         String[] atts = new String[attributes.size()];
         int k = 0;
         for (Entry<String, Object> attribute : attributes.entrySet()) {
-            atts[k] = attribute.getKey() + '=' + attribute.getValue();
+            atts[k++] = attribute.getKey() + '=' + attribute.getValue();
         }
         return atts;
     }
@@ -210,8 +251,8 @@ public class SessionStats implements SessionMBean {
     }
 
     private double calculateRate(long count) {
-        double dt = System.currentTimeMillis() - loginTimeStamp.getTime();
-        if (dt > EPS) {
+        double dt = counters.getSecondsSinceLogin();
+        if (dt > 0) {
             return count / dt;
         } else {
             return Double.NaN;

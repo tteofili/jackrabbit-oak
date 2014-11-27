@@ -26,6 +26,7 @@ import static javax.jcr.observation.Event.PROPERTY_ADDED;
 import static javax.jcr.observation.Event.PROPERTY_CHANGED;
 import static javax.jcr.observation.Event.PROPERTY_REMOVED;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -51,7 +52,6 @@ import org.apache.jackrabbit.oak.jcr.NodeStoreFixture;
 import org.apache.jackrabbit.oak.jcr.repository.RepositoryImpl;
 import org.apache.jackrabbit.test.api.util.Text;
 import org.junit.After;
-import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -62,11 +62,12 @@ public class ObservationRefreshTest extends AbstractRepositoryTest {
     public static final int ALL_EVENTS = NODE_ADDED | NODE_REMOVED | NODE_MOVED | PROPERTY_ADDED |
             PROPERTY_REMOVED | PROPERTY_CHANGED | PERSIST;
     private static final String TEST_NODE = "test_node";
+    private static final String TEST_NODE_TYPE = "oak:Unstructured";
     private static final String REFERENCEABLE_NODE = "\"referenceable\"";
     private static final String TEST_PATH = '/' + TEST_NODE;
     private static final String TEST_TYPE = "mix:test";
 
-    private static final long CONDITION_TIMEOUT = 30000;
+    private static final long CONDITION_TIMEOUT = 10*60*1000;
 
     private Session observingSession;
     private ObservationManager observationManager;
@@ -77,6 +78,10 @@ public class ObservationRefreshTest extends AbstractRepositoryTest {
 
     @Before
     public void setup() throws RepositoryException {
+        // Ensure the observation revision queue is sufficiently large to hold
+        // all revisions. Otherwise waiting for events might block since pending
+        // events would only be released on a subsequent commit. See OAK-1491
+        observationQueueLength = 1000000;
         Session session = getAdminSession();
 
         NodeTypeManager ntMgr = session.getWorkspace().getNodeTypeManager();
@@ -85,7 +90,7 @@ public class ObservationRefreshTest extends AbstractRepositoryTest {
         mixTest.setMixin(true);
         ntMgr.registerNodeType(mixTest, false);
 
-        Node n = session.getRootNode().addNode(TEST_NODE);
+        Node n = session.getRootNode().addNode(TEST_NODE, TEST_NODE_TYPE);
         n.addMixin(TEST_TYPE);
         Node refNode = n.addNode(REFERENCEABLE_NODE);
         refNode.addMixin(JcrConstants.MIX_REFERENCEABLE);
@@ -105,7 +110,6 @@ public class ObservationRefreshTest extends AbstractRepositoryTest {
 
     @Test
     public void observation() throws RepositoryException, InterruptedException, ExecutionException {
-        Assume.assumeTrue(fixture != NodeStoreFixture.DOCUMENT_JDBC);  // FIXME too slow. See OAK-1477
         final MyListener listener = new MyListener();
         observationManager.addEventListener(listener, ALL_EVENTS, "/", true, null, null, false);
         try {
@@ -114,7 +118,7 @@ public class ObservationRefreshTest extends AbstractRepositoryTest {
                 n.addNode("n" + i);
                 n.getSession().save();
             }
-            Timer.waitFor(CONDITION_TIMEOUT, new Condition() {
+            listener.waitFor(CONDITION_TIMEOUT, new Condition() {
                 @Override
                 public boolean evaluate() {
                     return listener.numAdded == 1000;
@@ -127,7 +131,7 @@ public class ObservationRefreshTest extends AbstractRepositoryTest {
                 n.getNode("n" + i).remove();
                 n.getSession().save();
             }
-            Timer.waitFor(CONDITION_TIMEOUT , new Condition() {
+            listener.waitFor(CONDITION_TIMEOUT, new Condition() {
                 @Override
                 public boolean evaluate() {
                     return listener.numRemoved == 1000;
@@ -140,7 +144,7 @@ public class ObservationRefreshTest extends AbstractRepositoryTest {
                 n.setProperty("test" + i, "foo");
                 n.getSession().save();
             }
-            Timer.waitFor(CONDITION_TIMEOUT , new Condition() {
+            listener.waitFor(CONDITION_TIMEOUT, new Condition() {
                 @Override
                 public boolean evaluate() {
                     return listener.numPropsAdded == 1100;
@@ -153,7 +157,7 @@ public class ObservationRefreshTest extends AbstractRepositoryTest {
                 n.setProperty("test" + i, i);
                 n.getSession().save();
             }
-            Timer.waitFor(CONDITION_TIMEOUT , new Condition() {
+            listener.waitFor(CONDITION_TIMEOUT, new Condition() {
                 @Override
                 public boolean evaluate() {
                     return listener.numPropsModified == 100;
@@ -165,20 +169,22 @@ public class ObservationRefreshTest extends AbstractRepositoryTest {
             for (int i=0; i<10; i++) {
                 n.setProperty("test100", "foo");
                 n.getSession().save();
-                Timer.waitFor(CONDITION_TIMEOUT, new Condition() {
-                    @Override
-                    public boolean evaluate() {
-                        return listener.test100Exists;
-                    }
-                });
+                assertTrue("Gave up waiting for events",
+                        listener.waitFor(CONDITION_TIMEOUT, new Condition() {
+                            @Override
+                            public boolean evaluate() {
+                                return listener.test100Exists;
+                            }
+                        }));
                 n.getProperty("test100").remove();
                 n.getSession().save();
-                Timer.waitFor(CONDITION_TIMEOUT, new Condition() {
-                    @Override
-                    public boolean evaluate() {
-                        return !listener.test100Exists;
-                    }
-                });
+                assertTrue("Gave up waiting for events",
+                        listener.waitFor(CONDITION_TIMEOUT, new Condition() {
+                            @Override
+                            public boolean evaluate() {
+                                return !listener.test100Exists;
+                            }
+                        }));
             }
             assertEquals("", listener.error);
 
@@ -186,7 +192,7 @@ public class ObservationRefreshTest extends AbstractRepositoryTest {
                 n.getProperty("test" + i).remove();
                 n.getSession().save();
             }
-            Timer.waitFor(CONDITION_TIMEOUT , new Condition() {
+            listener.waitFor(CONDITION_TIMEOUT, new Condition() {
                 @Override
                 public boolean evaluate() {
                     return listener.numPropsRemoved == 1100;
@@ -202,19 +208,6 @@ public class ObservationRefreshTest extends AbstractRepositoryTest {
 
     private interface Condition {
         boolean evaluate();
-    }
-    private static class Timer {
-
-        public static boolean waitFor(long timeout, Condition c) throws InterruptedException {
-            long end = System.currentTimeMillis() + timeout;
-            while (System.currentTimeMillis() < end) {
-                if (c.evaluate()) {
-                    return true;
-                }
-                Thread.sleep(100);
-            }
-            return false;
-        }
     }
 
     private class MyListener implements EventListener {
@@ -234,7 +227,7 @@ public class ObservationRefreshTest extends AbstractRepositoryTest {
         private volatile boolean test100Exists = false;
 
         @Override
-        public void onEvent(EventIterator events) {
+        public synchronized void onEvent(EventIterator events) {
             try {
                 while (events.hasNext()) {
                     Event event = events.nextEvent();
@@ -300,8 +293,24 @@ public class ObservationRefreshTest extends AbstractRepositoryTest {
             } catch (Exception e) {
                 error = e.toString();
                 e.printStackTrace();
+            } finally {
+                notifyAll();
             }
-
         }
+
+        synchronized boolean waitFor(long timeout, Condition c)
+                throws InterruptedException {
+            long end = System.currentTimeMillis() + timeout;
+            long remaining = end - System.currentTimeMillis();
+            while (remaining > 0) {
+                if (c.evaluate()) {
+                    return true;
+                }
+                wait(remaining);
+                remaining = end - System.currentTimeMillis();
+            }
+            return false;
+        }
+
     }
 }

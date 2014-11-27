@@ -19,7 +19,6 @@ package org.apache.jackrabbit.oak;
 import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
-
 import javax.annotation.Nullable;
 import javax.jcr.Credentials;
 import javax.jcr.NoSuchWorkspaceException;
@@ -40,6 +39,8 @@ import org.apache.jackrabbit.oak.api.ContentRepository;
 import org.apache.jackrabbit.oak.api.ContentSession;
 import org.apache.jackrabbit.oak.api.Root;
 import org.apache.jackrabbit.oak.namepath.NamePathMapper;
+import org.apache.jackrabbit.oak.plugins.commit.ConflictValidatorProvider;
+import org.apache.jackrabbit.oak.plugins.commit.JcrConflictHandler;
 import org.apache.jackrabbit.oak.plugins.index.property.PropertyIndexEditorProvider;
 import org.apache.jackrabbit.oak.plugins.index.property.PropertyIndexProvider;
 import org.apache.jackrabbit.oak.plugins.index.reference.ReferenceEditorProvider;
@@ -81,12 +82,14 @@ public abstract class AbstractSecurityTest {
     public void before() throws Exception {
         Oak oak = new Oak()
                 .with(new InitialContent())
+                .with(JcrConflictHandler.JCR_CONFLICT_HANDLER)
                 .with(new NamespaceEditorProvider())
                 .with(new ReferenceEditorProvider())
                 .with(new ReferenceIndexProvider())
                 .with(new PropertyIndexEditorProvider())
                 .with(new PropertyIndexProvider())
                 .with(new TypeEditorProvider())
+                .with(new ConflictValidatorProvider())
                 .with(getSecurityProvider());
         withEditors(oak);
         contentRepository = oak.createContentRepository();
@@ -191,6 +194,13 @@ public abstract class AbstractSecurityTest {
 
     protected ValueFactory getValueFactory() {
         return new ValueFactoryImpl(root, getNamePathMapper());
+    }
+
+    protected long waitForSystemTimeIncrement(long old) {
+        while (old == System.currentTimeMillis()) {
+            // wait for system timer to move
+        }
+        return System.currentTimeMillis();
     }
 
     protected User getTestUser() throws Exception {

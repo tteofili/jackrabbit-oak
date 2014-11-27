@@ -16,13 +16,17 @@
  */
 package org.apache.jackrabbit.oak.security.authentication.ldap;
 
+import javax.jcr.GuestCredentials;
 import javax.security.auth.login.AppConfigurationEntry;
 import javax.security.auth.login.Configuration;
+import javax.security.auth.login.LoginException;
 
+import org.apache.jackrabbit.oak.api.ContentSession;
 import org.apache.jackrabbit.oak.spi.security.authentication.external.impl.ExternalLoginModule;
-import org.junit.Ignore;
+import org.junit.Test;
 
-@Ignore //ignore for the moment because "mvn test" runs into PermGen memory issues
+import static org.junit.Assert.fail;
+
 public class LdapLoginStandaloneTest extends LdapLoginTestBase {
 
     @Override
@@ -38,5 +42,16 @@ public class LdapLoginStandaloneTest extends LdapLoginTestBase {
                 };
             }
         };
+    }
+
+    @Test
+    public void testGuestLogin() throws Exception {
+        try {
+            ContentSession sc = login(new GuestCredentials());
+            sc.close();
+            fail("Guest login must fail.");
+        } catch (LoginException e) {
+            // success
+        }
     }
 }

@@ -28,7 +28,7 @@ import static com.google.common.base.Preconditions.checkNotNull;
  * A cache key implementation, which is a combination of a path string and a
  * revision.
  */
-final public class PathRev implements CacheValue {
+public final class PathRev implements CacheValue {
 
     private final String path;
 
@@ -69,4 +69,25 @@ final public class PathRev implements CacheValue {
     public String toString() {
         return path + "@" + revision;
     }
+
+    public String asString() {
+        return toString();
+    }
+
+    public static PathRev fromString(String s) {
+        int index = s.lastIndexOf('@');
+        return new PathRev(s.substring(0, index), Revision.fromString(s.substring(index + 1)));
+    }
+
+    public int compareTo(PathRev b) {
+        if (this == b) {
+            return 0;
+        }
+        int compare = path.compareTo(b.path);
+        if (compare == 0) {
+            compare = revision.compareTo(b.revision);
+        }
+        return compare;
+    }
+    
 }

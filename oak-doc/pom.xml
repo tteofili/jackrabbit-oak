@@ -23,12 +23,13 @@
   <parent>
     <groupId>org.apache.jackrabbit</groupId>
     <artifactId>oak-parent</artifactId>
-    <version>0.16-SNAPSHOT</version>
+    <version>1.1-SNAPSHOT</version>
     <relativePath>../oak-parent/pom.xml</relativePath>
   </parent>
 
   <artifactId>oak-doc</artifactId>
   <name>Oak Documentation</name>
+  <url>http://jackrabbit.apache.org/oak/docs/</url>
   <packaging>jar</packaging>
 
   <build>
@@ -83,10 +84,10 @@
       <resource>
         <directory>src/site/markdown</directory>
         <includes>
-          <include>*.png</include>
-          <include>*.jpg</include>
-          <include>*.jpeg</include>
-          <include>*.gif</include>
+          <include>**/*.png</include>
+          <include>**/*.jpg</include>
+          <include>**/*.jpeg</include>
+          <include>**/*.gif</include>
         </includes>
       </resource>
     </resources>

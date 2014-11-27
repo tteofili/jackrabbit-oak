@@ -29,10 +29,10 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
 
-import org.apache.jackrabbit.mk.api.MicroKernelException;
 import org.apache.jackrabbit.oak.plugins.document.Collection;
 import org.apache.jackrabbit.oak.plugins.document.Document;
 import org.apache.jackrabbit.oak.plugins.document.DocumentStore;
+import org.apache.jackrabbit.oak.plugins.document.DocumentStoreException;
 import org.apache.jackrabbit.oak.plugins.document.NodeDocument;
 import org.apache.jackrabbit.oak.plugins.document.Revision;
 import org.apache.jackrabbit.oak.plugins.document.StableRevisionComparator;
@@ -61,6 +61,12 @@ public class MemoryDocumentStore implements DocumentStore {
     private ConcurrentSkipListMap<String, Document> clusterNodes =
             new ConcurrentSkipListMap<String, Document>();
 
+    /**
+     * The 'settings' collection.
+     */
+    private ConcurrentSkipListMap<String, Document> settings =
+            new ConcurrentSkipListMap<String, Document>();
+
     private final ReadWriteLock rwLock = new ReentrantReadWriteLock();
 
     /**
@@ -79,7 +85,7 @@ public class MemoryDocumentStore implements DocumentStore {
     public <T extends Document> T find(Collection<T> collection, String key, int maxCacheAge) {
         return find(collection, key);
     }
-    
+
     @Override
     public <T extends Document> T find(Collection<T> collection, String key) {
         Lock lock = rwLock.readLock();
@@ -91,7 +97,7 @@ public class MemoryDocumentStore implements DocumentStore {
             lock.unlock();
         }
     }
-    
+
     @Override
     @Nonnull
     public <T extends Document> List<T> query(Collection<T> collection,
@@ -100,7 +106,7 @@ public class MemoryDocumentStore implements DocumentStore {
                                 int limit) {
         return query(collection, fromKey, toKey, null, 0, limit);
     }
-    
+
     @Override
     @Nonnull
     public <T extends Document> List<T> query(Collection<T> collection,
@@ -118,7 +124,7 @@ public class MemoryDocumentStore implements DocumentStore {
             for (T doc : sub.values()) {
                 if (indexedProperty != null) {
                     Long value = (Long) doc.get(indexedProperty);
-                    if (value < startValue) {
+                    if (value == null || value < startValue) {
                         continue;
                     }
                 }
@@ -144,16 +150,21 @@ public class MemoryDocumentStore implements DocumentStore {
         }
     }
 
+    @Override
+    public <T extends Document> void remove(Collection<T> collection, List<String> keys) {
+        for(String key : keys){
+            remove(collection, key);
+        }
+    }
+
     @CheckForNull
     @Override
-    public <T extends Document> T createOrUpdate(Collection<T> collection, UpdateOp update)
-            throws MicroKernelException {
+    public <T extends Document> T createOrUpdate(Collection<T> collection, UpdateOp update) {
         return internalCreateOrUpdate(collection, update, false);
     }
 
     @Override
-    public <T extends Document> T findAndUpdate(Collection<T> collection, UpdateOp update)
-            throws MicroKernelException {
+    public <T extends Document> T findAndUpdate(Collection<T> collection, UpdateOp update) {
         return internalCreateOrUpdate(collection, update, true);
     }
 
@@ -169,6 +180,8 @@ public class MemoryDocumentStore implements DocumentStore {
             return (ConcurrentSkipListMap<String, T>) nodes;
         } else if (collection == Collection.CLUSTER_NODES) {
             return (ConcurrentSkipListMap<String, T>) clusterNodes;
+        }else if (collection == Collection.SETTINGS) {
+            return (ConcurrentSkipListMap<String, T>) settings;
         } else {
             throw new IllegalArgumentException(
                     "Unknown collection: " + collection.toString());
@@ -191,7 +204,7 @@ public class MemoryDocumentStore implements DocumentStore {
             T doc = collection.newDocument(this);
             if (oldDoc == null) {
                 if (!update.isNew()) {
-                    throw new MicroKernelException("Document does not exist: " + update.getId());
+                    throw new DocumentStoreException("Document does not exist: " + update.getId());
                 }
             } else {
                 oldDoc.deepCopy(doc);
@@ -289,7 +302,7 @@ public class MemoryDocumentStore implements DocumentStore {
         if (readWriteMode == null || readWriteMode.equals(lastReadWriteMode)) {
             return;
         }
-        lastReadWriteMode = readWriteMode;        
+        lastReadWriteMode = readWriteMode;
         try {
             Map<String, String> map = Splitter.on(", ").withKeyValueSeparator(":").split(readWriteMode);
             String read = map.get("read");
@@ -298,7 +311,7 @@ public class MemoryDocumentStore implements DocumentStore {
                 if (!readPref.equals(this.readPreference)) {
                     this.readPreference = readPref;
                 }
-            } 
+            }
             String write = map.get("write");
             if (write != null) {
                 WriteConcern writeConcern = WriteConcern.valueOf(write);
@@ -310,7 +323,7 @@ public class MemoryDocumentStore implements DocumentStore {
             // unsupported or parse error - ignore
         }
     }
-    
+
     public ReadPreference getReadPreference() {
         return readPreference;
     }

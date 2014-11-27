@@ -36,7 +36,7 @@ public class UpdateUtils {
 
     /**
      * Apply the changes to the in-memory document.
-     * 
+     *
      * @param doc
      *            the target document.
      * @param update
@@ -44,13 +44,24 @@ public class UpdateUtils {
      * @param comparator
      *            the revision comparator.
      */
-    public static void applyChanges(@Nonnull Document doc, @Nonnull UpdateOp update, @Nonnull Comparator<Revision> comparator) {
+    public static void applyChanges(@Nonnull Document doc,
+                                    @Nonnull UpdateOp update,
+                                    @Nonnull Comparator<Revision> comparator) {
         for (Entry<Key, Operation> e : checkNotNull(update).getChanges().entrySet()) {
             Key k = e.getKey();
             Operation op = e.getValue();
             switch (op.type) {
                 case SET: {
                     doc.put(k.toString(), op.value);
+                    break;
+                }
+                case MAX: {
+                    Comparable newValue = (Comparable) op.value;
+                    Object old = doc.get(k.toString());
+                    //noinspection unchecked
+                    if (old == null || newValue.compareTo(old) > 0) {
+                        doc.put(k.toString(), op.value);
+                    }
                     break;
                 }
                 case INCREMENT: {
@@ -69,6 +80,9 @@ public class UpdateUtils {
                     if (m == null) {
                         m = new TreeMap<Revision, Object>(comparator);
                         doc.put(k.getName(), m);
+                    }
+                    if (k.getRevision() == null) {
+                        throw new IllegalArgumentException("Cannot set map entry " + k.getName() + " with null revision");
                     }
                     m.put(k.getRevision(), op.value);
                     break;

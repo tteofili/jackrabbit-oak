@@ -18,15 +18,16 @@
  */
 package org.apache.jackrabbit.oak.plugins.backup;
 
+import static org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState.EMPTY_NODE;
+
 import java.io.File;
 import java.io.IOException;
 import java.util.concurrent.TimeUnit;
 
-import org.apache.jackrabbit.oak.plugins.segment.Journal;
+import org.apache.jackrabbit.oak.plugins.segment.Compactor;
 import org.apache.jackrabbit.oak.plugins.segment.SegmentNodeBuilder;
 import org.apache.jackrabbit.oak.plugins.segment.SegmentNodeState;
 import org.apache.jackrabbit.oak.plugins.segment.file.FileStore;
-import org.apache.jackrabbit.oak.spi.state.ApplyDiff;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.apache.jackrabbit.oak.spi.state.NodeStore;
 import org.slf4j.Logger;
@@ -56,33 +57,31 @@ public class FileStoreBackup {
         // 2. init filestore
         FileStore backup = new FileStore(destination, MAX_FILE_SIZE, false);
         try {
-            Journal journal = backup.getJournal("root");
-
-            SegmentNodeState state = new SegmentNodeState(
-                    backup.getWriter().getDummySegment(), journal.getHead());
-            SegmentNodeBuilder builder = state.builder();
-
+            SegmentNodeState state = backup.getHead();
+            NodeState before = null;
             String beforeCheckpoint = state.getString("checkpoint");
             if (beforeCheckpoint == null) {
                 // 3.1 no stored checkpoint, so do the initial full backup
-                builder.setChildNode("root", current);
+                before = EMPTY_NODE;
             } else {
                 // 3.2 try to retrieve the previously backed up checkpoint
-                NodeState before = store.retrieve(beforeCheckpoint);
+                before = store.retrieve(beforeCheckpoint);
                 if (before == null) {
                     // the previous checkpoint is no longer available,
                     // so use the backed up state as the basis of the
                     // incremental backup diff
                     before = state.getChildNode("root");
                 }
-                current.compareAgainstBaseState(
-                        before, new ApplyDiff(builder.child("root")));
             }
-            builder.setProperty("checkpoint", checkpoint);
+
+            Compactor compactor = new Compactor(backup.getTracker().getWriter());
+            SegmentNodeState after = compactor.compact(before, current);
 
             // 4. commit the backup
-            journal.setHead(
-                    state.getRecordId(), builder.getNodeState().getRecordId());
+            SegmentNodeBuilder builder = state.builder();
+            builder.setProperty("checkpoint", checkpoint);
+            builder.setChildNode("root", after);
+            backup.setHead(state, builder.getNodeState());
         } finally {
             backup.close();
         }

@@ -128,7 +128,7 @@ public final class IOUtils {
     public static byte[] readBytes(InputStream in) throws IOException {
         int len = readVarInt(in);
         byte[] data = new byte[len];
-        for (int pos = 0; pos < len; ) {
+        for (int pos = 0; pos < len;) {
             int l = in.read(data, pos, data.length - pos);
             if (l < 0) {
                 throw new EOFException();
@@ -166,7 +166,7 @@ public final class IOUtils {
             return x;
         }
         x &= 0x7f;
-        for (int s = 7; ; s += 7) {
+        for (int s = 7;; s += 7) {
             int b = in.read();
             if (b < 0) {
                 throw new EOFException();
@@ -259,7 +259,7 @@ public final class IOUtils {
             return x;
         }
         x &= 0x7f;
-        for (int s = 7; ; s += 7) {
+        for (int s = 7;; s += 7) {
             long b = in.read();
             if (b < 0) {
                 throw new EOFException();
@@ -289,7 +289,7 @@ public final class IOUtils {
 
     /**
      * Unconditionally close a {@code Closeable}.
-     * <p/>
+     * <p>
      * Equivalent to {@link Closeable#close()}, except any exceptions will be ignored.
      * This is typically used in finally blocks.
      *
@@ -307,7 +307,7 @@ public final class IOUtils {
 
     /**
      * Unconditionally close a {@code Socket}.
-     * <p/>
+     * <p>
      * Equivalent to {@link Socket#close()}, except any exceptions will be ignored.
      * This is typically used in finally blocks.
      *
@@ -326,7 +326,7 @@ public final class IOUtils {
     /**
      * Copy bytes from an {@code InputStream} to an
      * {@code OutputStream}.
-     * <p/>
+     * <p>
      * This method buffers the input internally, so there is no need to use a
      * {@code BufferedInputStream}.
      *
@@ -345,5 +345,22 @@ public final class IOUtils {
             count += n;
         }
         return count;
+    }
+
+    /**
+     * Returns a human-readable version of the file size, where the input represents
+     * a specific number of bytes. Based on http://stackoverflow.com/a/3758880/1035417
+     */
+    public static String humanReadableByteCount(long bytes) {
+        if (bytes < 0) {
+            return "0";
+        }
+        int unit = 1000;
+        if (bytes < unit) {
+            return bytes + " B";
+        }
+        int exp = (int) (Math.log(bytes) / Math.log(unit));
+        char pre = "kMGTPE".charAt(exp - 1);
+        return String.format("%.1f %sB", bytes / Math.pow(unit, exp), pre);
     }
 }

@@ -37,6 +37,7 @@ import org.apache.jackrabbit.oak.plugins.index.IndexUpdateProvider;
 import org.apache.jackrabbit.oak.plugins.index.property.PropertyIndexEditorProvider;
 import org.apache.jackrabbit.oak.plugins.memory.MemoryNodeStore;
 import org.apache.jackrabbit.oak.plugins.nodetype.write.InitialContent;
+import org.apache.jackrabbit.oak.query.QueryEngineSettings;
 import org.apache.jackrabbit.oak.query.ast.SelectorImpl;
 import org.apache.jackrabbit.oak.query.index.FilterImpl;
 import org.apache.jackrabbit.oak.spi.commit.CommitInfo;
@@ -70,8 +71,11 @@ public class NodeTypeIndexTest {
         NodeBuilder root = store.getRoot().builder();
 
         // remove "rep:security" as it interferes with tests
-        root.getChildNode("rep:security").remove(); 
+        root.getChildNode("rep:security").remove();
         
+        // remove "entryCount", so the node type index cost is not fixed
+        root.getChildNode("oak:index").getChildNode("nodetype").removeProperty("entryCount");
+
         addFolder(root, "folder-1");
         addFolder(root, "folder-2");
         addFile(root, "file-1");
@@ -101,7 +105,7 @@ public class NodeTypeIndexTest {
         NodeState types = system.getChildNode(JCR_NODE_TYPES);
         NodeState type = types.getChildNode(nodeTypeName);
         SelectorImpl selector = new SelectorImpl(type, nodeTypeName);
-        return new FilterImpl(selector, "SELECT * FROM [" + nodeTypeName + "]");
+        return new FilterImpl(selector, "SELECT * FROM [" + nodeTypeName + "]", new QueryEngineSettings());
     }
 
     private static void checkCursor(Cursor cursor, String... matches) {
@@ -137,5 +141,5 @@ public class NodeTypeIndexTest {
         return node.child(name).setProperty(
                 JcrConstants.JCR_PRIMARYTYPE, nodeType, Type.NAME);
     }
-    
+
 }

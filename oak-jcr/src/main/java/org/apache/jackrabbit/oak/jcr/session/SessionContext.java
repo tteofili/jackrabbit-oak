@@ -57,11 +57,11 @@ import org.apache.jackrabbit.oak.jcr.session.operation.SessionOperation;
 import org.apache.jackrabbit.oak.namepath.NamePathMapper;
 import org.apache.jackrabbit.oak.namepath.NamePathMapperImpl;
 import org.apache.jackrabbit.oak.plugins.nodetype.ReadOnlyNodeTypeManager;
+import org.apache.jackrabbit.oak.plugins.observation.CommitRateLimiter;
 import org.apache.jackrabbit.oak.plugins.value.ValueFactoryImpl;
 import org.apache.jackrabbit.oak.spi.security.SecurityConfiguration;
 import org.apache.jackrabbit.oak.spi.security.SecurityProvider;
 import org.apache.jackrabbit.oak.spi.security.authorization.AuthorizationConfiguration;
-import org.apache.jackrabbit.oak.spi.security.authorization.permission.PermissionProvider;
 import org.apache.jackrabbit.oak.spi.security.principal.PrincipalConfiguration;
 import org.apache.jackrabbit.oak.spi.security.privilege.PrivilegeConfiguration;
 import org.apache.jackrabbit.oak.spi.security.user.UserConfiguration;
@@ -87,6 +87,8 @@ public class SessionContext implements NamePathMapper {
     private final Whiteboard whiteboard;
     private final Map<String, Object> attributes;
     private final SessionDelegate delegate;
+    private final int observationQueueLength;
+    private final CommitRateLimiter commitRateLimiter;
 
     private final SessionNamespaces namespaces;
     private final NamePathMapper namePathMapper;
@@ -95,7 +97,6 @@ public class SessionContext implements NamePathMapper {
     private SessionImpl session = null;
     private WorkspaceImpl workspace = null;
 
-    private PermissionProvider permissionProvider;
     private AccessControlManager accessControlManager;
     private AccessManager accessManager;
     private PrincipalManager principalManager;
@@ -112,13 +113,16 @@ public class SessionContext implements NamePathMapper {
     public SessionContext(
             @Nonnull Repository repository, @Nonnull StatisticManager statisticManager,
             @Nonnull SecurityProvider securityProvider, @Nonnull Whiteboard whiteboard,
-            @Nonnull Map<String, Object> attributes, @Nonnull final SessionDelegate delegate) {
+            @Nonnull Map<String, Object> attributes, @Nonnull final SessionDelegate delegate,
+            int observationQueueLength, CommitRateLimiter commitRateLimiter) {
         this.repository = checkNotNull(repository);
         this.statisticManager = statisticManager;
         this.securityProvider = checkNotNull(securityProvider);
         this.whiteboard = checkNotNull(whiteboard);
         this.attributes = checkNotNull(attributes);
         this.delegate = checkNotNull(delegate);
+        this.observationQueueLength = observationQueueLength;
+        this.commitRateLimiter = commitRateLimiter;
         SessionStats sessionStats = delegate.getSessionStats();
         sessionStats.setAttributes(attributes);
 
@@ -264,8 +268,7 @@ public class SessionContext implements NamePathMapper {
             observationManager = new ObservationManagerImpl(
                 this,
                 ReadOnlyNodeTypeManager.getInstance(delegate.getRoot(), namePathMapper),
-                getPermissionProvider(),
-                whiteboard);
+                whiteboard, observationQueueLength, commitRateLimiter);
         }
         return observationManager;
     }
@@ -304,12 +307,6 @@ public class SessionContext implements NamePathMapper {
     }
 
     @Override
-    @CheckForNull
-    public String getOakPathKeepIndex(String jcrPath) {
-        return namePathMapper.getOakPathKeepIndex(jcrPath);
-    }
-
-    @Override
     @Nonnull
     public String getJcrPath(String oakPath) {
         return namePathMapper.getJcrPath(oakPath);
@@ -329,13 +326,7 @@ public class SessionContext implements NamePathMapper {
         if (oakPath != null) {
             return oakPath;
         } else {
-            // check if the path is an SNS path with an index > 1 and throw a PathNotFoundException instead (see OAK-1216)
-            if (getOakPathKeepIndex(jcrPath) != null) {
-                throw new PathNotFoundException(jcrPath);
-            } else {
-                throw new RepositoryException("Invalid name or path: " + jcrPath);
-            }
-
+            throw new RepositoryException("Invalid name or path: " + jcrPath);
         }
     }
 
@@ -360,7 +351,7 @@ public class SessionContext implements NamePathMapper {
     @Nonnull
     public AccessManager getAccessManager() throws RepositoryException {
         if (accessManager == null) {
-            accessManager = new AccessManager(delegate, getPermissionProvider());
+            accessManager = new AccessManager(delegate, delegate.getPermissionProvider());
         }
         return accessManager;
     }
@@ -392,9 +383,9 @@ public class SessionContext implements NamePathMapper {
      */
     // TODO: should this be in SessionImpl?
     private void unlockAllSessionScopedLocks() throws RepositoryException {
-        delegate.perform(new SessionOperation<Void>() {
+        delegate.perform(new SessionOperation<Void>("unlockAllSessionScopedLocks") {
             @Override
-            public Void perform() throws RepositoryException {
+            public Void perform() {
                 Iterator<String> iterator = sessionScopedLocks.iterator();
                 while (iterator.hasNext()) {
                     NodeDelegate node = delegate.getNode(iterator.next());
@@ -415,18 +406,6 @@ public class SessionContext implements NamePathMapper {
     @Nonnull
     private <T> T getConfig(Class<T> clss) {
         return securityProvider.getConfiguration(clss);
-    }
-
-    private PermissionProvider getPermissionProvider() {
-        // FIXME: review whether 'auto-refresh' should rather be made on a wrapping
-        //        permission provider instead of doing this in the access manager
-        //        since this permission provider is also passed to the observation manager.
-        if (permissionProvider == null) {
-            permissionProvider = checkNotNull(securityProvider)
-                    .getConfiguration(AuthorizationConfiguration.class)
-                    .getPermissionProvider(delegate.getRoot(), delegate.getWorkspaceName(), delegate.getAuthInfo().getPrincipals());
-        }
-        return permissionProvider;
     }
 
 }

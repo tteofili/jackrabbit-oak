@@ -47,7 +47,7 @@ import org.apache.jackrabbit.oak.spi.state.NodeStateDiff;
  * A simple usage pattern would look like this:
  * <pre>
  * EventGenerator generator = new EventGenerator(before, after, handler);
- * while (generator.isDone()) {
+ * while (!generator.isDone()) {
  *     generator.generate();
  * }
  * </pre>
@@ -71,11 +71,21 @@ public class EventGenerator {
     private final LinkedList<Runnable> continuations = newLinkedList();
 
     /**
+     * Creates a new generator instance. Changes to process need to be added
+     * through {@link #addHandler(NodeState, NodeState, EventHandler)}
+     */
+    public EventGenerator() {}
+
+    /**
      * Creates a new generator instance for processing the given changes.
      */
     public EventGenerator(
             @Nonnull NodeState before, @Nonnull NodeState after,
             @Nonnull EventHandler handler) {
+        continuations.addFirst(new Continuation(handler, before, after, 0));
+    }
+
+    public void addHandler(NodeState before, NodeState after, EventHandler handler) {
         continuations.addFirst(new Continuation(handler, before, after, 0));
     }
 
@@ -143,7 +153,16 @@ public class EventGenerator {
          */
         @Override
         public void run() {
-            after.compareAgainstBaseState(before, this);
+            if (skip == 0) {
+                // Only call enter if this is not a continuation that hit
+                // the MAX_CHANGES_PER_CONTINUATION limit before
+                handler.enter(before, after);
+            }
+            if (after.compareAgainstBaseState(before, this)) {
+                // Only call leave if this continuation exists normally and not
+                // as a result of hitting the MAX_CHANGES_PER_CONTINUATION limit
+                handler.leave(before, after);
+            }
         }
 
         //-------------------------------------------------< NodeStateDiff >--
@@ -309,7 +328,7 @@ public class EventGenerator {
         private boolean fullQueue() {
             if (counter > skip // must have processed at least one event
                     && continuations.size() >= MAX_QUEUED_CONTINUATIONS) {
-                continuations.addFirst(new Continuation(
+                continuations.add(new Continuation(
                         handler, this.before, this.after, counter));
                 return true;
             } else {

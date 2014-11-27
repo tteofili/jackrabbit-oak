@@ -71,7 +71,7 @@ import org.slf4j.LoggerFactory;
  *
  * <h3>Commit</h3>
  * If login was successfully handled by this module the {@link #commit()} will
- * just populate the subject.<p/>
+ * just populate the subject.<p>
  *
  * If the login was successfully handled by another module in the chain, the
  * {@code TokenLoginModule} will test if the login was associated with a
@@ -159,6 +159,7 @@ public final class TokenLoginModule extends AbstractLoginModule {
         if (tokenProvider != null && sharedState.containsKey(SHARED_KEY_CREDENTIALS)) {
             Credentials shared = getSharedCredentials();
             if (shared != null && tokenProvider.doCreateToken(shared)) {
+                getRoot().refresh(); // refresh root, in case the external login module created users
                 TokenInfo ti = tokenProvider.createToken(shared);
                 if (ti != null) {
                     TokenCredentials tc = new TokenCredentials(ti.getToken());

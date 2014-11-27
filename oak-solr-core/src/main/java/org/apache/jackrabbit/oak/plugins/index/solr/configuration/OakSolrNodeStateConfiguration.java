@@ -16,8 +16,13 @@
  */
 package org.apache.jackrabbit.oak.plugins.index.solr.configuration;
 
+import java.util.Collection;
+import java.util.Collections;
+import java.util.LinkedList;
+
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Type;
+import org.apache.jackrabbit.oak.plugins.index.solr.server.EmbeddedSolrServerProvider;
 import org.apache.jackrabbit.oak.spi.query.Filter;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 
@@ -30,7 +35,7 @@ import org.apache.jackrabbit.oak.spi.state.NodeState;
  * Subclasses of this should at least provide the {@link org.apache.jackrabbit.oak.spi.state.NodeState} which holds
  * the configuration.
  */
-public abstract class OakSolrNodeStateConfiguration implements OakSolrConfiguration, SolrServerConfigurationProvider {
+public abstract class OakSolrNodeStateConfiguration implements OakSolrConfiguration, SolrServerConfigurationProvider<EmbeddedSolrServerProvider> {
 
     /**
      * get the {@link org.apache.jackrabbit.oak.spi.state.NodeState} which contains the properties for the Oak -
@@ -42,15 +47,18 @@ public abstract class OakSolrNodeStateConfiguration implements OakSolrConfigurat
 
     @Override
     public String getFieldNameFor(Type<?> propertyType) {
-        if (Type.BINARIES.equals(propertyType) || Type.BINARY.equals(propertyType)) {
-            // TODO : use Tika / SolrCell here
-            return propertyType.toString() + "_bin";
+        Iterable<String> typeMappings = getStringValuesFor(Properties.TYPE_MAPPINGS);
+        if (typeMappings != null) {
+            for (String typeMapping : typeMappings) {
+                String[] mapping = typeMapping.split("=");
+                if (mapping.length == 2 && mapping[0] != null && mapping[1] != null) {
+                    Type<?> type = Type.fromString(mapping[0]);
+                    if (type != null && type.tag() == propertyType.tag()) {
+                        return mapping[1];
+                    }
+                }
+            }
         }
-        return null;
-    }
-
-    @Override
-    public String getFieldForPropertyRestriction(Filter.PropertyRestriction propertyRestriction) {
         return null;
     }
 
@@ -89,12 +97,92 @@ public abstract class OakSolrNodeStateConfiguration implements OakSolrConfigurat
     }
 
     @Override
+    public String getCatchAllField() {
+        return getStringValueFor(Properties.CATCHALL_FIELD, SolrServerConfigurationDefaults.CATCHALL_FIELD);
+    }
+
+    @Override
+    public String getFieldForPropertyRestriction(Filter.PropertyRestriction propertyRestriction) {
+        Iterable<String> propertyMappings = getStringValuesFor(Properties.PROPERTY_MAPPINGS);
+        if (propertyMappings != null) {
+            for (String propertyMapping : propertyMappings) {
+                String[] mapping = propertyMapping.split("=");
+                if (mapping.length == 2 && mapping[0] != null && mapping[1] != null) {
+                    if (propertyRestriction.propertyName.equals(mapping[0])) {
+                        return mapping[1];
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    @Override
     public CommitPolicy getCommitPolicy() {
         return CommitPolicy.valueOf(getStringValueFor(Properties.COMMIT_POLICY, CommitPolicy.SOFT.toString()));
     }
 
-    protected String getStringValueFor(String propertyName, String defaultValue) {
-        String value = null;
+    @Override
+    public int getRows() {
+        return getIntValueFor(Properties.ROWS, SolrServerConfigurationDefaults.ROWS);
+    }
+
+    @Override
+    public boolean useForPropertyRestrictions() {
+        return getBooleanValueFor(Properties.PROPERTY_RESTRICIONS, SolrServerConfigurationDefaults.PROPERTY_RESTRICTIONS);
+    }
+
+    @Override
+    public boolean useForPrimaryTypes() {
+        return getBooleanValueFor(Properties.PRIMARY_TYPES, SolrServerConfigurationDefaults.PRIMARY_TYPES);
+    }
+
+    @Override
+    public boolean useForPathRestrictions() {
+        return getBooleanValueFor(Properties.PATH_RESTRICTIONS, SolrServerConfigurationDefaults.PATH_RESTRICTIONS);
+    }
+
+    @Override
+    public Collection<String> getIgnoredProperties() {
+        Collection<String> ignoredProperties;
+        Iterable<String> ignoredPropertiesValues = getStringValuesFor(Properties.IGNORED_PROPERTIES);
+        if (ignoredPropertiesValues != null) {
+            ignoredProperties = new LinkedList<String>();
+            for (String ignoredProperty : ignoredPropertiesValues) {
+                ignoredProperties.add(ignoredProperty);
+            }
+        } else {
+            ignoredProperties = Collections.emptyList();
+        }
+        return ignoredProperties;
+    }
+
+    private boolean getBooleanValueFor(String propertyName, boolean defaultValue) {
+        boolean value = defaultValue;
+        NodeState configurationNodeState = getConfigurationNodeState();
+        if (configurationNodeState.exists()) {
+            PropertyState property = configurationNodeState.getProperty(propertyName);
+            if (property != null) {
+                value = property.getValue(Type.BOOLEAN);
+            }
+        }
+        return value;
+    }
+
+    private int getIntValueFor(String propertyName, int defaultValue) {
+        long value = defaultValue;
+        NodeState configurationNodeState = getConfigurationNodeState();
+        if (configurationNodeState.exists()) {
+            PropertyState property = configurationNodeState.getProperty(propertyName);
+            if (property != null) {
+                value = property.getValue(Type.LONG);
+            }
+        }
+        return (int) value;
+    }
+
+    private String getStringValueFor(String propertyName, String defaultValue) {
+        String value = defaultValue;
         NodeState configurationNodeState = getConfigurationNodeState();
         if (configurationNodeState.exists()) {
             PropertyState property = configurationNodeState.getProperty(propertyName);
@@ -102,14 +190,23 @@ public abstract class OakSolrNodeStateConfiguration implements OakSolrConfigurat
                 value = property.getValue(Type.STRING);
             }
         }
-        if (value == null || value.length() == 0) {
-            value = defaultValue;
-        }
         return value;
     }
 
+    private Iterable<String> getStringValuesFor(String propertyName) {
+        Iterable<String> values = null;
+        NodeState configurationNodeState = getConfigurationNodeState();
+        if (configurationNodeState.exists()) {
+            PropertyState property = configurationNodeState.getProperty(propertyName);
+            if (property != null && property.isArray()) {
+                values = property.getValue(Type.STRINGS);
+            }
+        }
+        return values;
+    }
+
     @Override
-    public SolrServerConfiguration getSolrServerConfiguration() {
+    public SolrServerConfiguration<EmbeddedSolrServerProvider> getSolrServerConfiguration() {
         String solrHomePath = getStringValueFor(Properties.SOLRHOME_PATH, SolrServerConfigurationDefaults.SOLR_HOME_PATH);
         String solrConfigPath = getStringValueFor(Properties.SOLRCONFIG_PATH, SolrServerConfigurationDefaults.SOLR_CONFIG_PATH);
         String coreName = getStringValueFor(Properties.CORE_NAME, SolrServerConfigurationDefaults.CORE_NAME);
@@ -117,7 +214,7 @@ public abstract class OakSolrNodeStateConfiguration implements OakSolrConfigurat
         String context = getStringValueFor(Properties.CONTEXT, SolrServerConfigurationDefaults.CONTEXT);
         Integer httpPort = Integer.valueOf(getStringValueFor(Properties.HTTP_PORT, SolrServerConfigurationDefaults.HTTP_PORT));
 
-        return new SolrServerConfiguration(solrHomePath,
+        return new EmbeddedSolrServerConfiguration(solrHomePath,
                 solrConfigPath, coreName).withHttpConfiguration(context, httpPort);
     }
 
@@ -125,7 +222,6 @@ public abstract class OakSolrNodeStateConfiguration implements OakSolrConfigurat
      * Properties that may be retrieved from the configuration {@link org.apache.jackrabbit.oak.spi.state.NodeState}.
      */
     public final class Properties {
-
         public static final String SOLRHOME_PATH = "solrHomePath";
         public static final String SOLRCONFIG_PATH = "solrConfigPath";
         public static final String CONTEXT = "solrContext";
@@ -135,7 +231,14 @@ public abstract class OakSolrNodeStateConfiguration implements OakSolrConfigurat
         public static final String PARENT_FIELD = "parentField";
         public static final String CHILDREN_FIELD = "childrenField";
         public static final String DESCENDANTS_FIELD = "descendantsField";
+        public static final String CATCHALL_FIELD = "catchAllField";
         public static final String COMMIT_POLICY = "commitPolicy";
-
+        public static final String ROWS = "rows";
+        public static final String PROPERTY_RESTRICIONS = "propertyRestrictions";
+        public static final String PRIMARY_TYPES = "primaryTypes";
+        public static final String PATH_RESTRICTIONS = "pathRestrictions";
+        public static final String IGNORED_PROPERTIES = "ignoredProperties";
+        public static final String TYPE_MAPPINGS = "typeMappings";
+        public static final String PROPERTY_MAPPINGS = "propertyMappings";
     }
 }

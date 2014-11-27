@@ -27,7 +27,7 @@ import static com.google.common.base.Preconditions.checkNotNull;
 /**
  * A cache value wrapping a simple string.
  */
-final public class StringValue implements CacheValue {
+public final class StringValue implements CacheValue {
 
     private final String value;
 
@@ -61,4 +61,13 @@ final public class StringValue implements CacheValue {
     public String toString() {
         return value;
     }
+
+    public String asString() {
+        return value;
+    }
+    
+    public static StringValue fromString(String value) {
+        return new StringValue(value);
+    }
+
 }

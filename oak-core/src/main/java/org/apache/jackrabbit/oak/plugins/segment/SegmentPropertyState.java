@@ -49,13 +49,19 @@ import static org.apache.jackrabbit.oak.api.Type.STRING;
 import static org.apache.jackrabbit.oak.api.Type.URI;
 import static org.apache.jackrabbit.oak.api.Type.WEAKREFERENCE;
 
-class SegmentPropertyState extends Record implements PropertyState {
+/**
+ * A property, which can read a value or list record from a segment. It
+ * currently doesn't cache data.
+ * <p>
+ * Depending on the property type, this is a record of type "VALUE" or a record
+ * of type "LIST" (for arrays).
+ */
+public class SegmentPropertyState extends Record implements PropertyState {
 
     private final PropertyTemplate template;
 
-    public SegmentPropertyState(
-            Segment segment, RecordId id, PropertyTemplate template) {
-        super(segment, id);
+    public SegmentPropertyState(RecordId id, PropertyTemplate template) {
+        super(id);
         this.template = checkNotNull(template);
     }
 
@@ -68,7 +74,7 @@ class SegmentPropertyState extends Record implements PropertyState {
                 listId = segment.readRecordId(getOffset(4));
             }
         }
-        return new ListRecord(segment, listId, size);
+        return new ListRecord(listId, size);
     }
 
     Map<String, RecordId> getValueRecords() {
@@ -162,7 +168,7 @@ class SegmentPropertyState extends Record implements PropertyState {
     @SuppressWarnings("unchecked")
     private <T> T getValue(Segment segment, RecordId id, Type<T> type) {
         if (type == BINARY) {
-            return (T) new SegmentBlob(segment, id); // load binaries lazily
+            return (T) new SegmentBlob(id); // load binaries lazily
         }
 
         String value = segment.readString(id);

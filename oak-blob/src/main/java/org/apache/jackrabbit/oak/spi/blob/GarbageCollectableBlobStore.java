@@ -18,9 +18,10 @@ package org.apache.jackrabbit.oak.spi.blob;
 
 import java.io.IOException;
 import java.util.Iterator;
+import java.util.List;
 
 /**
- * A blob store that support garbage collection.
+ * A blob store that supports garbage collection.
  */
 public interface GarbageCollectableBlobStore extends BlobStore {
 
@@ -37,7 +38,7 @@ public interface GarbageCollectableBlobStore extends BlobStore {
      * afterwards. A file based blob stores might simply rename the file, so
      * that no additional writes are necessary.
      *
-     * @param tempFilePath the temporary file
+     * @param tempFileName the temporary file name
      * @return the blob id
      */
     String writeBlob(String tempFileName) throws IOException;
@@ -48,12 +49,12 @@ public interface GarbageCollectableBlobStore extends BlobStore {
      * @return the number of removed blocks
      */
     int sweep() throws IOException;
-    
+
     /**
      * Start the mark phase.
      */
     void startMark() throws IOException;
-    
+
     /**
      * Clear all objects marked as "transiently in use".
      */
@@ -83,16 +84,14 @@ public interface GarbageCollectableBlobStore extends BlobStore {
     Iterator<String> getAllChunkIds(long maxLastModifiedTime) throws Exception;
 
     /**
-     * Delete the blob with the given id.
-     * 
-     * @param chunkId the chunk id
-     * @param maxLastModifiedTime
-     *            the max last modified time to consider for retrieval 
+     * Deletes the blobs with the given ids.
+     *
+     * @param chunkIds the chunk ids
+     * @param maxLastModifiedTime the max last modified time to consider for retrieval
      * @return true, if successful
-     * @throws Exception
-     *             the exception
+     * @throws Exception the exception
      */
-    boolean deleteChunk(String chunkId, long maxLastModifiedTime) throws Exception;
+    boolean deleteChunks(List<String> chunkIds, long maxLastModifiedTime) throws Exception;
 
     /**
      * Resolve chunks from the given Id.

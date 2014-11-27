@@ -24,11 +24,15 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
-
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
+import org.apache.jackrabbit.oak.commons.PropertiesUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -81,7 +85,9 @@ public final class ConfigurationParameters implements Map<String, Object> {
     public static ConfigurationParameters of(@Nonnull ConfigurationParameters... params) {
         Map<String, Object> m = new HashMap<String, Object>();
         for (ConfigurationParameters cp : params) {
-            m.putAll(cp.options);
+            if (cp != null) {
+                m.putAll(cp.options);
+            }
         }
         return m.isEmpty() ? EMPTY : new ConfigurationParameters(m);
     }
@@ -137,6 +143,19 @@ public final class ConfigurationParameters implements Map<String, Object> {
             options.put(String.valueOf(e.getKey()), e.getValue());
         }
         return new ConfigurationParameters(options);
+    }
+
+    /**
+     * Creates new a single valued configuration parameters instance from the
+     * given key and value.
+     *
+     * @param key The key
+     * @param value The value
+     * @return a new instance of configuration parameters.
+     */
+    @Nonnull
+    public static ConfigurationParameters of(@Nonnull String key, @Nonnull Object value) {
+        return new ConfigurationParameters(ImmutableMap.of(key, value));
     }
 
     /**
@@ -229,6 +248,9 @@ public final class ConfigurationParameters implements Map<String, Object> {
                 return (T) configProperty;
             } else if (clazz == String.class) {
                 return (T) str;
+            } else if (clazz == Milliseconds.class) {
+                Milliseconds ret = Milliseconds.of(str);
+                return (T) ret == null ? defaultValue : (T) ret;
             } else if (clazz == Integer.class || clazz == int.class) {
                 return (T) Integer.valueOf(str);
             } else if (clazz == Long.class || clazz == long.class) {
@@ -239,6 +261,24 @@ public final class ConfigurationParameters implements Map<String, Object> {
                 return (T) Double.valueOf(str);
             } else if (clazz == Boolean.class || clazz == boolean.class) {
                 return (T) Boolean.valueOf(str);
+            } else if (clazz == String[].class){
+                return (T) PropertiesUtil.toStringArray(configProperty, (String[]) defaultValue);
+            } else if (clazz == Set.class || Set.class.isAssignableFrom(clazz)) {
+                if (configProperty instanceof Set) {
+                    return (T) configProperty;
+                } else if (configProperty instanceof Collection) {
+                    return (T) ImmutableSet.copyOf((Collection) configProperty);
+                } else if (configProperty.getClass().isArray()) {
+                    return (T) ImmutableSet.copyOf((Object[]) configProperty);
+                } else {
+                    String[] arr = PropertiesUtil.toStringArray(configProperty);
+                    if (arr != null) {
+                        return (T) ImmutableSet.copyOf(arr);
+                    } else {
+                        log.warn("Unsupported target type {} for value {}", clazz.getName(), str);
+                        throw new IllegalArgumentException("Cannot convert config entry " + str + " to " + clazz.getName());
+                    }
+                }
             } else {
                 // unsupported target type
                 log.warn("Unsupported target type {} for value {}", clazz.getName(), str);
@@ -349,5 +389,99 @@ public final class ConfigurationParameters implements Map<String, Object> {
     @Override
     public Set<Entry<String,Object>> entrySet() {
         return options.entrySet();
+    }
+
+    /**
+     * Helper class for configuration parameters that denote a "duration", such as a timeout or expiration time.
+     */
+    public static final class Milliseconds {
+
+        private static final Pattern pattern = Pattern.compile("(\\d+)(\\.\\d+)?(ms|s|m|h|d)?");
+
+        public static final Milliseconds NULL = new Milliseconds(0);
+
+        public static final Milliseconds FOREVER = new Milliseconds(Long.MAX_VALUE);
+
+        public static final Milliseconds NEVER = new Milliseconds(-1);
+
+        public final long value;
+
+        private Milliseconds(long value) {
+            this.value = value;
+        }
+
+        /**
+         * Returns a new milliseconds object from the given long value.
+         * @param value the value
+         * @return the milliseconds object
+         */
+        public static Milliseconds of(long value) {
+            if (value == 0) {
+                return NULL;
+            } else if (value == Long.MAX_VALUE) {
+                return FOREVER;
+            } else if (value < 0) {
+                return NEVER;
+            } else {
+                return new Milliseconds(value);
+            }
+        }
+
+        /**
+         * Parses a value string into a duration. the String has the following format:
+         * <xmp>
+         *     format:= (value [ unit ])+;
+         *     value:= float value;
+         *     unit: "ms" | "s" | "m" | "h" | "d";
+         * </xmp>
+         *
+         * Example:
+         * <xmp>
+         *     "100", "100ms" : 100 milliseconds
+         *     "1s 50ms": 1050 milliseconds
+         *     "1.5d":  1 1/2 days == 36 hours.
+         * </xmp>
+         *
+         * @param str the string to parse
+         * @return the new Milliseconds object or null.
+         */
+        @CheckForNull
+        public static Milliseconds of(@Nullable String str) {
+            if (str == null) {
+                return null;
+            }
+            Matcher m = pattern.matcher(str);
+            long current = -1;
+            while (m.find()) {
+                String number = m.group(1);
+                String decimal = m.group(2);
+                if (decimal != null) {
+                    number+=decimal;
+                }
+                String unit = m.group(3);
+                double value = Double.valueOf(number);
+                if ("s".equals(unit)) {
+                    value*= 1000.0;
+                } else if ("m".equals(unit)) {
+                    value*= 60*1000.0;
+                } else if ("h".equals(unit)) {
+                    value*= 60*60*1000.0;
+                } else if ("d".equals(unit)) {
+                    value*= 24*60*60*1000.0;
+                }
+                current += value;
+            }
+            return current < 0 ? null : new Milliseconds(current + 1);
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            return this == o || !(o == null || getClass() != o.getClass()) && value == ((Milliseconds) o).value;
+        }
+
+        @Override
+        public int hashCode() {
+            return (int) (value ^ (value >>> 32));
+        }
     }
 }

@@ -20,7 +20,7 @@ import javax.annotation.Nonnull;
 
 /**
  * The collection types.
- * 
+ *
  * @param <T> the document type
  */
 public abstract class Collection<T extends Document> {
@@ -55,6 +55,18 @@ public abstract class Collection<T extends Document> {
                 @Nonnull
                 public ClusterNodeInfoDocument newDocument(DocumentStore store) {
                     return new ClusterNodeInfoDocument();
+                }
+            };
+
+    /**
+     * The 'settings' collection contains setting/state data required for DocumentNodeStore
+     */
+    public static final Collection<Document> SETTINGS =
+            new Collection<Document>("settings") {
+                @Override
+                @Nonnull
+                public Document newDocument(DocumentStore store) {
+                    return new Document();
                 }
             };
 

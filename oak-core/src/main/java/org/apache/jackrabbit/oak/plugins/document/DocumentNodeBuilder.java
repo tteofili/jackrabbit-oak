@@ -23,21 +23,23 @@ import javax.annotation.Nonnull;
 
 import org.apache.jackrabbit.oak.api.Blob;
 import org.apache.jackrabbit.oak.plugins.memory.MemoryNodeBuilder;
+import org.apache.jackrabbit.oak.spi.state.ApplyDiff;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 
 import static com.google.common.base.Preconditions.checkNotNull;
+import static org.apache.jackrabbit.oak.spi.state.AbstractNodeState.checkValidName;
 
 /**
  * A node builder implementation for DocumentMK.
  */
-class DocumentNodeBuilder extends MemoryNodeBuilder {
-    
+class DocumentNodeBuilder extends AbstractDocumentNodeBuilder {
+
     private final DocumentRootBuilder root;
 
-    private NodeState base = null;
+    private NodeState base;
 
-    private NodeState rootBase = null;
+    private NodeState rootBase;
 
     DocumentNodeBuilder(MemoryNodeBuilder base,
                         String name,
@@ -63,6 +65,11 @@ class DocumentNodeBuilder extends MemoryNodeBuilder {
 
     @Override
     public boolean moveTo(NodeBuilder newParent, String newName) {
+        checkNotNull(newParent);
+        checkValidName(newName);
+        if (isRoot() || !exists() || newParent.hasChildNode(newName)) {
+            return false;
+        }
         if (newParent instanceof DocumentNodeBuilder) {
             // check if this builder is an ancestor of newParent or newParent
             DocumentNodeBuilder parent = (DocumentNodeBuilder) newParent;
@@ -78,11 +85,48 @@ class DocumentNodeBuilder extends MemoryNodeBuilder {
                 }
             }
         }
-        return super.moveTo(newParent, newName);
+        if (newParent.exists()) {
+            // remember current root state and reset root in case
+            // something goes wrong
+            NodeState rootState = root.getNodeState();
+            boolean success = false;
+            try {
+                annotateSourcePath();
+                NodeState nodeState = getNodeState();
+                new ApplyDiff(newParent.child(newName)).apply(nodeState);
+                removeRecursive(this);
+                success = true;
+                return true;
+            } finally {
+                if (!success) {
+                    root.reset(rootState);
+                }
+            }
+        } else {
+            return false;
+        }
     }
-    
+
     @Override
     public Blob createBlob(InputStream stream) throws IOException {
         return root.createBlob(stream);
+    }
+
+    @Override
+    public boolean remove() {
+        return removeRecursive(this);
+    }
+
+    //---------------------< internal >-----------------------------------------
+
+    private boolean removeInternal() {
+        return super.remove();
+    }
+
+    private static boolean removeRecursive(DocumentNodeBuilder builder) {
+        for (String name : builder.getChildNodeNames()) {
+            removeRecursive(builder.getChildNode(name));
+        }
+        return builder.removeInternal();
     }
 }

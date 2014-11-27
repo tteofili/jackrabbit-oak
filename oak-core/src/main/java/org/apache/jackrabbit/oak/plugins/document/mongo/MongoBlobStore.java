@@ -18,6 +18,12 @@ package org.apache.jackrabbit.oak.plugins.document.mongo;
 
 import java.io.IOException;
 import java.util.Iterator;
+import java.util.List;
+
+import org.apache.jackrabbit.oak.commons.StringUtils;
+import org.apache.jackrabbit.oak.plugins.blob.CachingBlobStore;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.google.common.collect.AbstractIterator;
 import com.mongodb.BasicDBObject;
@@ -31,20 +37,15 @@ import com.mongodb.QueryBuilder;
 import com.mongodb.ReadPreference;
 import com.mongodb.WriteResult;
 
-import org.apache.jackrabbit.oak.spi.blob.AbstractBlobStore;
-import org.apache.jackrabbit.oak.commons.StringUtils;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 /**
  * Implementation of blob store for the MongoDB extending from
- * {@link AbstractBlobStore}. It saves blobs into a separate collection in
+ * {@link org.apache.jackrabbit.oak.spi.blob.AbstractBlobStore}. It saves blobs into a separate collection in
  * MongoDB (not using GridFS) and it supports basic garbage collection.
- * 
+ *
  * FIXME: -Do we need to create commands for retry etc.? -Not sure if this is
  * going to work for multiple MKs talking to same MongoDB?
  */
-public class MongoBlobStore extends AbstractBlobStore {
+public class MongoBlobStore extends CachingBlobStore {
 
     public static final String COLLECTION_BLOBS = "blobs";
 
@@ -59,6 +60,11 @@ public class MongoBlobStore extends AbstractBlobStore {
      * @param db The DB.
      */
     public MongoBlobStore(DB db) {
+        this(db, DEFAULT_CACHE_SIZE);
+    }
+
+    public MongoBlobStore(DB db, long cacheSize){
+        super(cacheSize);
         this.db = db;
         initBlobCollection();
     }
@@ -66,6 +72,7 @@ public class MongoBlobStore extends AbstractBlobStore {
     @Override
     protected void storeBlock(byte[] digest, int level, byte[] data) throws IOException {
         String id = StringUtils.convertBytesToHex(digest);
+        cache.put(id, data);
         // Check if it already exists?
         MongoBlob mongoBlob = new MongoBlob();
         mongoBlob.setId(id);
@@ -78,24 +85,26 @@ public class MongoBlobStore extends AbstractBlobStore {
             getBlobCollection().insert(mongoBlob);
         } catch (MongoException.DuplicateKey e) {
             // the same block was already stored before: ignore
-        } 
+        }
     }
 
     @Override
     protected byte[] readBlockFromBackend(BlockId blockId) throws Exception {
         String id = StringUtils.convertBytesToHex(blockId.getDigest());
-        MongoBlob blobMongo = getBlob(id, 0);
-        if (blobMongo == null) {
-            String message = "Did not find block " + id;
-            LOG.error(message);
-            throw new IOException(message);
+        byte[] data = cache.get(id);
+        if (data == null) {
+            MongoBlob blobMongo = getBlob(id, 0);
+            if (blobMongo == null) {
+                String message = "Did not find block " + id;
+                LOG.error(message);
+                throw new IOException(message);
+            }
+            data = blobMongo.getData();
+            cache.put(id, data);
         }
-        byte[] data = blobMongo.getData();
-
         if (blockId.getPos() == 0) {
             return data;
         }
-
         int len = (int) (data.length - blockId.getPos());
         if (len < 0) {
             return new byte[0];
@@ -165,7 +174,7 @@ public class MongoBlobStore extends AbstractBlobStore {
 
     private MongoBlob getBlob(String id, long lastMod) {
         DBObject query = getBlobQuery(id, lastMod);
-        
+
         // try the secondary first
         // TODO add a configuration option for whether to try reading from secondary
         ReadPreference pref = ReadPreference.secondaryPreferred();
@@ -190,13 +199,21 @@ public class MongoBlobStore extends AbstractBlobStore {
         }
         return queryBuilder.get();
     }
-    
-    @Override
-    public boolean deleteChunk(String chunkId, long maxLastModifiedTime) throws Exception {
-        DBCollection collection = getBlobCollection();
-        WriteResult result = collection.remove(getBlobQuery(chunkId, maxLastModifiedTime));
 
-        if (result.getN() == 1) {
+    @Override
+    public boolean deleteChunks(List<String> chunkIds, long maxLastModifiedTime) throws Exception {
+        DBCollection collection = getBlobCollection();
+        QueryBuilder queryBuilder = new QueryBuilder();
+        if (chunkIds != null) {
+            queryBuilder = queryBuilder.and(MongoBlob.KEY_ID).in(chunkIds.toArray(new String[0]));
+            if (maxLastModifiedTime > 0) {
+                queryBuilder = queryBuilder.and(MongoBlob.KEY_LAST_MOD)
+                                    .lessThan(maxLastModifiedTime);
+            }
+        }
+
+        WriteResult result = collection.remove(queryBuilder.get());
+        if (result.getN() == chunkIds.size()) {
             return true;
         }
 
@@ -219,6 +236,7 @@ public class MongoBlobStore extends AbstractBlobStore {
                 collection.find(builder.get(), fields).hint(fields)
                         .addOption(Bytes.QUERYOPTION_SLAVEOK);
 
+        //TODO The cursor needs to be closed
         return new AbstractIterator<String>() {
             @Override
             protected String computeNext() {

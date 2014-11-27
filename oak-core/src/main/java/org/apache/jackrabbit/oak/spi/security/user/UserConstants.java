@@ -31,6 +31,8 @@ public interface UserConstants {
     String NT_REP_AUTHORIZABLE_FOLDER = "rep:AuthorizableFolder";
     String NT_REP_USER = "rep:User";
     String NT_REP_GROUP = "rep:Group";
+    String NT_REP_SYSTEM_USER = "rep:SystemUser";
+    String NT_REP_PASSWORD = "rep:Password";
     @Deprecated
     String NT_REP_MEMBERS = "rep:Members";
     String NT_REP_MEMBER_REFERENCES_LIST = "rep:MemberReferencesList";
@@ -41,10 +43,12 @@ public interface UserConstants {
     String REP_PRINCIPAL_NAME = "rep:principalName";
     String REP_AUTHORIZABLE_ID = "rep:authorizableId";
     String REP_PASSWORD = "rep:password";
+    String REP_PASSWORD_LAST_MODIFIED = "rep:passwordLastModified";
     String REP_DISABLED = "rep:disabled";
     String REP_MEMBERS = "rep:members";
     String REP_MEMBERS_LIST = "rep:membersList";
     String REP_IMPERSONATORS = "rep:impersonators";
+    String REP_PWD = "rep:pwd";
 
     Collection<String> GROUP_PROPERTY_NAMES = ImmutableSet.of(
             REP_PRINCIPAL_NAME,
@@ -59,6 +63,14 @@ public interface UserConstants {
             REP_DISABLED,
             REP_IMPERSONATORS
     );
+
+    Collection<String> PWD_PROPERTY_NAMES = ImmutableSet.of(
+            REP_PASSWORD_LAST_MODIFIED
+    );
+
+    Collection<String> NT_NAMES = ImmutableSet.of(
+            NT_REP_USER, NT_REP_GROUP, NT_REP_PASSWORD,
+            NT_REP_MEMBERS, NT_REP_MEMBER_REFERENCES, NT_REP_MEMBER_REFERENCES_LIST);
 
     /**
      * Configuration option defining the ID of the administrator user.
@@ -90,6 +102,11 @@ public interface UserConstants {
     String DEFAULT_ANONYMOUS_ID = "anonymous";
 
     /**
+     * Mandatory configuration option denoting the user {@link org.apache.jackrabbit.oak.spi.security.authentication.Authentication} implementation to use in the login module.
+     */
+    String PARAM_USER_AUTHENTICATION_FACTORY = "userAuthenticationFactory";
+
+    /**
      * Configuration option to define the path underneath which user nodes
      * are being created.
      */
@@ -112,7 +129,18 @@ public interface UserConstants {
     String DEFAULT_GROUP_PATH = "/rep:security/rep:authorizables/rep:groups";
 
     /**
-     * Parameter used to change the number of levels that are used by default
+     * Configuration option to define the path relative to the user root node
+     * underneath which system user nodes are being created.
+     */
+    String PARAM_SYSTEM_RELATIVE_PATH = "systemRelativePath";
+
+    /**
+     * Default intermediate path for system users.
+     */
+    String DEFAULT_SYSTEM_RELATIVE_PATH = "system";
+
+    /**
+     * Parameter used to change the number of levels that are used by default to
      * store authorizable nodes.<br>The default number of levels is 2.
      */
     String PARAM_DEFAULT_DEPTH = "defaultDepth";
@@ -172,4 +200,32 @@ public interface UserConstants {
      * be reviewed and adjusted accordingly.</p>
      */
     String PARAM_SUPPORT_AUTOSAVE = "supportAutoSave";
+
+    /**
+     * Optional configuration parameter indicating the maximum age in days a password may have
+     * before it expires. If the value specified is > 0, password expiry is implicitly enabled.
+     */
+    String PARAM_PASSWORD_MAX_AGE = "passwordMaxAge";
+
+    /**
+     * Default value for {@link #PARAM_PASSWORD_MAX_AGE}
+     */
+    int DEFAULT_PASSWORD_MAX_AGE = 0;
+
+    /**
+     * Optional configuration parameter indicating whether users must change their passwords
+     * on first login. If enabled, passwords are immediately expired upon user creation.
+     */
+    String PARAM_PASSWORD_INITIAL_CHANGE = "initialPasswordChange";
+
+    /**
+     * Default value for {@link #PARAM_PASSWORD_INITIAL_CHANGE}
+     */
+    boolean DEFAULT_PASSWORD_INITIAL_CHANGE = false;
+
+    /**
+     * Name of the {@link javax.jcr.SimpleCredentials} attribute containing the new password.
+     * This may be used change the password via the credentials object.
+     */
+    String CREDENTIALS_ATTRIBUTE_NEWPASSWORD = "user.newpassword";
 }

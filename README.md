@@ -2,15 +2,12 @@
 Jackrabbit Oak - the next generation content repository
 =======================================================
 
-Jackrabbit Oak is an effort to implement a scalable and performant
-hierarchical content repository for use as the foundation of modern
-world-class web sites and other demanding content applications.
+Jackrabbit Oak is a scalable, high-performance hierarchical content
+repository designed for use as the foundation of modern world-class
+web sites and other demanding content applications.
 
 The Oak effort is a part of the Apache Jackrabbit project.
 Apache Jackrabbit is a project of the Apache Software Foundation.
-
-Oak is currently alpha-level software. Use at your own risk with no
-stability or compatibility guarantees.
 
 Getting Started
 ---------------
@@ -65,6 +62,7 @@ The build consists of the following main components:
   - oak-http          - HTTP binding for Oak
   - oak-lucene        - Lucene-based query index
   - oak-run           - runnable jar packaging
+  - oak-pojosr        - integration with PojoSR
   - oak-upgrade       - tooling for upgrading Jackrabbit repositories to Oak
   - oak-it            - integration tests
     - oak-it/mk       - integration tests for MicroKernel
@@ -77,7 +75,7 @@ License
 
 (see [LICENSE.txt](LICENSE.txt) for full license details)
 
-Collective work: Copyright 2013 The Apache Software Foundation.
+Collective work: Copyright 2014 The Apache Software Foundation.
 
 Licensed to the Apache Software Foundation (ASF) under one or more
 contributor license agreements.  See the NOTICE file distributed with
@@ -93,4 +91,3 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
-

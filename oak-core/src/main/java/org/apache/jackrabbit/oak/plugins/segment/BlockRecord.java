@@ -20,12 +20,15 @@ import static com.google.common.base.Preconditions.checkElementIndex;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.base.Preconditions.checkPositionIndexes;
 
+/**
+ * A record of type "BLOCK".
+ */
 class BlockRecord extends Record {
 
     private final int size;
 
-    BlockRecord(Segment segment, RecordId id, int size) {
-        super(segment, id);
+    BlockRecord(RecordId id, int size) {
+        super(id);
         this.size = size;
     }
 

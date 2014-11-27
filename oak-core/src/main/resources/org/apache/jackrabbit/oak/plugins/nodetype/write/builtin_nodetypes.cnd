@@ -707,9 +707,16 @@
   mixin
   - rep:impersonators (STRING) protected multiple
 
+[rep:Password]
+  - * (UNDEFINED) protected
+  - * (UNDEFINED) protected multiple
+
 [rep:User] > rep:Authorizable, rep:Impersonatable
+  + rep:pwd (rep:Password) = rep:Password protected
   - rep:password (STRING) protected
   - rep:disabled (STRING) protected
+
+[rep:SystemUser] > rep:User
 
 [rep:Group] > rep:Authorizable, rep:MemberReferences
   + rep:members (rep:Members) = rep:Members multiple protected VERSION /* @deprecated since oak 1.0 (remove?) */

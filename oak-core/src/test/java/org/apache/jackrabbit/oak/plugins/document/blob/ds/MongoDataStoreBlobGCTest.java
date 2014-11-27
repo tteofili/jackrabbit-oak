@@ -47,7 +47,7 @@ public class MongoDataStoreBlobGCTest extends MongoBlobGCTest {
     public void setUpConnection() throws Exception {
         mongoConnection = MongoUtils.getConnection();
         MongoUtils.dropCollections(mongoConnection.getDB());
-        mk = new DocumentMK.Builder().setMongoDB(mongoConnection.getDB())
+        mk = new DocumentMK.Builder().clock(getTestClock()).setMongoDB(mongoConnection.getDB())
                 .setBlobStore(DataStoreUtils.getBlobStore()).open();
     }
 

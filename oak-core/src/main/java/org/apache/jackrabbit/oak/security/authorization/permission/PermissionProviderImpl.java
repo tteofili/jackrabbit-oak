@@ -17,20 +17,23 @@
 package org.apache.jackrabbit.oak.security.authorization.permission;
 
 import java.security.Principal;
+import java.util.Collections;
 import java.util.Set;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
-import com.google.common.collect.ImmutableSet;
 import org.apache.jackrabbit.JcrConstants;
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Root;
 import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.core.ImmutableRoot;
 import org.apache.jackrabbit.oak.plugins.tree.ImmutableTree;
+import org.apache.jackrabbit.oak.plugins.tree.TreeLocation;
 import org.apache.jackrabbit.oak.plugins.version.VersionConstants;
 import org.apache.jackrabbit.oak.spi.security.authorization.AuthorizationConfiguration;
 import org.apache.jackrabbit.oak.spi.security.authorization.accesscontrol.AccessControlConstants;
+import org.apache.jackrabbit.oak.spi.security.authorization.permission.AggregatedPermissionProvider;
+import org.apache.jackrabbit.oak.spi.security.authorization.permission.ControlFlag;
 import org.apache.jackrabbit.oak.spi.security.authorization.permission.PermissionConstants;
 import org.apache.jackrabbit.oak.spi.security.authorization.permission.PermissionProvider;
 import org.apache.jackrabbit.oak.spi.security.authorization.permission.Permissions;
@@ -38,9 +41,8 @@ import org.apache.jackrabbit.oak.spi.security.authorization.permission.Repositor
 import org.apache.jackrabbit.oak.spi.security.authorization.permission.TreePermission;
 import org.apache.jackrabbit.oak.spi.security.principal.AdminPrincipal;
 import org.apache.jackrabbit.oak.spi.security.principal.SystemPrincipal;
-import org.apache.jackrabbit.oak.plugins.tree.TreeLocation;
 
-public class PermissionProviderImpl implements PermissionProvider, AccessControlConstants, PermissionConstants {
+public class PermissionProviderImpl implements PermissionProvider, AccessControlConstants, PermissionConstants, AggregatedPermissionProvider {
 
     private final Root root;
 
@@ -52,9 +54,10 @@ public class PermissionProviderImpl implements PermissionProvider, AccessControl
 
     private ImmutableRoot immutableRoot;
 
+    private ControlFlag flag;
+
     public PermissionProviderImpl(@Nonnull Root root, @Nonnull String workspaceName, @Nonnull Set<Principal> principals,
-                                  @Nonnull AuthorizationConfiguration acConfig,
-                                  @Nonnull PermissionEntryCache.Local cache) {
+                                  @Nonnull AuthorizationConfiguration acConfig) {
         this.root = root;
         this.workspaceName = workspaceName;
         this.acConfig = acConfig;
@@ -64,8 +67,10 @@ public class PermissionProviderImpl implements PermissionProvider, AccessControl
         if (principals.contains(SystemPrincipal.INSTANCE) || isAdmin(principals)) {
             compiledPermissions = AllPermissions.getInstance();
         } else {
-            compiledPermissions = CompiledPermissionImpl.create(immutableRoot, workspaceName, principals, acConfig, cache);
+            compiledPermissions = CompiledPermissionImpl.create(immutableRoot, workspaceName, principals, acConfig);
         }
+
+        flag = ControlFlag.valueOf(acConfig.getParameters().getConfigValue(AggregatedPermissionProvider.PARAM_CONTROL_FLAG, ControlFlag.REQUISITE_NAME));
     }
 
     @Override
@@ -117,10 +122,41 @@ public class PermissionProviderImpl implements PermissionProvider, AccessControl
         return isGranted;
     }
 
+    //---------------------------------------< AggregatedPermissionProvider >---
+    @Override
+    public ControlFlag getFlag() {
+        return flag;
+    }
+
+    @Override
+    public boolean handles(@Nonnull String path, @Nonnull String jcrAction) {
+        return true;
+    }
+
+    @Override
+    public boolean handles(@Nonnull Tree tree) {
+        return true;
+    }
+
+    @Override
+    public boolean handles(@Nonnull Tree tree, long permission) {
+        return true;
+    }
+
+    @Override
+    public boolean handles(@Nonnull TreePermission treePermission, long permission) {
+        return true;
+    }
+
+    @Override
+    public boolean handlesRepositoryPermissions() {
+        return true;
+    }
+
     //--------------------------------------------------------------------------
 
     private boolean isAdmin(Set<Principal> principals) {
-        Set<String> adminNames = ImmutableSet.copyOf(acConfig.getParameters().getConfigValue(PARAM_ADMINISTRATIVE_PRINCIPALS, new String[0]));
+        Set<String> adminNames = acConfig.getParameters().getConfigValue(PARAM_ADMINISTRATIVE_PRINCIPALS, Collections.EMPTY_SET);
         for (Principal principal : principals) {
             if (principal instanceof AdminPrincipal || adminNames.contains(principal.getName())) {
                 return true;
@@ -138,11 +174,7 @@ public class PermissionProviderImpl implements PermissionProvider, AccessControl
     }
 
     private static ImmutableRoot getImmutableRoot(@Nonnull Root base) {
-        if (base instanceof ImmutableRoot) {
-            return (ImmutableRoot) base;
-        } else {
-            return new ImmutableRoot(base);
-        }
+        return ImmutableRoot.getInstance(base);
     }
 
     private static boolean isVersionStorePath(@Nonnull String oakPath) {

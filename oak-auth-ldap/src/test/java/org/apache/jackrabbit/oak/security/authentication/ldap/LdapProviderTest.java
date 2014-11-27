@@ -31,7 +31,6 @@ import org.apache.jackrabbit.oak.security.authentication.ldap.impl.LdapIdentityP
 import org.apache.jackrabbit.oak.security.authentication.ldap.impl.LdapProviderConfig;
 import org.apache.jackrabbit.oak.spi.security.authentication.external.ExternalGroup;
 import org.apache.jackrabbit.oak.spi.security.authentication.external.ExternalIdentity;
-import org.apache.jackrabbit.oak.spi.security.authentication.external.ExternalIdentityException;
 import org.apache.jackrabbit.oak.spi.security.authentication.external.ExternalIdentityProvider;
 import org.apache.jackrabbit.oak.spi.security.authentication.external.ExternalIdentityRef;
 import org.apache.jackrabbit.oak.spi.security.authentication.external.ExternalUser;
@@ -110,6 +109,8 @@ public class LdapProviderTest {
                 .setBaseDN(ServerDNConstants.GROUPS_SYSTEM_DN)
                 .setObjectClasses("groupOfUniqueNames");
 
+        providerConfig.getAdminPoolConfig().setMaxActive(0);
+        providerConfig.getUserPoolConfig().setMaxActive(0);
         return new LdapIdentityProvider(providerConfig);
     }
 
@@ -166,6 +167,14 @@ public class LdapProviderTest {
     @Test
     public void testAuthenticate() throws Exception {
         SimpleCredentials creds = new SimpleCredentials(TEST_USER1_UID, "pass".toCharArray());
+        ExternalUser user = idp.authenticate(creds);
+        assertNotNull("User 1 must authenticate", user);
+        assertEquals("User Ref", TEST_USER1_DN, user.getExternalId().getId());
+    }
+
+    @Test
+    public void testAuthenticateCaseInsensitive() throws Exception {
+        SimpleCredentials creds = new SimpleCredentials(TEST_USER1_UID.toUpperCase(), "pass".toCharArray());
         ExternalUser user = idp.authenticate(creds);
         assertNotNull("User 1 must authenticate", user);
         assertEquals("User Ref", TEST_USER1_DN, user.getExternalId().getId());

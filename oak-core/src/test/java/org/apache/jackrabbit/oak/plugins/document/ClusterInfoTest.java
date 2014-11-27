@@ -19,11 +19,15 @@
 package org.apache.jackrabbit.oak.plugins.document;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 
 import java.util.List;
 
 import org.apache.jackrabbit.oak.plugins.document.memory.MemoryDocumentStore;
+import org.apache.jackrabbit.oak.stats.Clock;
+import org.junit.After;
 import org.junit.Test;
 
 import com.mongodb.ReadPreference;
@@ -33,11 +37,15 @@ import com.mongodb.WriteConcern;
  * Test the ClusterInfo class
  */
 public class ClusterInfoTest {
-    
+
     @Test
     public void readWriteMode() throws InterruptedException {
-        
+
         MemoryDocumentStore mem = new MemoryDocumentStore();
+        Clock clock = new Clock.Virtual();
+        clock.waitUntil(System.currentTimeMillis());
+        ClusterNodeInfo.setClock(clock);
+
         DocumentNodeStore ns1 = new DocumentMK.Builder().
                 setDocumentStore(mem).
                 setAsyncDelay(0).
@@ -46,12 +54,17 @@ public class ClusterInfoTest {
                 setDocumentStore(mem).
                 setAsyncDelay(0).
                 getNodeStore();
+        // Bring the current time forward to after the leaseTime which would have been 
+        // updated in the DocumentNodeStore initialization.
+        clock.waitUntil(clock.getTime() + ns1.getClusterInfo().getLeaseTime());
+
         ns1.getClusterInfo().setLeaseTime(0);
         ns2.getClusterInfo().setLeaseTime(0);
+
         List<ClusterNodeInfoDocument> list = mem.query(
                 Collection.CLUSTER_NODES, "0", "a", Integer.MAX_VALUE);
         assertEquals(2, list.size());
-        
+
         assertNull(mem.getReadPreference());
         assertNull(mem.getWriteConcern());
         mem.setReadWriteMode("read:primary, write:majority");
@@ -59,19 +72,19 @@ public class ClusterInfoTest {
         assertEquals(WriteConcern.MAJORITY, mem.getWriteConcern());
 
         UpdateOp op;
-        
+
         // unknown modes: ignore
         op = new UpdateOp(list.get(0).getId(), false);
         op.set("readWriteMode", "read:xyz, write:abc");
         mem.findAndUpdate(Collection.CLUSTER_NODES, op);
-        ns1.runBackgroundOperations();
+        ns1.renewClusterIdLease();
         assertEquals(ReadPreference.primary(), mem.getReadPreference());
         assertEquals(WriteConcern.MAJORITY, mem.getWriteConcern());
 
         op = new UpdateOp(list.get(0).getId(), false);
         op.set("readWriteMode", "read:nearest, write:fsynced");
         mem.findAndUpdate(Collection.CLUSTER_NODES, op);
-        ns1.runBackgroundOperations();
+        ns1.renewClusterIdLease();
         assertEquals(ReadPreference.nearest(), mem.getReadPreference());
         assertEquals(WriteConcern.FSYNCED, mem.getWriteConcern());
 
@@ -79,4 +92,51 @@ public class ClusterInfoTest {
         ns2.dispose();
     }
 
+    @Test
+    public void renewLease() throws InterruptedException {
+        MemoryDocumentStore mem = new MemoryDocumentStore();
+        Clock clock = new Clock.Virtual();
+        clock.waitUntil(System.currentTimeMillis());
+        ClusterNodeInfo.setClock(clock);
+
+        DocumentNodeStore ns = new DocumentMK.Builder().
+                setDocumentStore(mem).
+                setAsyncDelay(0).
+                getNodeStore();
+
+        ClusterNodeInfo info = ns.getClusterInfo();
+        assertNotNull(info);
+
+        // current lease end
+        long leaseEnd = getLeaseEndTime(ns);
+
+        // wait a bit, but not more than half of the lease time
+        clock.waitUntil(clock.getTime() + (ns.getClusterInfo().getLeaseTime() / 2) - 1000);
+
+        // must not renew lease right now
+        ns.renewClusterIdLease();
+        assertEquals(leaseEnd, getLeaseEndTime(ns));
+
+        // wait some more time
+        clock.waitUntil(clock.getTime() + 2000);
+
+        // now the lease must be renewed
+        ns.renewClusterIdLease();
+        assertTrue(getLeaseEndTime(ns) > leaseEnd);
+
+        ns.dispose();
+    }
+
+    private static long getLeaseEndTime(DocumentNodeStore nodeStore) {
+        ClusterNodeInfoDocument doc = nodeStore.getDocumentStore().find(
+                Collection.CLUSTER_NODES,
+                String.valueOf(nodeStore.getClusterId()));
+        assertNotNull(doc);
+        return doc.getLeaseEndTime();
+    }
+
+    @After
+    public void tearDown(){
+        ClusterNodeInfo.resetClockToDefault();
+    }
 }

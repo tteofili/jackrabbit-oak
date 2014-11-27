@@ -16,6 +16,11 @@
  */
 package org.apache.jackrabbit.oak.plugins.index.property;
 
+import static com.google.common.base.Preconditions.checkState;
+import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.INDEX_CONTENT_NODE_NAME;
+import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.INDEX_DEFINITIONS_NAME;
+import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.TYPE_PROPERTY_NAME;
+
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
 import java.util.HashSet;
@@ -23,16 +28,15 @@ import java.util.Set;
 
 import org.apache.jackrabbit.oak.api.PropertyValue;
 import org.apache.jackrabbit.oak.api.Type;
-import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.spi.query.Cursor;
-import org.apache.jackrabbit.oak.spi.query.Cursors;
 import org.apache.jackrabbit.oak.spi.query.Filter;
-import org.apache.jackrabbit.oak.spi.query.Filter.PropertyRestriction;
 import org.apache.jackrabbit.oak.spi.query.QueryIndex;
+import org.apache.jackrabbit.oak.spi.state.ChildNodeEntry;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.google.common.base.Charsets;
-import com.google.common.collect.Iterables;
 
 /**
  * Provides a QueryIndex that does lookups against a property index
@@ -82,6 +86,8 @@ import com.google.common.collect.Iterables;
  */
 class PropertyIndex implements QueryIndex {
 
+    private static final String PROPERTY = "property";
+
     // TODO the max string length should be removed, or made configurable
     private static final int MAX_STRING_LENGTH = 100;
 
@@ -89,6 +95,8 @@ class PropertyIndex implements QueryIndex {
      * name used when the indexed value is an empty string
      */
     private static final String EMPTY_TOKEN = ":";
+
+    private static final Logger LOG = LoggerFactory.getLogger(PropertyIndex.class);
 
     static Set<String> encode(PropertyValue value) {
         if (value == null) {
@@ -113,11 +121,36 @@ class PropertyIndex implements QueryIndex {
         return values;
     }
 
+    private PropertyIndexPlan plan(NodeState root, Filter filter) {
+        PropertyIndexPlan bestPlan = null;
+
+        // TODO support indexes on a path
+        // currently, only indexes on the root node are supported
+        NodeState state = root.getChildNode(INDEX_DEFINITIONS_NAME);
+        for (ChildNodeEntry entry : state.getChildNodeEntries()) {
+            NodeState definition = entry.getNodeState();
+            if (PROPERTY.equals(definition.getString(TYPE_PROPERTY_NAME))
+                    && definition.hasChildNode(INDEX_CONTENT_NODE_NAME)) {
+                PropertyIndexPlan plan = new PropertyIndexPlan(
+                        entry.getName(), definition, filter);
+                if (plan.getCost() != Double.POSITIVE_INFINITY) {
+                    LOG.debug("property cost for {} is {}",
+                            plan.getName(), plan.getCost());
+                    if (bestPlan == null || plan.getCost() < bestPlan.getCost()) {
+                        bestPlan = plan;
+                    }
+                }
+            }
+        }
+
+        return bestPlan;
+    }
+
     //--------------------------------------------------------< QueryIndex >--
 
     @Override
     public String getIndexName() {
-        return "property";
+        return PROPERTY;
     }
 
     @Override
@@ -126,115 +159,36 @@ class PropertyIndex implements QueryIndex {
             // not an appropriate index for full-text search
             return Double.POSITIVE_INFINITY;
         }
-
-        PropertyIndexLookup lookup = new PropertyIndexLookup(root);
-        for (PropertyRestriction pr : filter.getPropertyRestrictions()) {
-            String propertyName = PathUtils.getName(pr.propertyName);
-            // TODO support indexes on a path
-            // currently, only indexes on the root node are supported
-            if (lookup.isIndexed(propertyName, "/", filter)) {
-                if (pr.firstIncluding && pr.lastIncluding
-                    && pr.first != null && pr.first.equals(pr.last)) {
-                    // "[property] = $value"
-                    return lookup.getCost(filter, propertyName, pr.first);
-                } else if (pr.list != null) {
-                    double cost = 0;
-                    for (PropertyValue p : pr.list) {
-                        cost += lookup.getCost(filter, propertyName, p);
-                    }
-                    return cost;
-                } else {
-                    // processed as "[property] is not null"
-                    return lookup.getCost(filter, propertyName, null);
-                }
-            }
+        if (filter.containsNativeConstraint()) {
+            // not an appropriate index for native search
+            return Double.POSITIVE_INFINITY;
         }
-        // not an appropriate index
-        return Double.POSITIVE_INFINITY;
+
+        PropertyIndexPlan plan = plan(root, filter);
+        if (plan != null) {
+            return plan.getCost();
+        } else {
+            return Double.POSITIVE_INFINITY;
+        }
     }
 
     @Override
     public Cursor query(Filter filter, NodeState root) {
-        Iterable<String> paths = null;
-
-        PropertyIndexLookup lookup = new PropertyIndexLookup(root);
-        int depth = 1;
-        for (PropertyRestriction pr : filter.getPropertyRestrictions()) {
-            String propertyName = PathUtils.getName(pr.propertyName);
-            depth = PathUtils.getDepth(pr.propertyName);
-            // TODO support indexes on a path
-            // currently, only indexes on the root node are supported
-            if (lookup.isIndexed(propertyName, "/", filter)) {
-                // equality
-                if (pr.firstIncluding && pr.lastIncluding
-                    && pr.first != null && pr.first.equals(pr.last)) {
-                    // "[property] = $value"
-                    paths = lookup.query(filter, propertyName, pr.first);
-                    break;
-                } else if (pr.list != null) {
-                    for (PropertyValue pv : pr.list) {
-                        Iterable<String> p = lookup.query(filter, propertyName, pv);
-                        if (paths == null) {
-                            paths = p;
-                        } else {
-                            paths = Iterables.concat(paths, p);
-                        }
-                    }
-                    break;
-                } else {
-                    // processed as "[property] is not null"
-                    paths = lookup.query(filter, propertyName, null);
-                    break;
-                }
-            }
-        }
-        if (paths == null) {
-            throw new IllegalStateException("Property index is used even when no index is available for filter " + filter);
-        }
-        Cursor c = Cursors.newPathCursor(paths);
-        if (depth > 1) {
-            c = Cursors.newAncestorCursor(c, depth - 1);
-        }
-        return c;
+        PropertyIndexPlan plan = plan(root, filter);
+        checkState(plan != null,
+                "Property index is used even when no index"
+                + " is available for filter " + filter);
+        return plan.execute();
     }
-    
+
     @Override
     public String getPlan(Filter filter, NodeState root) {
-        StringBuilder buff = new StringBuilder("property");
-        StringBuilder notIndexed = new StringBuilder();
-        PropertyIndexLookup lookup = new PropertyIndexLookup(root);
-        for (PropertyRestriction pr : filter.getPropertyRestrictions()) {
-            String propertyName = PathUtils.getName(pr.propertyName);
-            // TODO support indexes on a path
-            // currently, only indexes on the root node are supported
-            if (lookup.isIndexed(propertyName, "/", filter)) {
-                if (pr.firstIncluding && pr.lastIncluding
-                    && pr.first != null && pr.first.equals(pr.last)) {
-                    buff.append(' ').append(propertyName).append('=').append(pr.first);
-                } else {
-                    buff.append(' ').append(propertyName);
-                }
-            } else if (pr.list != null) {
-                buff.append(' ').append(propertyName).append(" IN(");
-                int i = 0;
-                for (PropertyValue pv : pr.list) {
-                    if (i++ > 0) {
-                        buff.append(", ");
-                    }
-                    buff.append(pv);
-                }
-                buff.append(')');
-            } else {
-                notIndexed.append(' ').append(propertyName);
-                if (!pr.toString().isEmpty()) {
-                    notIndexed.append(':').append(pr);
-                }
-            }
+        PropertyIndexPlan plan = plan(root, filter);
+        if (plan != null) {
+            return plan.toString();
+        } else {
+            return "property index not applicable";
         }
-        if (notIndexed.length() > 0) {
-            buff.append(" (").append(notIndexed.toString().trim()).append(")");
-        }
-        return buff.toString();
     }
 
 }

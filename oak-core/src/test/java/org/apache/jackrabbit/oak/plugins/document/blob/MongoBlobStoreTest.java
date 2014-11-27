@@ -19,6 +19,7 @@ package org.apache.jackrabbit.oak.plugins.document.blob;
 import org.apache.jackrabbit.oak.plugins.document.MongoUtils;
 import org.apache.jackrabbit.oak.plugins.document.mongo.MongoBlobStore;
 import org.apache.jackrabbit.oak.plugins.document.util.MongoConnection;
+import org.apache.jackrabbit.oak.spi.blob.AbstractBlobStoreTest;
 import org.junit.After;
 import org.junit.Assume;
 import org.junit.Before;
@@ -30,18 +31,18 @@ import org.junit.BeforeClass;
 public class MongoBlobStoreTest extends AbstractBlobStoreTest {
 
     private MongoConnection mongoConnection;
-    
+
     @BeforeClass
     public static void checkMongoDbAvailable() {
         Assume.assumeNotNull(MongoUtils.getConnection());
     }
-    
+
     @Before
     @Override
     public void setUp() throws Exception {
         mongoConnection = MongoUtils.getConnection();
         MongoUtils.dropCollections(mongoConnection.getDB());
-        
+
         MongoBlobStore blobStore = new MongoBlobStore(mongoConnection.getDB());
         blobStore.setBlockSize(128);
         blobStore.setBlockSizeMin(48);

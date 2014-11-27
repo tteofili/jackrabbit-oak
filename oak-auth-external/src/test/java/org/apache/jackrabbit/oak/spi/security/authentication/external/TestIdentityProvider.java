@@ -18,6 +18,7 @@ package org.apache.jackrabbit.oak.spi.security.authentication.external;
 
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
 
@@ -28,11 +29,13 @@ import javax.security.auth.login.LoginException;
 
 public class TestIdentityProvider implements ExternalIdentityProvider {
 
-    private final Map<String, TestGroup> externalGroups = new HashMap<String, TestGroup>();
-    private final Map<String, TestUser> externalUsers = new HashMap<String, TestUser>();
+    private final Map<String, ExternalGroup> externalGroups = new HashMap<String, ExternalGroup>();
+    private final Map<String, ExternalUser> externalUsers = new HashMap<String, ExternalUser>();
 
 
     public TestIdentityProvider() {
+        addGroup(new TestGroup("aa"));
+        addGroup(new TestGroup("aaa"));
         addGroup(new TestGroup("a").withGroups("aa", "aaa"));
         addGroup(new TestGroup("b").withGroups("a"));
         addGroup(new TestGroup("c"));
@@ -41,17 +44,17 @@ public class TestIdentityProvider implements ExternalIdentityProvider {
                 .withProperty("name", "Test User")
                 .withProperty("profile/name", "Public Name")
                 .withProperty("profile/age", 72)
-                .withProperty("./email", "test@testuser.com")
+                .withProperty("email", "test@testuser.com")
                 .withGroups("a", "b", "c")
         );
     }
 
     private void addUser(TestIdentity user) {
-        externalUsers.put(user.getId(), (TestUser) user);
+        externalUsers.put(user.getId().toLowerCase(), (TestUser) user);
     }
 
     private void addGroup(TestIdentity group) {
-        externalGroups.put(group.getId(), (TestGroup) group);
+        externalGroups.put(group.getId().toLowerCase(), (TestGroup) group);
     }
 
     @Nonnull
@@ -62,12 +65,16 @@ public class TestIdentityProvider implements ExternalIdentityProvider {
 
     @Override
     public ExternalIdentity getIdentity(@Nonnull ExternalIdentityRef ref) throws ExternalIdentityException {
-        return null;
+        ExternalIdentity id = externalUsers.get(ref.getId().toLowerCase());
+        if (id != null) {
+            return id;
+        }
+        return externalGroups.get(ref.getId().toLowerCase());
     }
 
     @Override
     public ExternalUser getUser(@Nonnull String userId) throws ExternalIdentityException {
-        return externalUsers.get(userId);
+        return externalUsers.get(userId.toLowerCase());
     }
 
     @Override
@@ -87,7 +94,17 @@ public class TestIdentityProvider implements ExternalIdentityProvider {
 
     @Override
     public ExternalGroup getGroup(@Nonnull String name) throws ExternalIdentityException {
-        return externalGroups.get(name);
+        return externalGroups.get(name.toLowerCase());
+    }
+
+    @Override
+    public Iterator<ExternalUser> listUsers() throws ExternalIdentityException {
+        return externalUsers.values().iterator();
+    }
+
+    @Override
+    public Iterator<ExternalGroup> listGroups() throws ExternalIdentityException {
+        return externalGroups.values().iterator();
     }
 
     private static class TestIdentity implements ExternalIdentity {

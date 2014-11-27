@@ -19,13 +19,14 @@
 package org.apache.jackrabbit.oak.query.ast;
 
 import java.util.Collections;
-import java.util.Map;
 import java.util.Set;
 
 import javax.jcr.PropertyType;
 
+import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.PropertyValue;
 import org.apache.jackrabbit.oak.api.Type;
+import org.apache.jackrabbit.oak.plugins.memory.PropertyStates;
 import org.apache.jackrabbit.oak.query.fulltext.LikePattern;
 import org.apache.jackrabbit.oak.query.index.FilterImpl;
 import org.apache.jackrabbit.oak.spi.query.PropertyValues;
@@ -49,8 +50,8 @@ public class ComparisonImpl extends ConstraintImpl {
         return operand1;
     }
 
-    public String getOperator() {
-        return operator.toString();
+    public Operator getOperator() {
+        return operator;
     }
 
     public StaticOperandImpl getOperand2() {
@@ -70,14 +71,6 @@ public class ComparisonImpl extends ConstraintImpl {
     public Set<SelectorImpl> getSelectors() {
         return operand1.getSelectors();
     }
-    
-    @Override 
-    public Map<DynamicOperandImpl, Set<StaticOperandImpl>> getInMap() {
-        if (operator == Operator.EQUAL) {
-            return Collections.singletonMap(operand1, Collections.singleton(operand2));
-        }
-        return Collections.emptyMap();
-    }    
     
     @Override
     public boolean evaluate() {
@@ -101,46 +94,22 @@ public class ComparisonImpl extends ConstraintImpl {
             // unable to convert, just skip this node
             return false;
         }
-        return evaluate(p1, p2);
-    }
-
-    /**
-     * "operand2 always evaluates to a scalar value"
-     * 
-     * for multi-valued properties: if any of the value matches, then return true
-     * 
-     * @param p1
-     * @param p2
-     * @return
-     */
-    private boolean evaluate(PropertyValue p1, PropertyValue p2) {
-        switch (operator) {
-        case EQUAL:
-            return PropertyValues.match(p1, p2);
-        case NOT_EQUAL:
-            return PropertyValues.notMatch(p1, p2);
-        case GREATER_OR_EQUAL:
-            return p1.compareTo(p2) >= 0;
-        case GREATER_THAN:
-            return p1.compareTo(p2) > 0;
-        case LESS_OR_EQUAL:
-            return p1.compareTo(p2) <= 0;
-        case LESS_THAN:
-            return p1.compareTo(p2) < 0;
-        case LIKE:
-            return evaluateLike(p1, p2);
-        }
-        throw new IllegalArgumentException("Unknown operator: " + operator);
-    }
-
-    private static boolean evaluateLike(PropertyValue v1, PropertyValue v2) {
-        LikePattern like = new LikePattern(v2.getValue(Type.STRING));
-        for (String s : v1.getValue(Type.STRINGS)) {
-            if (like.matches(s)) {
-                return true;
+        if (p1.isArray()) {
+            // JCR 2.0 spec, 6.7.16 Comparison:
+            // "... constraint is satisfied as a whole if the comparison
+            // against any element of the array is satisfied."
+            Type<?> base = p1.getType().getBaseType();
+            for (int i = 0; i < p1.count(); i++) {
+                PropertyState value = PropertyStates.createProperty(
+                        "value", p1.getValue(base, i), base);
+                if (operator.evaluate(PropertyValues.create(value), p2)) {
+                    return true;
+                }
             }
+            return false;
+        } else {
+            return operator.evaluate(p1, p2);
         }
-        return false;
     }
 
     @Override
@@ -189,6 +158,9 @@ public class ComparisonImpl extends ConstraintImpl {
                         // path conditions
                         operand1.restrict(f, operator, v);
                     }
+                } else {
+                    // like '%' conditions
+                    operand1.restrict(f, operator, v);
                 }
             } else {
                 operand1.restrict(f, operator, v);

@@ -30,6 +30,8 @@ import org.apache.jackrabbit.oak.plugins.commit.ConflictValidatorProvider;
 import org.apache.jackrabbit.oak.plugins.commit.JcrConflictHandler;
 import org.apache.jackrabbit.oak.plugins.index.IndexEditorProvider;
 import org.apache.jackrabbit.oak.plugins.index.nodetype.NodeTypeIndexProvider;
+import org.apache.jackrabbit.oak.plugins.index.property.OrderedPropertyIndexEditorProvider;
+import org.apache.jackrabbit.oak.plugins.index.property.OrderedPropertyIndexProvider;
 import org.apache.jackrabbit.oak.plugins.index.property.PropertyIndexEditorProvider;
 import org.apache.jackrabbit.oak.plugins.index.property.PropertyIndexProvider;
 import org.apache.jackrabbit.oak.plugins.index.reference.ReferenceEditorProvider;
@@ -39,23 +41,29 @@ import org.apache.jackrabbit.oak.plugins.name.NameValidatorProvider;
 import org.apache.jackrabbit.oak.plugins.name.NamespaceEditorProvider;
 import org.apache.jackrabbit.oak.plugins.nodetype.TypeEditorProvider;
 import org.apache.jackrabbit.oak.plugins.nodetype.write.InitialContent;
+import org.apache.jackrabbit.oak.plugins.observation.CommitRateLimiter;
 import org.apache.jackrabbit.oak.plugins.version.VersionEditorProvider;
+import org.apache.jackrabbit.oak.query.QueryEngineSettings;
 import org.apache.jackrabbit.oak.security.SecurityProviderImpl;
 import org.apache.jackrabbit.oak.spi.commit.CommitHook;
 import org.apache.jackrabbit.oak.spi.commit.ConflictHandler;
 import org.apache.jackrabbit.oak.spi.commit.Editor;
 import org.apache.jackrabbit.oak.spi.commit.EditorHook;
 import org.apache.jackrabbit.oak.spi.commit.EditorProvider;
+import org.apache.jackrabbit.oak.spi.commit.Observer;
 import org.apache.jackrabbit.oak.spi.lifecycle.RepositoryInitializer;
 import org.apache.jackrabbit.oak.spi.query.QueryIndexProvider;
 import org.apache.jackrabbit.oak.spi.security.SecurityProvider;
 import org.apache.jackrabbit.oak.spi.state.NodeStore;
 
 public class Jcr {
+    public static final int DEFAULT_OBSERVATION_QUEUE_LENGTH = 1000;
 
     private final Oak oak;
 
     private SecurityProvider securityProvider;
+    private int observationQueueLength = DEFAULT_OBSERVATION_QUEUE_LENGTH;
+    private CommitRateLimiter commitRateLimiter = null;
 
     public Jcr(Oak oak) {
         this.oak = oak;
@@ -78,7 +86,10 @@ public class Jcr {
         with(new PropertyIndexEditorProvider());
 
         with(new PropertyIndexProvider());
+        with(new OrderedPropertyIndexProvider());
         with(new NodeTypeIndexProvider());
+        
+        with(new OrderedPropertyIndexEditorProvider());
     }
 
     public Jcr() {
@@ -150,8 +161,34 @@ public class Jcr {
         return this;
     }
 
+    @Nonnull
+    public final Jcr with(@Nonnull Observer observer) {
+        oak.with(checkNotNull(observer));
+        return this;
+    }
+
+    @Nonnull
     public Jcr withAsyncIndexing() {
         oak.withAsyncIndexing();
+        return this;
+    }
+
+    @Nonnull
+    public Jcr withObservationQueueLength(int observationQueueLength) {
+        this.observationQueueLength = observationQueueLength;
+        return this;
+    }
+
+    @Nonnull
+    public Jcr with(CommitRateLimiter commitRateLimiter) {
+        oak.with(commitRateLimiter);
+        this.commitRateLimiter = commitRateLimiter;
+        return this;
+    }
+    
+    @Nonnull
+    public Jcr with(QueryEngineSettings qs) {
+        oak.with(qs);
         return this;
     }
 
@@ -159,7 +196,9 @@ public class Jcr {
         return new RepositoryImpl(
                 oak.createContentRepository(), 
                 oak.getWhiteboard(),
-                securityProvider);
+                securityProvider,
+                observationQueueLength,
+                commitRateLimiter);
     }
 
 }

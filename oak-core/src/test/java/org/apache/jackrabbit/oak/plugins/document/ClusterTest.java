@@ -88,7 +88,7 @@ public class ClusterTest {
 
         mk2.commit("/", "^\"test/x\":1", null, null);
         String n3 = mk3.getNodes("/test", mk3.getHeadRevision(), 0, 0, 10, null);
-        // mk3 didn't see the previous change yet; 
+        // mk3 didn't see the previous change yet;
         // it is questionable if this should prevent any changes to this node
         // (currently it does not)
         assertEquals("{\":childNodeCount\":0}", n3);
@@ -131,7 +131,7 @@ public class ClusterTest {
         assertEquals(1, c1.getId());
         c1.setLeaseTime(1);
         // this will quickly expire
-        c1.renewLease(1);
+        c1.renewLease();
         Thread.sleep(10);
         c2 = ClusterNodeInfo.getInstance(store, "m1", null);
         assertEquals(1, c2.getId());
@@ -416,7 +416,7 @@ public class ClusterTest {
         }
     }
 
-    private static class TrackingDiff extends DefaultNodeStateDiff {
+    static class TrackingDiff extends DefaultNodeStateDiff {
 
         final String path;
         final Set<String> added;

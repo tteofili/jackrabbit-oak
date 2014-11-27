@@ -24,6 +24,7 @@ import java.util.Set;
 
 import org.apache.jackrabbit.oak.api.PropertyValue;
 import org.apache.jackrabbit.oak.api.Tree;
+import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.namepath.JcrPathParser;
 import org.apache.jackrabbit.oak.namepath.NamePathMapper;
 import org.apache.jackrabbit.oak.query.ast.AndImpl;
@@ -36,6 +37,7 @@ import org.apache.jackrabbit.oak.query.ast.ComparisonImpl;
 import org.apache.jackrabbit.oak.query.ast.ConstraintImpl;
 import org.apache.jackrabbit.oak.query.ast.DescendantNodeImpl;
 import org.apache.jackrabbit.oak.query.ast.DescendantNodeJoinConditionImpl;
+import org.apache.jackrabbit.oak.query.ast.DynamicOperandImpl;
 import org.apache.jackrabbit.oak.query.ast.EquiJoinConditionImpl;
 import org.apache.jackrabbit.oak.query.ast.FullTextSearchImpl;
 import org.apache.jackrabbit.oak.query.ast.FullTextSearchScoreImpl;
@@ -58,6 +60,7 @@ import org.apache.jackrabbit.oak.query.ast.PropertyValueImpl;
 import org.apache.jackrabbit.oak.query.ast.SameNodeImpl;
 import org.apache.jackrabbit.oak.query.ast.SameNodeJoinConditionImpl;
 import org.apache.jackrabbit.oak.query.ast.SelectorImpl;
+import org.apache.jackrabbit.oak.query.ast.SimilarImpl;
 import org.apache.jackrabbit.oak.query.ast.SourceImpl;
 import org.apache.jackrabbit.oak.query.ast.UpperCaseImpl;
 import org.apache.jackrabbit.oak.query.index.FilterImpl;
@@ -67,8 +70,13 @@ import org.apache.jackrabbit.oak.query.plan.SelectorExecutionPlan;
 import org.apache.jackrabbit.oak.spi.query.Filter;
 import org.apache.jackrabbit.oak.spi.query.PropertyValues;
 import org.apache.jackrabbit.oak.spi.query.QueryIndex;
+import org.apache.jackrabbit.oak.spi.query.QueryIndex.AdvancedQueryIndex;
+import org.apache.jackrabbit.oak.spi.query.QueryIndex.IndexPlan;
+import org.apache.jackrabbit.oak.spi.query.QueryIndex.OrderEntry;
+import org.apache.jackrabbit.oak.spi.query.QueryIndex.OrderEntry.Order;
 import org.apache.jackrabbit.oak.spi.query.QueryIndexProvider;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
+import org.apache.jackrabbit.oak.spi.state.NodeStateUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -111,6 +119,13 @@ public class QueryImpl implements Query {
 
     private OrderingImpl[] orderings;
     private ColumnImpl[] columns;
+    
+    /**
+     * The columns that make a row distinct. This is all columns
+     * except for "jcr:score".
+     */
+    private boolean[] distinctColumns;
+    
     private boolean explain, measure;
     private boolean distinct;
     private long limit = Long.MAX_VALUE;
@@ -123,19 +138,31 @@ public class QueryImpl implements Query {
     
     private double estimatedCost;
 
+    private final QueryEngineSettings settings;
+
+    private boolean warnedHidden;
+
     QueryImpl(String statement, SourceImpl source, ConstraintImpl constraint,
-            ColumnImpl[] columns, NamePathMapper mapper) {
+            ColumnImpl[] columns, NamePathMapper mapper, QueryEngineSettings settings) {
         this.statement = statement;
         this.source = source;
         this.constraint = constraint;
         this.columns = columns;
         this.namePathMapper = mapper;
+        this.settings = settings;
     }
 
     @Override
     public void init() {
 
         final QueryImpl query = this;
+
+        if (constraint != null) {
+            // need to do this *before* the visitation below, as the
+            // simplify() method does not always keep the query reference
+            // passed in setQuery(). TODO: avoid that mutability concern
+            constraint = constraint.simplify();
+        }
 
         new AstVisitorBase() {
 
@@ -196,6 +223,13 @@ public class QueryImpl implements Query {
 
             @Override
             public boolean visit(NativeFunctionImpl node) {
+                node.setQuery(query);
+                node.bindSelector(source);
+                return super.visit(node);
+            }
+            
+            @Override
+            public boolean visit(SimilarImpl node) {
                 node.setQuery(query);
                 node.bindSelector(source);
                 return super.visit(node);
@@ -323,12 +357,19 @@ public class QueryImpl implements Query {
             }
 
         }.visit(this);
-        if (constraint != null) {
-            constraint = constraint.simplify();
-        }
+
         source.setQueryConstraint(constraint);
         for (ColumnImpl column : columns) {
             column.bindSelector(source);
+        }
+        distinctColumns = new boolean[columns.length];
+        for (int i = 0; i < columns.length; i++) {
+            ColumnImpl c = columns[i];
+            boolean distinct = true;
+            if (JCR_SCORE.equals(c.getPropertyName())) {
+                distinct = false;
+            }
+            distinctColumns[i] = distinct;
         }
     }
 
@@ -392,7 +433,7 @@ public class QueryImpl implements Query {
             ResultRowImpl r = new ResultRowImpl(this,
                     Tree.EMPTY_ARRAY,
                     new PropertyValue[] { PropertyValues.newString(plan)},
-                    null);
+                    null, null);
             return Arrays.asList(r).iterator();
         }
         if (LOG.isDebugEnabled()) {
@@ -400,9 +441,48 @@ public class QueryImpl implements Query {
             LOG.debug("query plan {}", getPlan());
         }
         RowIterator rowIt = new RowIterator(context.getBaseState());
-        Comparator<ResultRowImpl> orderBy = ResultRowImpl.getComparator(orderings);
+        Comparator<ResultRowImpl> orderBy;
+        boolean sortUsingIndex = false;
+        // TODO add issue about order by optimization for multiple selectors
+        if (orderings != null && selectors.size() == 1) {
+            IndexPlan plan = selectors.get(0).getExecutionPlan().getIndexPlan();
+            if (plan != null) {
+                List<OrderEntry> list = plan.getSortOrder();
+                if (list != null && list.size() == orderings.length) {
+                    sortUsingIndex = true;
+                    for (int i = 0; i < list.size(); i++) {
+                        OrderEntry e = list.get(i);
+                        OrderingImpl o = orderings[i];
+                        DynamicOperandImpl op = o.getOperand();
+                        if (!(op instanceof PropertyValueImpl)) {
+                            // ordered by a function: currently not supported
+                            sortUsingIndex = false;
+                            break;
+                        }
+                        // we only have one selector, so no need to check that
+                        // TODO support joins
+                        String pn = ((PropertyValueImpl) op).getPropertyName();
+                        if (!pn.equals(e.getPropertyName())) {
+                            // ordered by another property
+                            sortUsingIndex = false;
+                            break;
+                        }
+                        if (o.isDescending() != (e.getOrder() == Order.DESCENDING)) {
+                            // ordered ascending versus descending
+                            sortUsingIndex = false;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        if (sortUsingIndex) {
+            orderBy = null;
+        } else {
+            orderBy = ResultRowImpl.getComparator(orderings);
+        }
         Iterator<ResultRowImpl> it = 
-                FilterIterators.newCombinedFilter(rowIt, distinct, limit, offset, orderBy);
+                FilterIterators.newCombinedFilter(rowIt, distinct, limit, offset, orderBy, settings);
         if (measure) {
             // run the query
             while (it.hasNext()) {
@@ -419,7 +499,7 @@ public class QueryImpl implements Query {
                             PropertyValues.newString("query"),
                             PropertyValues.newLong(rowIt.getReadCount())
                         },
-                    null);
+                    null, null);
             list.add(r);
             for (SelectorImpl selector : selectors) {
                 r = new ResultRowImpl(this,
@@ -428,7 +508,7 @@ public class QueryImpl implements Query {
                                 PropertyValues.newString(selector.getSelectorName()),
                                 PropertyValues.newLong(selector.getScanCount()),
                             },
-                        null);
+                        null, null);
                 list.add(r);
             }
             it = list.iterator();
@@ -559,6 +639,11 @@ public class QueryImpl implements Query {
                         rowIndex++;
                         break;
                     }
+                    if (constraint != null && constraint.evaluateStop()) {
+                        current = null;
+                        end = true;
+                        break;
+                    }
                 } else {
                     current = null;
                     end = true;
@@ -621,7 +706,7 @@ public class QueryImpl implements Query {
                 orderValues[i] = orderings[i].getOperand().currentProperty();
             }
         }
-        return new ResultRowImpl(this, trees, values, orderValues);
+        return new ResultRowImpl(this, trees, values, distinctColumns, orderValues);
     }
 
     @Override
@@ -681,35 +766,97 @@ public class QueryImpl implements Query {
                 context.getIndexProvider(), traversalEnabled);
     }
 
-    private static SelectorExecutionPlan getBestSelectorExecutionPlan(
+    private SelectorExecutionPlan getBestSelectorExecutionPlan(
             NodeState rootState, FilterImpl filter,
             QueryIndexProvider indexProvider, boolean traversalEnabled) {
-        QueryIndex best = null;
+        QueryIndex bestIndex = null;
         if (LOG.isDebugEnabled()) {
             LOG.debug("cost using filter " + filter);
         }
 
         double bestCost = Double.POSITIVE_INFINITY;
+        IndexPlan bestPlan = null;
         for (QueryIndex index : indexProvider.getQueryIndexes(rootState)) {
-            double cost = index.getCost(filter, rootState);
+            double cost;
+            IndexPlan indexPlan = null;
+            if (index instanceof AdvancedQueryIndex) {
+                AdvancedQueryIndex advIndex = (AdvancedQueryIndex) index;
+                List<OrderEntry> sortOrder = null;
+                if (orderings != null) {
+                    sortOrder = new ArrayList<OrderEntry>();
+                    for (OrderingImpl o : orderings) {
+                        DynamicOperandImpl op = o.getOperand();
+                        if (!(op instanceof PropertyValueImpl)) {
+                            // ordered by a function: currently not supported
+                            break;
+                        }
+                        PropertyValueImpl p = (PropertyValueImpl) op;
+                        SelectorImpl s = p.getSelectors().iterator().next();
+                        if (!s.equals(filter.getSelector())) {
+                            // ordered by a different selector
+                            continue;
+                        }
+                        OrderEntry e = new OrderEntry(
+                                p.getPropertyName(), 
+                                Type.UNDEFINED, 
+                                o.isDescending() ? 
+                                OrderEntry.Order.DESCENDING : OrderEntry.Order.ASCENDING);
+                        sortOrder.add(e);
+                    }
+                    if (sortOrder.size() == 0) {
+                        sortOrder = null;
+                    }
+                }
+                long maxEntryCount = limit;
+                if (offset > 0) {
+                    if (offset + limit < 0) {
+                        // long overflow
+                        maxEntryCount = Long.MAX_VALUE;
+                    } else {
+                        maxEntryCount = offset + limit;
+                    }
+                }
+                List<IndexPlan> ipList = advIndex.getPlans(
+                        filter, sortOrder, rootState);
+                cost = Double.POSITIVE_INFINITY;
+                for (IndexPlan p : ipList) {
+                    // TODO limit is after all conditions
+                    long entryCount = Math.min(maxEntryCount, p.getEstimatedEntryCount());
+                    double c = p.getCostPerExecution() + entryCount * p.getCostPerEntry();
+                    if (c < cost) {
+                        cost = c;
+                        indexPlan = p;
+                    }
+                }
+            } else {
+                cost = index.getCost(filter, rootState);
+            }
             if (LOG.isDebugEnabled()) {
                 LOG.debug("cost for " + index.getIndexName() + " is " + cost);
             }
+            if (cost < 0) {
+                LOG.error("cost below 0 for " + index.getIndexName() + " is " + cost);
+            }
             if (cost < bestCost) {
                 bestCost = cost;
-                best = index;
+                bestIndex = index;
+                bestPlan = indexPlan;
             }
         }
 
         if (traversalEnabled) {
             QueryIndex traversal = new TraversingIndex();
             double cost = traversal.getCost(filter, rootState);
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("cost for " + traversal.getIndexName() + " is " + cost);
+            }
             if (cost < bestCost || bestCost == Double.POSITIVE_INFINITY) {
                 bestCost = cost;
-                best = traversal;
+                bestPlan = null;
+                bestIndex = traversal;
             }
         }
-        return new SelectorExecutionPlan(filter.getSelector(), best, bestCost);
+        return new SelectorExecutionPlan(filter.getSelector(), bestIndex, bestPlan, bestCost);
     }
 
     @Override
@@ -728,6 +875,13 @@ public class QueryImpl implements Query {
 
     @Override
     public Tree getTree(String path) {
+        if (NodeStateUtils.isHiddenPath(path)) {
+            if (!warnedHidden) {
+                warnedHidden = true;
+                LOG.warn("Hidden tree traversed: {}", path);
+            }
+            return null;
+        }
         return context.getRoot().getTree(path);
     }
 
@@ -787,6 +941,10 @@ public class QueryImpl implements Query {
 
     public String getStatement() {
         return statement;
+    }
+
+    public QueryEngineSettings getSettings() {
+        return settings;
     }
 
 }

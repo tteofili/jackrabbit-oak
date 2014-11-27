@@ -17,6 +17,7 @@
 package org.apache.jackrabbit.oak.plugins.nodetype;
 
 import java.util.List;
+import java.util.Set;
 
 import javax.jcr.PropertyType;
 import javax.jcr.Value;
@@ -32,8 +33,12 @@ import org.apache.jackrabbit.oak.spi.commit.DefaultEditor;
 import org.apache.jackrabbit.oak.spi.commit.Editor;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import static com.google.common.base.Preconditions.checkNotNull;
+import static com.google.common.base.Predicates.in;
+import static com.google.common.collect.Iterables.any;
 import static org.apache.jackrabbit.JcrConstants.JCR_ISMIXIN;
 import static org.apache.jackrabbit.JcrConstants.JCR_MIXINTYPES;
 import static org.apache.jackrabbit.JcrConstants.JCR_PRIMARYTYPE;
@@ -62,24 +67,38 @@ import static org.apache.jackrabbit.oak.plugins.nodetype.constraint.Constraints.
  */
 class TypeEditor extends DefaultEditor {
 
+    private static final Logger log = LoggerFactory.getLogger(TypeEditor.class);
+
+    private final boolean strict;
+
+    private final Set<String> typesToCheck;
+
+    private final boolean checkThisNode;
+
     private final TypeEditor parent;
 
     private final String nodeName;
 
     private final NodeState types;
 
-    private EffectiveType effective;
+    private final EffectiveType effective;
 
     private final NodeBuilder builder;
 
     TypeEditor(
-            NodeState types,
+            boolean strict, Set<String> typesToCheck, NodeState types,
             String primary, Iterable<String> mixins, NodeBuilder builder)
             throws CommitFailedException {
+        this.strict = strict;
+        this.typesToCheck = typesToCheck;
+        this.checkThisNode =
+                typesToCheck == null
+                || typesToCheck.contains(primary)
+                || any(mixins, in(typesToCheck));
         this.parent = null;
         this.nodeName = null;
         this.types = checkNotNull(types);
-        this.effective = getEffectiveType(primary, mixins);
+        this.effective = getEffectiveType(null, null, primary, mixins);
         this.builder = checkNotNull(builder);
     }
 
@@ -87,10 +106,17 @@ class TypeEditor extends DefaultEditor {
             TypeEditor parent, String name,
             String primary, Iterable<String> mixins, NodeBuilder builder)
             throws CommitFailedException {
+        this.strict = parent.strict;
+        this.typesToCheck = parent.typesToCheck;
+        this.checkThisNode =
+                typesToCheck == null
+                || typesToCheck.contains(primary)
+                || any(mixins, in(typesToCheck));
         this.parent = checkNotNull(parent);
         this.nodeName = checkNotNull(name);
         this.types = parent.types;
-        this.effective = getEffectiveType(primary, mixins);
+        this.effective =
+                getEffectiveType(parent.effective, name, primary, mixins);
         this.builder = checkNotNull(builder);
     }
 
@@ -98,6 +124,9 @@ class TypeEditor extends DefaultEditor {
      * Test constructor.
      */
     TypeEditor(EffectiveType effective) {
+        this.strict = true;
+        this.typesToCheck = null;
+        this.checkThisNode = true;
         this.parent = null;
         this.nodeName = null;
         this.types = EMPTY_NODE;
@@ -105,13 +134,25 @@ class TypeEditor extends DefaultEditor {
         this.builder = EMPTY_NODE.builder();
     }
 
-    private CommitFailedException constraintViolation(
-            int code, String message) {
+    /**
+     * Throws or logs the specified constraint violation.
+     *
+     * @param code code of this violation
+     * @param message description of the violation
+     * @throws CommitFailedException the constraint violation
+     */
+    private void constraintViolation(int code, String message)
+            throws CommitFailedException {
+        String path = getPath();
         if (effective != null) {
-            return effective.constraintViolation(code, getPath(), message);
+            path = path + "[" + effective + "]";
+        }
+        CommitFailedException exception = new CommitFailedException(
+                CONSTRAINT, code, path + ": " + message);
+        if (strict) {
+            throw exception;
         } else {
-            return new CommitFailedException(
-                    CONSTRAINT, 0, getPath() + ": " + message);
+            log.warn(exception.getMessage());
         }
     }
 
@@ -134,20 +175,22 @@ class TypeEditor extends DefaultEditor {
     @Override
     public void propertyChanged(PropertyState before, PropertyState after)
             throws CommitFailedException {
-        NodeState definition = effective.getDefinition(after);
-        if (definition == null) {
-            throw constraintViolation(
-                    4, "No matching property definition found for " + after);
-        } else if (JCR_UUID.equals(after.getName())
-                && effective.isNodeType(MIX_REFERENCEABLE)) {
-            // special handling for the jcr:uuid property of mix:referenceable
-            // TODO: this should be done in a pluggable extension
-            if (!isValidUUID(after.getValue(Type.STRING))) {
-                throw constraintViolation(
-                        12, "Invalid UUID value in the jcr:uuid property");
+        if (checkThisNode) {
+            NodeState definition = effective.getDefinition(after);
+            if (definition == null) {
+                constraintViolation(
+                        4, "No matching property definition found for " + after);
+            } else if (JCR_UUID.equals(after.getName())
+                    && effective.isNodeType(MIX_REFERENCEABLE)) {
+                // special handling for the jcr:uuid property of mix:referenceable
+                // TODO: this should be done in a pluggable extension
+                if (!isValidUUID(after.getValue(Type.STRING))) {
+                    constraintViolation(
+                            12, "Invalid UUID value in the jcr:uuid property");
+                }
+            } else {
+                checkValueConstraints(definition, after);
             }
-        } else {
-            checkValueConstraints(definition, after);
         }
     }
 
@@ -155,8 +198,8 @@ class TypeEditor extends DefaultEditor {
     public void propertyDeleted(PropertyState before)
             throws CommitFailedException {
         String name = before.getName();
-        if (effective.isMandatoryProperty(name)) {
-            throw constraintViolation(
+        if (checkThisNode && effective.isMandatoryProperty(name)) {
+            constraintViolation(
                     22, "Mandatory property " + name + " can not be removed");
         }
     }
@@ -166,21 +209,23 @@ class TypeEditor extends DefaultEditor {
             throws CommitFailedException {
         TypeEditor editor = childNodeChanged(name, MISSING_NODE, after);
 
-        // TODO: add any auto-created items that are still missing
+        if (editor.checkThisNode) {
+            // TODO: add any auto-created items that are still missing
 
-        // verify the presence of all mandatory items
-        for (String property : editor.effective.getMandatoryProperties()) {
-            if (!after.hasProperty(property)) {
-                throw editor.constraintViolation(
-                        21, "Mandatory property " + property
-                        + " not found in a new node");
+            // verify the presence of all mandatory items
+            for (String property : editor.effective.getMandatoryProperties()) {
+                if (!after.hasProperty(property)) {
+                    editor.constraintViolation(
+                            21, "Mandatory property " + property
+                            + " not found in a new node");
+                }
             }
-        }
-        for (String child : editor.effective.getMandatoryChildNodes()) {
-            if (!after.hasChildNode(child)) {
-                throw editor.constraintViolation(
-                        25, "Mandatory child node " + child
-                        + " not found in a new node");
+            for (String child : editor.effective.getMandatoryChildNodes()) {
+                if (!after.hasChildNode(child)) {
+                    editor.constraintViolation(
+                            25, "Mandatory child node " + child
+                            + " not found in a new node");
+                }
             }
         }
 
@@ -195,13 +240,13 @@ class TypeEditor extends DefaultEditor {
         Iterable<String> mixins = after.getNames(JCR_MIXINTYPES);
 
         NodeBuilder childBuilder = builder.getChildNode(name);
-        if (primary == null) {
+        if (primary == null && effective != null) {
             // no primary type defined, find and apply a default type
             primary = effective.getDefaultType(name);
             if (primary != null) {
                 builder.setProperty(JCR_PRIMARYTYPE, primary, NAME);
             } else {
-                throw constraintViolation(
+                constraintViolation(
                         4, "No default primary type available "
                         + " for child node " + name);
             }
@@ -209,44 +254,53 @@ class TypeEditor extends DefaultEditor {
 
         TypeEditor editor =
                 new TypeEditor(this, name, primary, mixins, childBuilder);
-        if (!effective.isValidChildNode(name, editor.effective)) {
-            throw constraintViolation(
+        if (checkThisNode
+                && !effective.isValidChildNode(name, editor.effective)) {
+            constraintViolation(
                     1, "No matching definition found for child node " + name
                     + " with effective type " + editor.effective);
         }
-
         return editor;
     }
 
     @Override
     public Editor childNodeDeleted(String name, NodeState before)
             throws CommitFailedException {
-        if (effective.isMandatoryChildNode(name)) {
-            throw constraintViolation(
+        if (checkThisNode && effective.isMandatoryChildNode(name)) {
+            constraintViolation(
                      26, "Mandatory child node " + name + " can not be removed");
-        } else {
-            return null; // no further checking needed for the removed subtree
         }
+        return null; // no further checking needed for the removed subtree
     }
 
     //-----------------------------------------------------------< private >--
 
     private EffectiveType getEffectiveType(
+            EffectiveType parent, String name,
             String primary, Iterable<String> mixins)
             throws CommitFailedException {
         List<NodeState> list = Lists.newArrayList();
 
         NodeState type = types.getChildNode(primary);
         if (!type.exists()) {
-            throw constraintViolation(
+            constraintViolation(
                     1, "The primary type " + primary + " does not exist");
         } else if (type.getBoolean(JCR_ISMIXIN)) {
-            throw constraintViolation(
+            constraintViolation(
                     2, "Mixin type " + primary + " used as the primary type");
-        } else if (type.getBoolean(JCR_IS_ABSTRACT)) {
-            throw constraintViolation(
-                    3, "Abstract type " + primary + " used as the primary type");
         } else {
+            if (type.getBoolean(JCR_IS_ABSTRACT)) {
+                if (parent != null && primary.equals(parent.getDefaultType(name))) {
+                    // OAK-1013: Allow (with a warning) an abstract primary
+                    // type if it's the default type implied by the parent node
+                    log.warn("Abstract type " + primary
+                            + " used as the default primary type of node "
+                            + getPath());
+                } else {
+                    constraintViolation(
+                            2, "Abstract type " + primary + " used as the primary type");
+                }
+            }
             list.add(type);
         }
 
@@ -254,13 +308,13 @@ class TypeEditor extends DefaultEditor {
         for (String mixin : mixins) {
             type = types.getChildNode(mixin);
             if (!type.exists()) {
-                throw constraintViolation(
+                constraintViolation(
                         5, "The mixin type " + mixin + " does not exist");
             } else if (!type.getBoolean(JCR_ISMIXIN)) {
-                throw constraintViolation(
+                constraintViolation(
                         6, "Primary type " + mixin + " used as a mixin type");
             } else if (type.getBoolean(JCR_IS_ABSTRACT)) {
-                throw constraintViolation(
+                constraintViolation(
                         7, "Abstract type " + mixin + " used as a mixin type");
             } else {
                 list.add(type);
@@ -326,7 +380,7 @@ class TypeEditor extends DefaultEditor {
                 }
             }
         }
-        throw constraintViolation(5, "Value constraint violation in " + property);
+        constraintViolation(5, "Value constraint violation in " + property);
     }
 
 }

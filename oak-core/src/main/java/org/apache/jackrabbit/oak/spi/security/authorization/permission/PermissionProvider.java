@@ -24,7 +24,10 @@ import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Tree;
 
 /**
- * TODO
+ * Main entry point for permission evaluation in Oak. This provider covers
+ * permission validation upon read and write access on the Oak API as well as
+ * the various permission related methods defined by the JCR API, namely on
+ * {@link javax.jcr.security.AccessControlManager} and {@link javax.jcr.Session}.
  *
  * @see org.apache.jackrabbit.oak.spi.security.authorization.AuthorizationConfiguration#getPermissionProvider(org.apache.jackrabbit.oak.api.Root, String, java.util.Set)
  */
@@ -43,7 +46,7 @@ public interface PermissionProvider {
      * specified {@code Tree}.
      *
      * @param tree The {@code tree} for which the privileges should be retrieved.
-     * @return
+     * @return set of privilege names
      */
     @Nonnull
     Set<String> getPrivileges(@Nullable Tree tree);
@@ -73,10 +76,11 @@ public interface PermissionProvider {
      * @return The {@link org.apache.jackrabbit.oak.spi.security.authorization.permission.RepositoryPermission}
      * for the set of {@code Principal}s this provider instance has been created for.
      */
+    @Nonnull
     RepositoryPermission getRepositoryPermission();
 
     /**
-     * Return the {@coe TreePermission} for the set of {@code Principal}s associated
+     * Return the {@code TreePermission} for the set of {@code Principal}s associated
      * with this provider at the specified {@code tree}.
      *
      * @param tree The tree for which the {@code TreePermission} object should be built.
@@ -84,6 +88,7 @@ public interface PermissionProvider {
      * obtained before for the parent tree.
      * @return The {@code TreePermission} object for the specified {@code tree}.
      */
+    @Nonnull
     TreePermission getTreePermission(@Nonnull Tree tree, @Nonnull TreePermission parentPermission);
 
     /**

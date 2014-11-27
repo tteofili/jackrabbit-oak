@@ -17,30 +17,54 @@
 package org.apache.jackrabbit.oak.plugins.segment;
 
 import static com.google.common.base.Preconditions.checkState;
+import static org.apache.jackrabbit.oak.commons.PropertiesUtil.toBoolean;
+import static org.apache.jackrabbit.oak.spi.whiteboard.WhiteboardUtils.registerMBean;
 
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
 import java.util.Dictionary;
+import java.util.Hashtable;
 
+import org.apache.commons.io.FilenameUtils;
 import org.apache.felix.scr.annotations.Activate;
 import org.apache.felix.scr.annotations.Component;
 import org.apache.felix.scr.annotations.ConfigurationPolicy;
 import org.apache.felix.scr.annotations.Deactivate;
 import org.apache.felix.scr.annotations.Property;
-import org.apache.felix.scr.annotations.Service;
+import org.apache.felix.scr.annotations.Reference;
+import org.apache.felix.scr.annotations.ReferenceCardinality;
+import org.apache.felix.scr.annotations.ReferencePolicy;
+import org.apache.jackrabbit.oak.api.jmx.CheckpointMBean;
 import org.apache.jackrabbit.oak.osgi.ObserverTracker;
+import org.apache.jackrabbit.oak.osgi.OsgiWhiteboard;
+import org.apache.jackrabbit.oak.plugins.blob.BlobGC;
+import org.apache.jackrabbit.oak.plugins.blob.BlobGCMBean;
+import org.apache.jackrabbit.oak.plugins.blob.BlobGarbageCollector;
+import org.apache.jackrabbit.oak.plugins.blob.MarkSweepGarbageCollector;
 import org.apache.jackrabbit.oak.plugins.segment.file.FileStore;
+import org.apache.jackrabbit.oak.spi.blob.BlobStore;
+import org.apache.jackrabbit.oak.spi.blob.GarbageCollectableBlobStore;
 import org.apache.jackrabbit.oak.spi.commit.Observable;
 import org.apache.jackrabbit.oak.spi.commit.Observer;
 import org.apache.jackrabbit.oak.spi.state.NodeStore;
 import org.apache.jackrabbit.oak.spi.state.ProxyNodeStore;
+import org.apache.jackrabbit.oak.spi.state.RevisionGC;
+import org.apache.jackrabbit.oak.spi.state.RevisionGCMBean;
+import org.apache.jackrabbit.oak.spi.whiteboard.Registration;
+import org.apache.jackrabbit.oak.spi.whiteboard.WhiteboardExecutor;
+import org.osgi.framework.Constants;
+import org.osgi.framework.ServiceRegistration;
 import org.osgi.service.component.ComponentContext;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+/**
+ * An OSGi wrapper for the segment node store.
+ */
 @Component(policy = ConfigurationPolicy.REQUIRE)
-@Service(NodeStore.class)
 public class SegmentNodeStoreService extends ProxyNodeStore
-        implements Observable {
+        implements Observable, SegmentStoreProvider {
 
     @Property(description="The unique name of this instance")
     public static final String NAME = "name";
@@ -57,6 +81,18 @@ public class SegmentNodeStoreService extends ProxyNodeStore
     @Property(description="Cache size (MB)", intValue=256)
     public static final String CACHE = "cache";
 
+    @Property(description = "TarMK compaction paused flag", boolValue = true)
+    public static final String PAUSE_COMPACTION = "pauseCompaction";
+
+    @Property(description = "Flag indicating that this component will not register as a NodeStore but just as a NodeStoreProvider", boolValue = false)
+    public static final String STANDBY = "standby";
+    /**
+     * Boolean value indicating a blobStore is to be used
+     */
+    public static final String CUSTOM_BLOB_STORE = "customBlobStore";
+
+    private final Logger log = LoggerFactory.getLogger(getClass());
+
     private String name;
 
     private SegmentStore store;
@@ -65,6 +101,20 @@ public class SegmentNodeStoreService extends ProxyNodeStore
 
     private ObserverTracker observerTracker;
 
+    private ComponentContext context;
+
+    @Reference(cardinality = ReferenceCardinality.OPTIONAL_UNARY,
+            policy = ReferencePolicy.DYNAMIC)
+    private volatile BlobStore blobStore;
+
+    private ServiceRegistration storeRegistration;
+    private ServiceRegistration providerRegistration;
+    private Registration checkpointRegistration;
+    private Registration revisionGCRegistration;
+    private Registration blobGCRegistration;
+    private WhiteboardExecutor executor;
+    private boolean customBlobStore;
+
     @Override
     protected synchronized SegmentNodeStore getNodeStore() {
         checkState(delegate != null, "service must be activated when used");
@@ -72,14 +122,32 @@ public class SegmentNodeStoreService extends ProxyNodeStore
     }
 
     @Activate
-    public synchronized void activate(ComponentContext context)
+    private void activate(ComponentContext context) throws IOException {
+        this.context = context;
+        this.customBlobStore = Boolean.parseBoolean(lookup(context, CUSTOM_BLOB_STORE));
+
+        if(blobStore == null && customBlobStore){
+            log.info("BlobStore use enabled. SegmentNodeStore would be initialized when BlobStore would be available");
+        }else{
+            registerNodeStore();
+        }
+    }
+
+    public synchronized void registerNodeStore()
             throws IOException {
+        if(context == null){
+            log.info("Component still not activated. Ignoring the initialization call");
+            return;
+        }
+
         Dictionary<?, ?> properties = context.getProperties();
-        name = "" + properties.get(NAME);
+        name = String.valueOf(properties.get(NAME));
 
         String directory = lookup(context, DIRECTORY);
         if (directory == null) {
             directory = "tarmk";
+        }else{
+            directory = FilenameUtils.concat(directory, "segmentstore");
         }
 
         String mode = lookup(context, MODE);
@@ -93,13 +161,64 @@ public class SegmentNodeStoreService extends ProxyNodeStore
             size = System.getProperty(SIZE, "256");
         }
 
-        store = new FileStore(
-                new File(directory),
-                Integer.parseInt(size), "64".equals(mode));
+        boolean pauseCompaction = toBoolean(lookup(context, PAUSE_COMPACTION), true);
+        boolean memoryMapping = "64".equals(mode);
+        if (customBlobStore) {
+            log.info("Initializing SegmentNodeStore with BlobStore [{}]", blobStore);
+            store = new FileStore(blobStore, new File(directory),
+                    Integer.parseInt(size), memoryMapping)
+                    .setPauseCompaction(pauseCompaction);
+        } else {
+            store = new FileStore(new File(directory), Integer.parseInt(size),
+                    memoryMapping).setPauseCompaction(pauseCompaction);
+        }
 
         delegate = new SegmentNodeStore(store);
         observerTracker = new ObserverTracker(delegate);
         observerTracker.start(context.getBundleContext());
+
+        Dictionary<String, String> props = new Hashtable<String, String>();
+        props.put(Constants.SERVICE_PID, SegmentNodeStore.class.getName());
+
+        boolean standby = toBoolean(lookup(context, STANDBY), false);
+        providerRegistration = context.getBundleContext().registerService(SegmentStoreProvider.class.getName(), this, props);
+        if (!standby) {
+            storeRegistration = context.getBundleContext().registerService(NodeStore.class.getName(), this, props);
+        }
+
+        OsgiWhiteboard whiteboard = new OsgiWhiteboard(context.getBundleContext());
+        executor = new WhiteboardExecutor();
+        executor.start(whiteboard);
+
+        checkpointRegistration = registerMBean(whiteboard, CheckpointMBean.class, new SegmentCheckpointMBean(delegate),
+                CheckpointMBean.TYPE, "Segment node store checkpoint management");
+
+        RevisionGC revisionGC = new RevisionGC(new Runnable() {
+            @Override
+            public void run() {
+                store.gc();
+            }
+        }, executor);
+        revisionGCRegistration = registerMBean(whiteboard, RevisionGCMBean.class, revisionGC,
+                RevisionGCMBean.TYPE, "Segment node store revision garbage collection");
+
+        if (store.getBlobStore() instanceof GarbageCollectableBlobStore) {
+            BlobGarbageCollector gc = new BlobGarbageCollector() {
+                @Override
+                public void collectGarbage() throws Exception {
+                    MarkSweepGarbageCollector gc = new MarkSweepGarbageCollector(
+                            new SegmentBlobReferenceRetriever(store.getTracker()),
+                            (GarbageCollectableBlobStore) store.getBlobStore(),
+                            executor);
+                    gc.collectGarbage();
+                }
+            };
+
+            blobGCRegistration = registerMBean(whiteboard, BlobGCMBean.class, new BlobGC(gc, executor),
+                    BlobGCMBean.TYPE, "Segment node store blob garbage collection");
+        }
+
+        log.info("SegmentNodeStore initialized");
     }
 
     private static String lookup(ComponentContext context, String property) {
@@ -107,18 +226,65 @@ public class SegmentNodeStoreService extends ProxyNodeStore
             return context.getProperties().get(property).toString();
         }
         if (context.getBundleContext().getProperty(property) != null) {
-            return context.getBundleContext().getProperty(property).toString();
+            return context.getBundleContext().getProperty(property);
         }
         return null;
     }
 
     @Deactivate
     public synchronized void deactivate() {
+        unregisterNodeStore();
+
         observerTracker.stop();
         delegate = null;
 
         store.close();
         store = null;
+    }
+
+    protected void bindBlobStore(BlobStore blobStore) throws IOException {
+        this.blobStore = blobStore;
+        registerNodeStore();
+    }
+
+    protected void unbindBlobStore(BlobStore blobStore){
+        this.blobStore = null;
+        unregisterNodeStore();
+    }
+
+    private void unregisterNodeStore() {
+        if(providerRegistration != null){
+            providerRegistration.unregister();
+            providerRegistration = null;
+        }
+        if(storeRegistration != null){
+            storeRegistration.unregister();
+            storeRegistration = null;
+        }
+        if (checkpointRegistration != null) {
+            checkpointRegistration.unregister();
+            checkpointRegistration = null;
+        }
+        if (revisionGCRegistration != null) {
+            revisionGCRegistration.unregister();
+            revisionGCRegistration = null;
+        }
+        if (blobGCRegistration != null) {
+            blobGCRegistration.unregister();
+            blobGCRegistration = null;
+        }
+        if (executor != null) {
+            executor.stop();
+            executor = null;
+        }
+    }
+
+    /**
+     * needed for situations where you have to unwrap the
+     * SegmentNodeStoreService, to get the SegmentStore, like the failover
+     */
+    public SegmentStore getSegmentStore() {
+        return store;
     }
 
     //------------------------------------------------------------< Observable >---
@@ -134,5 +300,4 @@ public class SegmentNodeStoreService extends ProxyNodeStore
     public String toString() {
         return name + ": " + delegate;
     }
-
 }
