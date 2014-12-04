@@ -99,11 +99,11 @@ class IndexPlanner {
     }
 
     private IndexPlan.Builder getPlanBuilder() {
-        log.debug("Evaluating plan with index definition {}", defn);
+        log.trace("Evaluating plan with index definition {}", defn);
         FullTextExpression ft = filter.getFullTextConstraint();
 
         if (!defn.getVersion().isAtLeast(IndexFormatVersion.V2)){
-            log.debug("Index is old format. Not supported");
+            log.trace("Index is old format. Not supported");
             return null;
         }
 
@@ -177,7 +177,7 @@ class IndexPlanner {
                 result.enableNonFullTextConstraints();
             }
 
-            return plan.setCostPerEntry(1.0 / costPerEntryFactor);
+            return plan.setCostPerEntry(defn.getCostPerEntry() / costPerEntryFactor);
         }
 
         //TODO Support for property existence queries
@@ -267,8 +267,8 @@ class IndexPlanner {
 
     private IndexPlan.Builder defaultPlan() {
         return new IndexPlan.Builder()
-                .setCostPerExecution(1) // we're local. Low-cost
-                .setCostPerEntry(1)
+                .setCostPerExecution(defn.getCostPerExecution())
+                .setCostPerEntry(defn.getCostPerEntry())
                 .setFulltextIndex(defn.isFullTextEnabled())
                 .setIncludesNodeData(false) // we should not include node data
                 .setFilter(filter)
@@ -284,7 +284,7 @@ class IndexPlanner {
         //to be compared fairly
         FullTextExpression ft = filter.getFullTextConstraint();
         if (ft != null && defn.isFullTextEnabled()){
-            return getReader().numDocs();
+            return defn.getFulltextEntryCount(getReader().numDocs());
         }
         return Math.min(defn.getEntryCount(), getReader().numDocs());
     }
@@ -331,11 +331,13 @@ class IndexPlanner {
                     //some condition defined. So again find a rule which applies
                     IndexingRule matchingRule = defn.getApplicableIndexingRule(rule.getNodeTypeName());
                     if (matchingRule != null){
+                        log.debug("Applicable IndexingRule found {}", matchingRule);
                         return rule;
                     }
                 }
             }
-            log.debug("No applicable IndexingRule found for any of the superTypes {}", filter.getSupertypes());
+            log.trace("No applicable IndexingRule found for any of the superTypes {}",
+                filter.getSupertypes());
         }
         return null;
     }

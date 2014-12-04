@@ -126,11 +126,6 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
     public static final String COLLISIONS = "_collisions";
 
     /**
-     * Optional counter for changes to {@link #COLLISIONS} map.
-     */
-    public static final String COLLISIONSMODCOUNT = "_collisionsModCount";
-
-    /**
      * The modified time in seconds (5 second resolution).
      */
     public static final String MODIFIED_IN_SECS = "_modified";
@@ -318,7 +313,7 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
      * Properties to ignore when a document is split (see OAK-2044).
      */
     static final Set<String> IGNORE_ON_SPLIT = ImmutableSet.of(
-            ID, MOD_COUNT, COLLISIONSMODCOUNT, MODIFIED_IN_SECS, PREVIOUS, LAST_REV, CHILDREN_FLAG,
+            ID, MOD_COUNT, MODIFIED_IN_SECS, PREVIOUS, LAST_REV, CHILDREN_FLAG,
             HAS_BINARY_FLAG, PATH, DELETED_ONCE, COLLISIONS);
 
     public static final long HAS_BINARY_VAL = 1;
@@ -542,6 +537,26 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
             }
         }
         return false;
+    }
+
+    /**
+     * Returns the commit revision for the change with the given revision.
+     *
+     * @param revision the revision of a change.
+     * @return the commit revision of the change or {@code null} if the change
+     *          is not committed or unknown.
+     */
+    @CheckForNull
+    public Revision getCommitRevision(@Nonnull Revision revision) {
+        NodeDocument commitRoot = getCommitRoot(checkNotNull(revision));
+        if (commitRoot == null) {
+            return null;
+        }
+        String value = commitRoot.getCommitValue(revision);
+        if (Utils.isCommitted(value)) {
+            return Utils.resolveCommitRevision(revision, value);
+        }
+        return null;
     }
 
     /**
