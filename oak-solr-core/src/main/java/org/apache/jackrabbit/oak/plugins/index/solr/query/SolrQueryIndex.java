@@ -23,7 +23,10 @@ import java.util.Deque;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import javax.annotation.CheckForNull;
 
 import com.google.common.collect.AbstractIterator;
@@ -68,6 +71,7 @@ public class SolrQueryIndex implements FulltextQueryIndex {
 
     private static final String NATIVE_SOLR_QUERY = "native*solr";
     private static final String NATIVE_LUCENE_QUERY = "native*lucene";
+    private static final Pattern FACET_REGEX = Pattern.compile("facet\\((\\w+(\\:\\w+)?)\\)");
 
     public static final String TYPE = "solr";
 
@@ -173,6 +177,7 @@ public class SolrQueryIndex implements FulltextQueryIndex {
                 for (String facetField : facetFieldsString.split(",")) {
                     solrQuery.addFacetField(facetField);
                 }
+                solrQuery.setFacetMinCount(1);
             }
         }
 
@@ -486,14 +491,14 @@ public class SolrQueryIndex implements FulltextQueryIndex {
                 protected SolrResultRow computeNext() {
                     if (!queue.isEmpty() || loadDocs()) {
                         return queue.remove();
-                    } else if (facetFields != null && lastFacet < facetFields.size()) {
-                        lastFacet++;
-                        return new SolrResultRow(facetFields.get(lastFacet - 1));
+//                    } else if (facetFields != null && lastFacet < facetFields.size()) {
+//                        lastFacet++;
+//                        return new SolrResultRow(facetFields.get(lastFacet - 1));
                     }
                     return endOfData();
                 }
 
-                private SolrResultRow convertToRow(SolrDocument doc) throws IOException {
+                private SolrResultRow convertToRow(SolrDocument doc, List<FacetField> facetFields) throws IOException {
                     String path = String.valueOf(doc.getFieldValue(configuration.getPathField()));
                     if (path != null) {
                         if ("".equals(path)) {
@@ -513,7 +518,7 @@ public class SolrQueryIndex implements FulltextQueryIndex {
                         if (scoreObj != null) {
                             score = (Float) scoreObj;
                         }
-                        return new SolrResultRow(path, score, doc);
+                        return new SolrResultRow(path, score, doc, facetFields);
                     }
                     return null;
                 }
@@ -549,7 +554,7 @@ public class SolrQueryIndex implements FulltextQueryIndex {
                         }
 
                         for (SolrDocument doc : docs) {
-                            SolrResultRow row = convertToRow(doc);
+                            SolrResultRow row = convertToRow(doc, facetFields);
                             if (row != null) {
                                 queue.add(row);
                             }
@@ -578,7 +583,7 @@ public class SolrQueryIndex implements FulltextQueryIndex {
         String path;
         double score;
         SolrDocument doc;
-        FacetField facetField;
+        List<FacetField> facetFields;
 
         SolrResultRow(String path, double score) {
             this.path = path;
@@ -591,9 +596,11 @@ public class SolrQueryIndex implements FulltextQueryIndex {
             this.doc = doc;
         }
 
-        SolrResultRow(FacetField facetField) {
-            this.facetField = facetField;
-            this.path = "/facet(" + facetField.toString() + ")";
+        SolrResultRow(String path, double score, SolrDocument doc, List<FacetField> facetFields) {
+            this.path = path;
+            this.score = score;
+            this.doc = doc;
+            this.facetFields = facetFields;
         }
 
         @Override
@@ -659,15 +666,22 @@ public class SolrQueryIndex implements FulltextQueryIndex {
 
                 @Override
                 public PropertyValue getValue(String columnName) {
-                    System.out.println(columnName);
                     // overlay the score
                     if (QueryImpl.JCR_SCORE.equals(columnName)) {
                         return PropertyValues.newDouble(currentRow.score);
                     }
-                    if (columnName.matches("facet\\((\\w+)\\)")) { // facets
-                        String facetFieldName = columnName.substring(columnName.indexOf('(') + 1, columnName.lastIndexOf(')'));
-                        FacetField facetField = currentRow.facetField;
-                        if (facetField != null && facetFieldName.equals(facetField.getName())) {
+                    Matcher m = FACET_REGEX.matcher(columnName);
+                    if (m.matches()) { // facets
+                        String facetFieldName = m.group(1);
+                        FacetField facetField = null;
+                        for (FacetField ff : currentRow.facetFields) {
+                            if (ff.getName().equals(facetFieldName)) {
+                                facetField = ff;
+                                break;
+                            }
+                        }
+
+                        if (facetField != null) {
                             return PropertyValues.newString(facetField.toString());
                         } else {
                             return null;
