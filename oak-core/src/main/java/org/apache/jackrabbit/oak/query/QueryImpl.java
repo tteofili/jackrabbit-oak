@@ -896,7 +896,7 @@ public class QueryImpl implements Query {
         if (path == null) {
             return null;
         }
-        if (!JcrPathParser.validate(path)) {
+        if (!JcrPathParser.validate(path) && !path.startsWith("facet(")) {
             throw new IllegalArgumentException("Invalid path: " + path);
         }
         String p = namePathMapper.getOakPath(path);
