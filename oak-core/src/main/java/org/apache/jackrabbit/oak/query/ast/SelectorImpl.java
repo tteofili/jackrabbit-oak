@@ -619,11 +619,8 @@ public class SelectorImpl extends SourceImpl {
     
     private PropertyValue currentOakProperty(Tree t, String oakPropertyName, Integer propertyType) {
         PropertyValue result;
-//        if (oakPropertyName.startsWith("facet(") && oakPropertyName.endsWith(")")) {
-//            System.out.println("check facets ACLs!");
-//        }
         if (oakPropertyName.startsWith("facet(") && oakPropertyName.endsWith(")")) {
-            result = currentRow.getValue(oakPropertyName);
+            result = currentRow.getValue(oakPropertyName); // TODO : check ACLs
         } else if (t == null || !t.exists()) {
 //        if (t == null || !t.exists()) {
             return null;
