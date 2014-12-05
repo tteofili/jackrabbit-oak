@@ -167,19 +167,21 @@ public class SolrQueryIndex implements FulltextQueryIndex {
         }
 
         // facet enable
-        String facetFunctionStartToken = "facet(";
         String queryStatement = filter.getQueryStatement();
         if (queryStatement != null) {
-            int facetTokenIndex = queryStatement.indexOf(facetFunctionStartToken);
-            if (facetTokenIndex > -1) {
-                String facetFieldsString = queryStatement.substring(facetTokenIndex +
-                        facetFunctionStartToken.length(), queryStatement.indexOf(")", facetTokenIndex));
-                for (String facetField : facetFieldsString.split(",")) {
-                    solrQuery.addFacetField(facetField);
-                }
+            Matcher matcher = FACET_REGEX.matcher(queryStatement);
+
+            int start = 0;
+            while (matcher.find(start)) {
+                String facetField = matcher.group(1);
+                solrQuery.addFacetField(facetField);
+                start = matcher.end();
+            }
+            if (start > 0) {
                 solrQuery.setFacetMinCount(1);
             }
         }
+
 
         Collection<Filter.PropertyRestriction> propertyRestrictions = filter.getPropertyRestrictions();
         if (propertyRestrictions != null && !propertyRestrictions.isEmpty()) {
@@ -491,9 +493,6 @@ public class SolrQueryIndex implements FulltextQueryIndex {
                 protected SolrResultRow computeNext() {
                     if (!queue.isEmpty() || loadDocs()) {
                         return queue.remove();
-//                    } else if (facetFields != null && lastFacet < facetFields.size()) {
-//                        lastFacet++;
-//                        return new SolrResultRow(facetFields.get(lastFacet - 1));
                     }
                     return endOfData();
                 }
