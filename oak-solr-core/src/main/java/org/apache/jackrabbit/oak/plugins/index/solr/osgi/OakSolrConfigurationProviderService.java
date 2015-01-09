@@ -98,6 +98,9 @@ public class OakSolrConfigurationProviderService implements OakSolrConfiguration
             "mappings from JCR property names to Solr fields")
     private static final String PROPERTY_MAPPINGS = "property.mappings";
 
+    @Property(intValue = SolrServerConfigurationDefaults.ACL_CHECK_PATH_DEPTH, label = "ACL check path depth")
+    private static final String ACL_CHECK_PATH_DEPTH = "acl.check.path.depth";
+
     private String pathChildrenFieldName;
     private String pathParentFieldName;
     private String pathDescendantsFieldName;
@@ -105,6 +108,7 @@ public class OakSolrConfigurationProviderService implements OakSolrConfiguration
     private String catchAllField;
     private CommitPolicy commitPolicy;
     private int rows;
+    private int aclCheckPathDepth;
     private boolean useForPathRestrictions;
     private boolean useForPropertyRestrictions;
     private boolean useForPrimaryTypes;
@@ -122,6 +126,7 @@ public class OakSolrConfigurationProviderService implements OakSolrConfiguration
         pathDescendantsFieldName = String.valueOf(componentContext.getProperties().get(PATH_DESCENDANTS_FIELD));
         catchAllField = String.valueOf(componentContext.getProperties().get(CATCH_ALL_FIELD));
         rows = Integer.parseInt(String.valueOf(componentContext.getProperties().get(ROWS)));
+        aclCheckPathDepth = Integer.parseInt(String.valueOf(componentContext.getProperties().get(ACL_CHECK_PATH_DEPTH)));
         commitPolicy = CommitPolicy.valueOf(String.valueOf(componentContext.getProperties().get(COMMIT_POLICY)));
         useForPathRestrictions = Boolean.valueOf(String.valueOf(componentContext.getProperties().get(PATH_RESTRICTIONS)));
         useForPropertyRestrictions = Boolean.valueOf(String.valueOf(componentContext.getProperties().get(PROPERTY_RESTRICTIONS)));
@@ -235,6 +240,11 @@ public class OakSolrConfigurationProviderService implements OakSolrConfiguration
                 @Override
                 public Collection<String> getIgnoredProperties() {
                     return Arrays.asList(ignoredProperties);
+                }
+
+                @Override
+                public int getACLCheckPathDepth() {
+                    return aclCheckPathDepth;
                 }
             };
         }

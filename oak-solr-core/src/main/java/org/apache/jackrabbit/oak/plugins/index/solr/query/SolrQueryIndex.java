@@ -22,16 +22,13 @@ import java.util.Collections;
 import java.util.Deque;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import javax.annotation.CheckForNull;
 
-import com.google.common.collect.AbstractIterator;
-import com.google.common.collect.Queues;
-import com.google.common.collect.Sets;
 import org.apache.jackrabbit.oak.api.PropertyValue;
 import org.apache.jackrabbit.oak.plugins.index.aggregate.NodeAggregator;
 import org.apache.jackrabbit.oak.plugins.index.solr.configuration.OakSolrConfiguration;
@@ -59,6 +56,11 @@ import org.apache.solr.common.SolrDocumentList;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.google.common.collect.AbstractIterator;
+import com.google.common.collect.Queues;
+import com.google.common.collect.Sets;
+
+import static com.google.common.base.Preconditions.checkNotNull;
 import static org.apache.jackrabbit.oak.commons.PathUtils.getAncestorPath;
 import static org.apache.jackrabbit.oak.commons.PathUtils.getDepth;
 import static org.apache.jackrabbit.oak.commons.PathUtils.getName;
@@ -82,6 +84,7 @@ public class SolrQueryIndex implements FulltextQueryIndex {
     private final OakSolrConfiguration configuration;
 
     private final NodeAggregator aggregator;
+
 
     public SolrQueryIndex(String name, SolrServer solrServer, OakSolrConfiguration configuration) {
         this.name = name;
@@ -469,7 +472,7 @@ public class SolrQueryIndex implements FulltextQueryIndex {
     }
 
     @Override
-    public Cursor query(final Filter filter, NodeState root) {
+    public Cursor query(final Filter filter, final NodeState root) {
         Cursor cursor;
         try {
             final Set<String> relPaths = filter.getFullTextConstraint() != null ? getRelativePaths(filter.getFullTextConstraint()) :
@@ -534,6 +537,9 @@ public class SolrQueryIndex implements FulltextQueryIndex {
                             log.debug("converting filter {}", filter);
                         }
                         SolrQuery query = getQuery(filter);
+                        if (configuration.getACLCheckPathDepth() > 0) {
+                            addACLPathsFilterQuery(query, root);
+                        }
                         if (lastDoc != null) {
                             offset++;
                             int newOffset = offset * configuration.getRows();
@@ -576,6 +582,54 @@ public class SolrQueryIndex implements FulltextQueryIndex {
             throw new RuntimeException(e);
         }
         return cursor;
+    }
+
+    private void addACLPathsFilterQuery(SolrQuery query, NodeState root) {
+        StringBuilder stringBuilder = new StringBuilder();
+
+        // add direct children filters
+        for (String p : getNodes(root, "", configuration.getACLCheckPathDepth())) {
+            if (stringBuilder.length() > 0) {
+                stringBuilder.append(" OR ");
+            }
+            stringBuilder.append(partialEscape(p));
+        }
+
+        query.addFilterQuery(configuration.getFieldForPathRestriction(
+                Filter.PathRestriction.DIRECT_CHILDREN) + ":(" + stringBuilder.toString() + ")");
+
+        // add all children filters
+        stringBuilder = new StringBuilder();
+        for (String p : collectReadableRoots(root)) {
+            if (stringBuilder.length() > 0) {
+                stringBuilder.append(" OR ");
+            }
+            stringBuilder.append(partialEscape(p));
+        }
+        query.addFilterQuery(configuration.getFieldForPathRestriction(Filter.PathRestriction.ALL_CHILDREN) +
+                ":(" + stringBuilder.toString() + ")");
+    }
+
+    private Collection<String> getNodes(NodeState nodeState, String path, int depth) {
+        Collection<String> paths = new LinkedList<String>();
+        if (depth > 0) {
+            for (String name : nodeState.getChildNodeNames()) {
+                NodeState child = nodeState.getChildNode(checkNotNull(name));
+                String childPath = path + "/" + name;
+                paths.add(childPath);
+                paths.addAll(getNodes(child, childPath, depth - 1));
+            }
+        }
+        return paths;
+    }
+
+    private Collection<String> collectReadableRoots(NodeState root) {
+        // TODO : this should build a flat list of paths at a certain depth from the passed node state
+        Collection<String> paths = new LinkedList<String>();
+        for (String childName : root.getChildNodeNames()) {
+            paths.add("/" + childName);
+        }
+        return paths;
     }
 
     static class SolrResultRow {

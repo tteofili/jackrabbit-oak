@@ -43,4 +43,5 @@ public class SolrServerConfigurationDefaults {
     public static final String IGNORED_PROPERTIES = "";
     public static final String TYPE_MAPPINGS = "";
     public static final String PROPERTY_MAPPINGS = "";
+    public static final int ACL_CHECK_PATH_DEPTH = 2;
 }

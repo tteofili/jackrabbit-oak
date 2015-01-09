@@ -109,4 +109,13 @@ public interface OakSolrConfiguration {
      * @return a {@link java.util.Collection} of names of properties to be ignored
      */
     Collection<String> getIgnoredProperties();
+
+    /**
+     * Provide the depth of the nodes that should be ACL checked by the index at query time.
+     * 0 means no ACL check, -1 means check all the nodes (not recommended, likely to be *very* slow)
+     * recommendation is to set a value between 1 and 3.
+     *
+     * @return the depth of the nodes that should be ACL checked by the Solr index
+     */
+    int getACLCheckPathDepth();
 }

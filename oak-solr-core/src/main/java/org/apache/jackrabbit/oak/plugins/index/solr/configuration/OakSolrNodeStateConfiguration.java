@@ -46,6 +46,11 @@ public abstract class OakSolrNodeStateConfiguration implements OakSolrConfigurat
     protected abstract NodeState getConfigurationNodeState();
 
     @Override
+    public int getACLCheckPathDepth() {
+        return getIntValueFor(Properties.ACL_CHECK_PATH_DEPTH, SolrServerConfigurationDefaults.ACL_CHECK_PATH_DEPTH);
+    }
+
+    @Override
     public String getFieldNameFor(Type<?> propertyType) {
         Iterable<String> typeMappings = getStringValuesFor(Properties.TYPE_MAPPINGS);
         if (typeMappings != null) {
@@ -240,5 +245,6 @@ public abstract class OakSolrNodeStateConfiguration implements OakSolrConfigurat
         public static final String IGNORED_PROPERTIES = "ignoredProperties";
         public static final String TYPE_MAPPINGS = "typeMappings";
         public static final String PROPERTY_MAPPINGS = "propertyMappings";
+        public static final String ACL_CHECK_PATH_DEPTH = "aclCheckPathDepth";
     }
 }

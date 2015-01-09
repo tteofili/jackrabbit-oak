@@ -108,4 +108,9 @@ public class DefaultSolrConfiguration implements OakSolrConfiguration {
         return ignoredProperties;
     }
 
+    @Override
+    public int getACLCheckPathDepth() {
+        return SolrServerConfigurationDefaults.ACL_CHECK_PATH_DEPTH;
+    }
+
 }
