@@ -17,6 +17,7 @@
 package org.apache.jackrabbit.oak.plugins.index.lucene;
 
 import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.util.AbstractAnalysisFactory;
 import org.apache.lucene.util.Version;
 
 public interface LuceneIndexConstants {
@@ -141,7 +142,7 @@ public interface LuceneIndexConstants {
      */
     String TEST_MODE = "testMode";
 
-    String EVALUATE_PATH_RESTRICTION = "oak.experimental.evaluatePathRestrictions";
+    String EVALUATE_PATH_RESTRICTION = "evaluatePathRestrictions";
 
     /**
      * Experimental config to restrict which property type gets indexed at
@@ -178,4 +179,25 @@ public interface LuceneIndexConstants {
      * node represented by this pattern
      */
     String AGG_RELATIVE_NODE = "relativeNode";
+
+    String COST_PER_ENTRY = "costPerEntry";
+
+    String COST_PER_EXECUTION = "costPerExecution";
+
+    /**
+     * Node name under which various analyzers are configured
+     */
+    String ANALYZERS = "analyzers";
+
+    /**
+     * Name of the default analyzer definition node under 'analyzers' node
+     */
+    String ANL_DEFAULT = "default";
+    String ANL_FILTERS = "filters";
+    String ANL_STOPWORDS = "stopwords";
+    String ANL_TOKENIZER = "tokenizer";
+    String ANL_CHAR_FILTERS = "charFilters";
+    String ANL_CLASS = "class";
+    String ANL_NAME = "name";
+    String ANL_LUCENE_MATCH_VERSION = AbstractAnalysisFactory.LUCENE_MATCH_VERSION_PARAM;
 }

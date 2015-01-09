@@ -28,7 +28,6 @@ import static org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState.MISSING_NO
 import java.util.Calendar;
 import java.util.HashSet;
 import java.util.Set;
-
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -41,7 +40,10 @@ import javax.management.openmbean.OpenDataException;
 import javax.management.openmbean.OpenType;
 import javax.management.openmbean.SimpleType;
 
+import com.google.common.base.Objects;
 import com.google.common.base.Stopwatch;
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Sets;
 import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Type;
@@ -66,9 +68,6 @@ import org.apache.jackrabbit.stats.TimeSeriesRecorder;
 import org.apache.jackrabbit.util.ISO8601;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import com.google.common.base.Objects;
-import com.google.common.collect.Sets;
 
 public class AsyncIndexUpdate implements Runnable {
 
@@ -265,9 +264,11 @@ public class AsyncIndexUpdate implements Runnable {
 
         // check for concurrent updates
         NodeState async = root.getChildNode(ASYNC);
-        if (async.getLong(name + "-lease") > System.currentTimeMillis()) {
+        long leaseEndTime = async.getLong(name + "-lease");
+        long currentTime = System.currentTimeMillis();
+        if (leaseEndTime > currentTime) {
             log.debug("Another copy of the {} index update is already running;"
-                    + " skipping this update", name);
+                    + " skipping this update. Time left for lease to expire {}s", name, (leaseEndTime - currentTime)/1000);
             return;
         }
 
@@ -296,7 +297,9 @@ public class AsyncIndexUpdate implements Runnable {
 
         // there are some recent changes, so let's create a new checkpoint
         String afterTime = now();
-        String afterCheckpoint = store.checkpoint(lifetime);
+        String afterCheckpoint = store.checkpoint(lifetime, ImmutableMap.of(
+                "creator", AsyncIndexUpdate.class.getSimpleName(),
+                "thread", Thread.currentThread().getName()));
         NodeState after = store.retrieve(afterCheckpoint);
         if (after == null) {
             log.debug("Unable to retrieve newly created checkpoint {},"
@@ -346,6 +349,7 @@ public class AsyncIndexUpdate implements Runnable {
             NodeState before, String beforeCheckpoint,
             NodeState after, String afterCheckpoint, String afterTime)
             throws CommitFailedException {
+        Stopwatch watch = Stopwatch.createStarted();
         // start collecting runtime statistics
         preAsyncRunStatsStats(indexStats);
 
@@ -395,6 +399,9 @@ public class AsyncIndexUpdate implements Runnable {
                 postAsyncRunStatsStatus(indexStats);
             }
             mergeWithConcurrencyCheck(builder, beforeCheckpoint, callback.lease);
+            if (indexUpdate.isReindexingPerformed()) {
+                log.info("Reindexing completed for indexes: {} in {}", indexUpdate.getAllReIndexedIndexes(), watch);
+            }
         } finally {
             callback.close();
         }

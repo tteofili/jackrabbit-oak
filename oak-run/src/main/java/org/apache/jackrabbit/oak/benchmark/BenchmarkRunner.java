@@ -101,6 +101,9 @@ public class BenchmarkRunner {
                 .withOptionalArg().ofType(Boolean.class).defaultsTo(Boolean.FALSE);
         OptionSpec<Integer> numberOfUsers = parser.accepts("numberOfUsers")
                 .withOptionalArg().ofType(Integer.class).defaultsTo(10000);
+        OptionSpec<Boolean> setScope = parser.accepts("setScope", "Whether to use include setScope in the user query.")
+                        .withOptionalArg().ofType(Boolean.class)
+                        .defaultsTo(Boolean.FALSE);
         OptionSpec<String> nonOption = parser.nonOptions();
         OptionSpec help = parser.acceptsAll(asList("h", "?", "help"), "show help").forHelp();
         OptionSet options = parser.parse(args);
@@ -125,10 +128,6 @@ public class BenchmarkRunner {
                         base.value(options),
                         fdsCache.value(options)),
                 OakRepositoryFixture.getMongoNS(
-                        host.value(options), port.value(options),
-                        dbName.value(options), dropDBAfterTest.value(options),
-                        cacheSize * MB),
-                OakRepositoryFixture.getMongoMK(
                         host.value(options), port.value(options),
                         dbName.value(options), dropDBAfterTest.value(options),
                         cacheSize * MB),
@@ -263,7 +262,8 @@ public class BenchmarkRunner {
             new FullTextSearchTest(
                     wikipedia.value(options),
                     flatStructure.value(options),
-                    report.value(options), withStorage.value(options))
+                    report.value(options), withStorage.value(options)),
+            new FindAuthorizableWithScopeTest(numberOfUsers.value(options), setScope.value(options))
         };
 
         Set<String> argset = Sets.newHashSet(nonOption.values(options));

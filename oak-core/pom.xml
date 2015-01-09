@@ -39,8 +39,6 @@
         <configuration>
           <instructions>
             <Embed-Dependency>
-              <!-- OAK-1768 TODO: embedded as short term workaround -->
-              mapdb,
               <!-- OAK-1708 TODO: temporary workaround for embedding code for DocumentNodeStoreService-->
               commons-dbcp,commons-pool,h2,json-simple,
               <!-- OAK-1708 TODO: note these below will only embedded when build with the respective profiles from oak-parent -->
@@ -55,6 +53,7 @@
               org.apache.jackrabbit.oak.api,
               org.apache.jackrabbit.oak.api.jmx,
               org.apache.jackrabbit.oak.stats,
+              org.apache.jackrabbit.oak.json,
               org.apache.jackrabbit.oak.kernel,
               org.apache.jackrabbit.oak.management,
               org.apache.jackrabbit.oak.util,
@@ -65,6 +64,7 @@
               org.apache.jackrabbit.oak.plugins.identifier,
               org.apache.jackrabbit.oak.plugins.index,
               org.apache.jackrabbit.oak.plugins.index.aggregate,
+              org.apache.jackrabbit.oak.plugins.index.counter,
               org.apache.jackrabbit.oak.plugins.index.nodetype,
               org.apache.jackrabbit.oak.plugins.index.property,
               org.apache.jackrabbit.oak.plugins.index.property.jmx,
@@ -200,6 +200,13 @@
     </dependency>
     <dependency>
       <groupId>org.apache.jackrabbit</groupId>
+      <artifactId>oak-commons</artifactId>
+      <version>${project.version}</version>
+      <type>test-jar</type>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.jackrabbit</groupId>
       <artifactId>oak-blob</artifactId>
       <version>${project.version}</version>
     </dependency>
@@ -266,13 +273,6 @@
       <artifactId>h2</artifactId>
       <version>${h2.version}</version>
       <optional>true</optional>
-    </dependency>
-
-    <!-- OAK-1768 added as short term workaround -->
-    <dependency>
-      <groupId>org.mapdb</groupId>
-      <artifactId>mapdb</artifactId>
-      <version>1.0.6</version>
     </dependency>
 
     <!-- JCR and Jackrabbit dependencies -->

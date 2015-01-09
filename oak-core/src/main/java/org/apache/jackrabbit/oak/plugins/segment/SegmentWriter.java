@@ -37,6 +37,7 @@ import static org.apache.jackrabbit.oak.api.Type.NAMES;
 import static org.apache.jackrabbit.oak.plugins.segment.MapRecord.BUCKETS_PER_LEVEL;
 import static org.apache.jackrabbit.oak.plugins.segment.Segment.MAX_SEGMENT_SIZE;
 import static org.apache.jackrabbit.oak.plugins.segment.Segment.RECORD_ID_BYTES;
+import static org.apache.jackrabbit.oak.plugins.segment.Segment.SEGMENT_REFERENCE_LIMIT;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -340,7 +341,10 @@ public class SegmentWriter {
 
     private synchronized int getSegmentRef(SegmentId segmentId) {
         int refcount = segment.getRefCount();
-        checkState(refcount < 256, "Segment cannot have more than 255 references", segment.getSegmentId());
+        if (refcount > SEGMENT_REFERENCE_LIMIT) {
+          throw new SegmentOverflowException(
+                  "Segment cannot have more than 255 references " + segment.getSegmentId());
+        }
         for (int index = 0; index < refcount; index++) {
             if (segmentId == segment.getRefId(index)) {
                 return index;
@@ -653,7 +657,7 @@ public class SegmentWriter {
         return thisLevel.iterator().next();
     }
 
-    public MapRecord writeMap(MapRecord base, Map<String, RecordId> changes) {
+    MapRecord writeMap(MapRecord base, Map<String, RecordId> changes) {
         if (base != null && base.isDiff()) {
             Segment segment = base.getSegment();
             RecordId key = segment.readRecordId(base.getOffset(8));
@@ -1089,8 +1093,8 @@ public class SegmentWriter {
             if (property instanceof SegmentPropertyState
                     && store.containsSegment(((SegmentPropertyState) property).getRecordId().getSegmentId())) {
                 ids.add(((SegmentPropertyState) property).getRecordId());
-            } else if (!(before instanceof SegmentNodeState)
-                    || store.containsSegment(((SegmentNodeState) before).getRecordId().getSegmentId())) {
+            } else if (before == null
+                    || !store.containsSegment(before.getRecordId().getSegmentId())) {
                 ids.add(writeProperty(property));
             } else {
                 // reuse previously stored property, if possible
@@ -1119,6 +1123,10 @@ public class SegmentWriter {
             }
             return new SegmentNodeState(recordId);
         }
+    }
+
+    public SegmentTracker getTracker() {
+        return tracker;
     }
 
 }

@@ -27,17 +27,20 @@ import org.apache.jackrabbit.oak.spi.state.NodeState;
  * index node
  */
 public interface IndexStoreStrategy {
-
+    
     /**
      * Updates the index for the given path.
      * 
      * @param index the index node
      * @param path path stored in the index
+     * @param indexName the name of the index. May be null.
+     * @param indexMeta the definition of the index. May be null.
      * @param beforeKeys keys that no longer apply to the path
      * @param afterKeys keys that now do apply to the path
      */
     void update(
         NodeBuilder index, String path,
+        String indexName, NodeBuilder indexMeta,
         Set<String> beforeKeys, Set<String> afterKeys);
     
     /**

@@ -29,11 +29,13 @@ import javax.jcr.security.Privilege;
 
 import org.apache.jackrabbit.api.JackrabbitRepository;
 import org.apache.jackrabbit.commons.jackrabbit.authorization.AccessControlUtils;
-import org.apache.jackrabbit.oak.jcr.FixturesHelper.Fixture;
+import org.apache.jackrabbit.oak.commons.FixturesHelper;
+import org.apache.jackrabbit.oak.commons.FixturesHelper.Fixture;
 import org.apache.jackrabbit.oak.query.QueryEngineSettings;
 import org.apache.jackrabbit.oak.spi.security.principal.EveryonePrincipal;
 import org.apache.jackrabbit.oak.spi.state.NodeStore;
 import org.junit.After;
+import org.junit.Before;
 import org.junit.Ignore;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
@@ -78,10 +80,14 @@ public abstract class AbstractRepositoryTest {
         if (FIXTURES.contains(Fixture.SEGMENT_MK)) {
             result.add(new Object[] { NodeStoreFixture.SEGMENT_MK });
         }
-        if (FIXTURES.contains(Fixture.DOCUMENT_JDBC)) {
-            result.add(new Object[] { NodeStoreFixture.DOCUMENT_JDBC });
+        if (FIXTURES.contains(Fixture.DOCUMENT_RDB)) {
+            result.add(new Object[] { NodeStoreFixture.DOCUMENT_RDB });
         }
         return result;
+    }
+
+    @Before
+    public void checkAssumptions() {
     }
 
     @After

@@ -45,13 +45,18 @@ import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.namepath.NamePathMapper;
+import org.apache.jackrabbit.oak.plugins.index.lucene.util.TokenizerChain;
 import org.apache.jackrabbit.oak.plugins.memory.PropertyStates;
 import org.apache.jackrabbit.oak.plugins.nodetype.ReadOnlyNodeTypeManager;
 import org.apache.jackrabbit.oak.plugins.tree.ImmutableTree;
+import org.apache.jackrabbit.oak.spi.query.QueryIndex.OrderEntry;
 import org.apache.jackrabbit.oak.spi.state.ChildNodeEntry;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.apache.jackrabbit.oak.util.TreeUtil;
+import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.miscellaneous.PerFieldAnalyzerWrapper;
+import org.apache.lucene.analysis.path.PathHierarchyTokenizerFactory;
 import org.apache.lucene.codecs.Codec;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -60,8 +65,10 @@ import static com.google.common.collect.Lists.newArrayList;
 import static com.google.common.collect.Lists.newArrayListWithCapacity;
 import static com.google.common.collect.Maps.newHashMap;
 import static com.google.common.collect.Sets.newHashSet;
+import static org.apache.jackrabbit.JcrConstants.JCR_SCORE;
 import static org.apache.jackrabbit.JcrConstants.NT_BASE;
 import static org.apache.jackrabbit.oak.api.Type.NAMES;
+import static org.apache.jackrabbit.oak.commons.PathUtils.getParentPath;
 import static org.apache.jackrabbit.oak.commons.PathUtils.isAbsolute;
 import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.DECLARING_NODE_TYPES;
 import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.ENTRY_COUNT_PROPERTY_NAME;
@@ -110,9 +117,13 @@ class IndexDefinition implements Aggregate.AggregateMapper{
 
     static final int TYPES_ALLOW_ALL = -1;
 
-    private final boolean fullTextEnabled;
+    /**
+     * native sort order
+     */
+    static final OrderEntry NATIVE_SORT_ORDER = new OrderEntry(JCR_SCORE, Type.UNDEFINED,
+        OrderEntry.Order.DESCENDING);
 
-    private final boolean propertyIndexEnabled;
+    private final boolean fullTextEnabled;
 
     private final NodeState definition;
 
@@ -129,6 +140,12 @@ class IndexDefinition implements Aggregate.AggregateMapper{
      * Defaults to {#DEFAULT_ENTRY_COUNT}
      */
     private final long entryCount;
+
+    private final boolean entryCountDefined;
+
+    private final double costPerEntry;
+
+    private final double costPerExecution;
 
     /**
      * The {@link IndexingRule}s inside this configuration. Keys being the NodeType names
@@ -148,6 +165,10 @@ class IndexDefinition implements Aggregate.AggregateMapper{
     private final Map<String, Aggregate> aggregates;
 
     private final boolean indexesAllTypes;
+
+    private final Analyzer analyzer;
+
+    private final Map<String, Analyzer> analyzers;
 
     public IndexDefinition(NodeState root, NodeState defn) {
         this(root, defn, null);
@@ -181,8 +202,6 @@ class IndexDefinition implements Aggregate.AggregateMapper{
         this.definedRules = ImmutableList.copyOf(definedIndexRules);
 
         this.fullTextEnabled = hasFulltextEnabledIndexRule(definedIndexRules);
-        this.propertyIndexEnabled = hasPropertyIndexEnabledIndexRule(definedIndexRules);
-
         this.evaluatePathRestrictions = getOptionalValue(defn, EVALUATE_PATH_RESTRICTION, false);
 
         String functionName = getOptionalValue(defn, LuceneIndexConstants.FUNC_NAME, null);
@@ -194,20 +213,22 @@ class IndexDefinition implements Aggregate.AggregateMapper{
         this.codec = createCodec();
 
         if (defn.hasProperty(ENTRY_COUNT_PROPERTY_NAME)) {
+            this.entryCountDefined = true;
             this.entryCount = defn.getProperty(ENTRY_COUNT_PROPERTY_NAME).getValue(Type.LONG);
         } else {
+            this.entryCountDefined = false;
             this.entryCount = DEFAULT_ENTRY_COUNT;
         }
 
+        this.costPerEntry = getOptionalValue(defn, LuceneIndexConstants.COST_PER_ENTRY, 1.0);
+        this.costPerExecution = getOptionalValue(defn, LuceneIndexConstants.COST_PER_EXECUTION, 1.0);
         this.indexesAllTypes = areAllTypesIndexed();
+        this.analyzers = collectAnalyzers(defn);
+        this.analyzer = createAnalyzer();
     }
 
     public boolean isFullTextEnabled() {
         return fullTextEnabled;
-    }
-
-    public boolean isPropertyIndexEnabled() {
-        return propertyIndexEnabled;
     }
 
     public String getFunctionName(){
@@ -241,6 +262,25 @@ class IndexDefinition implements Aggregate.AggregateMapper{
         return entryCount;
     }
 
+    public boolean isEntryCountDefined() {
+        return entryCountDefined;
+    }
+
+    public double getCostPerEntry() {
+        return costPerEntry;
+    }
+
+    public double getCostPerExecution() {
+        return costPerExecution;
+    }
+
+    public long getFulltextEntryCount(long numOfDocs){
+        if (isEntryCountDefined()){
+            return Math.min(getEntryCount(), numOfDocs);
+        }
+        return numOfDocs;
+    }
+
     public IndexFormatVersion getVersion() {
         return version;
     }
@@ -261,9 +301,40 @@ class IndexDefinition implements Aggregate.AggregateMapper{
         return indexesAllTypes;
     }
 
+    public Analyzer getAnalyzer(){
+        return analyzer;
+    }
+
     @Override
     public String toString() {
         return "IndexDefinition : " + indexName;
+    }
+
+    //~---------------------------------------------------< Analyzer >
+
+    private Analyzer createAnalyzer() {
+        Analyzer defaultAnalyzer = LuceneIndexConstants.ANALYZER;
+        if (analyzers.containsKey(LuceneIndexConstants.ANL_DEFAULT)){
+            defaultAnalyzer = analyzers.get(LuceneIndexConstants.ANL_DEFAULT);
+        }
+        if (!evaluatePathRestrictions()){
+            return defaultAnalyzer;
+        }
+        Map<String, Analyzer> analyzerMap = ImmutableMap.<String, Analyzer>builder()
+                .put(FieldNames.ANCESTORS,
+                        new TokenizerChain(new PathHierarchyTokenizerFactory(Collections.<String, String>emptyMap())))
+                .build();
+        return new PerFieldAnalyzerWrapper(defaultAnalyzer, analyzerMap);
+    }
+
+    private static Map<String, Analyzer> collectAnalyzers(NodeState defn) {
+        Map<String, Analyzer> analyzerMap = newHashMap();
+        NodeStateAnalyzerFactory factory = new NodeStateAnalyzerFactory(LuceneIndexConstants.VERSION);
+        for (ChildNodeEntry cne : defn.getChildNode(LuceneIndexConstants.ANALYZERS).getChildNodeEntries()) {
+            Analyzer a = factory.createInstance(cne.getNodeState());
+            analyzerMap.put(cne.getName(), a);
+        }
+        return ImmutableMap.copyOf(analyzerMap);
     }
 
     //~---------------------------------------------------< Aggregates >
@@ -395,7 +466,7 @@ class IndexDefinition implements Aggregate.AggregateMapper{
             definedIndexRules.add(rule);
 
             // register under node type and all its sub types
-            log.debug("Found rule '{}' for NodeType '{}'", rule, rule.getNodeTypeName());
+            log.trace("Found rule '{}' for NodeType '{}'", rule, rule.getNodeTypeName());
 
             List<String> ntNames = allNames;
             if (!rule.inherited){
@@ -411,7 +482,7 @@ class IndexDefinition implements Aggregate.AggregateMapper{
                         perNtConfig = new ArrayList<IndexingRule>();
                         nt2rules.put(ntName, perNtConfig);
                     }
-                    log.debug("Registering it for name '{}'", ntName);
+                    log.trace("Registering rule '{}' for name '{}'", rule, ntName);
                     perNtConfig.add(new IndexingRule(rule, ntName));
                 }
             }
@@ -436,8 +507,6 @@ class IndexDefinition implements Aggregate.AggregateMapper{
         private final List<NamePattern> namePatterns;
         final float boost;
         final boolean inherited;
-        final boolean defaultFulltextEnabled;
-        final boolean defaultStorageEnabled;
         final int propertyTypes;
         final boolean fulltextEnabled;
         final boolean propertyIndexEnabled;
@@ -451,9 +520,6 @@ class IndexDefinition implements Aggregate.AggregateMapper{
             this.baseNodeType = nodeTypeName;
             this.boost = getOptionalValue(config, FIELD_BOOST, DEFAULT_BOOST);
             this.inherited = getOptionalValue(config, LuceneIndexConstants.RULE_INHERITED, true);
-            this.defaultFulltextEnabled = getOptionalValue(config, LuceneIndexConstants.FULL_TEXT_ENABLED, false);
-            //TODO Provide a new proper propertyName for enabling storage
-            this.defaultStorageEnabled = getOptionalValue(config, LuceneIndexConstants.EXPERIMENTAL_STORAGE, false);
             this.propertyTypes = getSupportedTypes(config, INCLUDE_PROPERTY_TYPES, TYPES_ALLOW_ALL);
 
             List<NamePattern> namePatterns = newArrayList();
@@ -480,8 +546,6 @@ class IndexDefinition implements Aggregate.AggregateMapper{
             this.propConfigs = original.propConfigs;
             this.namePatterns = original.namePatterns;
             this.boost = original.boost;
-            this.defaultFulltextEnabled = original.defaultFulltextEnabled;
-            this.defaultStorageEnabled = original.defaultStorageEnabled;
             this.inherited = original.inherited;
             this.propertyTypes = original.propertyTypes;
             this.propertyIndexEnabled = original.propertyIndexEnabled;
@@ -666,6 +730,7 @@ class IndexDefinition implements Aggregate.AggregateMapper{
      * A property name pattern.
      */
     private static final class NamePattern {
+        private final String parentPath;
         /**
          * The pattern to match.
          */
@@ -685,7 +750,16 @@ class IndexDefinition implements Aggregate.AggregateMapper{
         private NamePattern(String pattern,
                             PropertyDefinition config){
 
-            this.pattern = Pattern.compile(pattern);
+            //Special handling for all props regex as its already being used
+            //and use of '/' in regex would confuse the parent path calculation
+            //logic
+            if (LuceneIndexConstants.REGEX_ALL_PROPS.equals(pattern)){
+                this.parentPath = "";
+                this.pattern = Pattern.compile(pattern);
+            } else {
+                this.parentPath = getParentPath(pattern);
+                this.pattern = Pattern.compile(PathUtils.getName(pattern));
+            }
             this.config = config;
         }
 
@@ -695,7 +769,12 @@ class IndexDefinition implements Aggregate.AggregateMapper{
          *         pattern; <code>false</code> otherwise.
          */
         boolean matches(String propertyPath) {
-            return pattern.matcher(propertyPath).matches();
+            String parentPath = getParentPath(propertyPath);
+            String propertyName = PathUtils.getName(propertyPath);
+            if (!this.parentPath.equals(parentPath)) {
+                return false;
+            }
+            return pattern.matcher(propertyName).matches();
         }
 
         PropertyDefinition getConfig() {
@@ -968,15 +1047,6 @@ class IndexDefinition implements Aggregate.AggregateMapper{
     private static boolean hasFulltextEnabledIndexRule(List<IndexingRule> rules) {
         for (IndexingRule rule : rules){
             if (rule.fulltextEnabled){
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static boolean hasPropertyIndexEnabledIndexRule(List<IndexingRule> rules) {
-        for (IndexingRule rule : rules){
-            if (rule.propertyIndexEnabled){
                 return true;
             }
         }

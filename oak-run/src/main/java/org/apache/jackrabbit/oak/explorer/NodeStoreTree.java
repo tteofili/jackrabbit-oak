@@ -54,20 +54,22 @@ import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.commons.json.JsopBuilder;
-import org.apache.jackrabbit.oak.kernel.JsopDiff;
+import org.apache.jackrabbit.oak.json.JsopDiff;
 import org.apache.jackrabbit.oak.plugins.segment.RecordId;
 import org.apache.jackrabbit.oak.plugins.segment.SegmentBlob;
 import org.apache.jackrabbit.oak.plugins.segment.SegmentId;
 import org.apache.jackrabbit.oak.plugins.segment.SegmentNodeState;
 import org.apache.jackrabbit.oak.plugins.segment.SegmentNodeStateHelper;
+import org.apache.jackrabbit.oak.plugins.segment.SegmentNotFoundException;
 import org.apache.jackrabbit.oak.plugins.segment.SegmentPropertyState;
 import org.apache.jackrabbit.oak.plugins.segment.file.FileStore;
+import org.apache.jackrabbit.oak.plugins.segment.file.FileStore.ReadOnlyStore;
 import org.apache.jackrabbit.oak.spi.state.ChildNodeEntry;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 
 public class NodeStoreTree extends JPanel implements TreeSelectionListener {
 
-    private final FileStore store;
+    private final ReadOnlyStore store;
 
     private DefaultTreeModel treeModel;
     private final JTree tree;
@@ -79,7 +81,7 @@ public class NodeStoreTree extends JPanel implements TreeSelectionListener {
     // TODO make this configurable
     private final boolean cacheNodeState = false;
 
-    public NodeStoreTree(FileStore store, JTextArea log, boolean skipSizeCheck) {
+    public NodeStoreTree(ReadOnlyStore store, JTextArea log, boolean skipSizeCheck) {
         super(new GridLayout(1, 0));
         this.store = store;
         this.log = log;
@@ -308,9 +310,9 @@ public class NodeStoreTree extends JPanel implements TreeSelectionListener {
             Blob b = ps.getValue(Type.BINARY, index);
             String info = "<";
             info += b.getClass().getSimpleName() + ";";
-            info += "ref:" + b.getReference() + ";";
+            info += "ref:" + safeGetReference(b) + ";";
             info += "id:" + b.getContentIdentity() + ";";
-            info += FileUtils.byteCountToDisplaySize(b.length()) + ">";
+            info += safeGetLength(b) + ">";
             for (SegmentId sid : SegmentBlob.getBulkSegmentIds(b)) {
                 info += newline + "        Bulk Segment Id " + sid;
                 String f = getFile(sid);
@@ -333,6 +335,24 @@ public class NodeStoreTree extends JPanel implements TreeSelectionListener {
         } else {
             return ps.getValue(Type.STRING, index);
         }
+    }
+
+    private String safeGetReference(Blob b) {
+        try {
+            return b.getReference();
+        } catch (IllegalStateException e) {
+            // missing BlobStore probably
+        }
+        return "[BlobStore not available]";
+    }
+
+    private String safeGetLength(Blob b) {
+        try {
+            return FileUtils.byteCountToDisplaySize(b.length());
+        } catch (IllegalStateException e) {
+            // missing BlobStore probably
+        }
+        return "[BlobStore not available]";
     }
 
     private String getFile(RecordId id) {
@@ -426,6 +446,13 @@ public class NodeStoreTree extends JPanel implements TreeSelectionListener {
         StringBuilder sb = new StringBuilder();
         sb.append("SegmentNodeState references to " + id);
         sb.append(newline);
+        for (Entry<String, Set<UUID>> e : store.getTarReaderIndex().entrySet()) {
+            if (e.getValue().contains(id)) {
+                sb.append("Tar file: " + e.getKey());
+                sb.append(newline);
+                break;
+            }
+        }
 
         List<String> paths = newArrayList();
         filterNodeStates(newHashSet(id), paths, store.getHead(), "/");
@@ -552,39 +579,35 @@ public class NodeStoreTree extends JPanel implements TreeSelectionListener {
         log.setText(sb.toString());
     }
 
-    public void compact() {
-        sizeCache = new HashMap<RecordIdKey, Long[]>();
-        treeModel = null;
+    public boolean revert(String revision) {
+        return safeRevert(revision, false);
+    }
 
-        StringBuilder sb = new StringBuilder();
-
-        long s = System.currentTimeMillis();
-        store.compact();
+    private boolean safeRevert(String revision, boolean rollback) {
+        String head = store.getHead().getRecordId().toString();
+        store.setRevision(revision);
         try {
-            store.flush();
-        } catch (IOException e) {
-            sb.append("IOException " + e.getMessage());
-            e.printStackTrace();
-        }
-        s = System.currentTimeMillis() - s;
-
-        sb.append("Compacted tar segments in " + s + " ms.");
-        sb.append(newline);
-
-        sb.append("File Index");
-        sb.append(newline);
-
-        List<String> files = newArrayList(store.getTarReaderIndex().keySet());
-        Collections.sort(files);
-
-        for (String path : files) {
-            sb.append(path);
+            refreshModel();
+            if (!rollback) {
+                log.setText("Switched head revision to " + revision);
+            }
+        } catch (SegmentNotFoundException e) {
+            StringBuilder sb = new StringBuilder();
+            sb.append("Unable to switch head revision to ");
+            sb.append(revision);
             sb.append(newline);
+            sb.append("    ");
+            sb.append(e.getMessage());
+            sb.append(newline);
+            sb.append("Will rollback to ");
+            sb.append(head);
+            log.setText(sb.toString());
+            return safeRevert(head, true);
         }
-        sb.append("----------");
-        log.setText(sb.toString());
-
-        refreshModel();
+        if (rollback) {
+            return false;
+        }
+        return true;
     }
 
     private static class NamePathModel implements Comparable<NamePathModel> {
@@ -729,7 +752,16 @@ public class NodeStoreTree extends JPanel implements TreeSelectionListener {
         }
         for (PropertyState ps : ns.getProperties()) {
             for (int j = 0; j < ps.count(); j++) {
-                s[0] = s[0] + ps.size(j);
+                if (ps.getType().tag() == Type.BINARY.tag()) {
+                    Blob b = ps.getValue(Type.BINARY, j);
+                    boolean skip = b instanceof SegmentBlob
+                            && ((SegmentBlob) b).isExternal();
+                    if (!skip) {
+                        s[0] = s[0] + b.length();
+                    }
+                } else {
+                    s[0] = s[0] + ps.size(j);
+                }
             }
         }
         sizeCache.put(key, s);

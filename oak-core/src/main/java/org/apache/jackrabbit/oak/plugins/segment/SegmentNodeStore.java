@@ -22,19 +22,25 @@ import static java.lang.System.currentTimeMillis;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static java.util.concurrent.TimeUnit.SECONDS;
+import static org.apache.jackrabbit.oak.api.Type.STRING;
 import static org.apache.jackrabbit.oak.plugins.segment.Record.fastEquals;
 
 import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.Collections;
+import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Random;
 import java.util.UUID;
+import java.util.concurrent.Callable;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicReference;
 
 import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
 
+import com.google.common.collect.Maps;
 import org.apache.jackrabbit.oak.api.Blob;
 import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.api.PropertyState;
@@ -100,6 +106,17 @@ public class SegmentNodeStore implements NodeStore, Observable {
         this.maximumBackoff = max;
     }
 
+    boolean locked(Callable<Boolean> c) throws Exception {
+        if (commitSemaphore.tryAcquire()) {
+            try {
+                return c.call();
+            } finally {
+                commitSemaphore.release();
+            }
+        }
+        return false;
+    }
+
     /**
      * Refreshes the head state. Should only be called while holding a
      * permit from the {@link #commitSemaphore}.
@@ -151,6 +168,9 @@ public class SegmentNodeStore implements NodeStore, Observable {
         } catch (InterruptedException e) {
             throw new CommitFailedException(
                     "Segment", 2, "Merge interrupted", e);
+        } catch (SegmentOverflowException e) {
+            throw new CommitFailedException(
+                    "Segment", 3, "Merge failed", e);
         }
     }
 
@@ -207,9 +227,11 @@ public class SegmentNodeStore implements NodeStore, Observable {
                 "without specifying BlobStore");
     }
 
-    @Override @Nonnull
-    public synchronized String checkpoint(long lifetime) {
+    @Nonnull
+    @Override
+    public String checkpoint(long lifetime, @Nonnull Map<String, String> properties) {
         checkArgument(lifetime > 0);
+        checkNotNull(properties);
         String name = UUID.randomUUID().toString();
         long now = System.currentTimeMillis();
 
@@ -236,6 +258,12 @@ public class SegmentNodeStore implements NodeStore, Observable {
                     NodeBuilder cp = checkpoints.child(name);
                     cp.setProperty("timestamp",  now + lifetime);
                     cp.setProperty("created", now);
+
+                    NodeBuilder props = cp.setChildNode("properties");
+                    for (Entry<String, String> p : properties.entrySet()) {
+                        props.setProperty(p.getKey(), p.getValue());
+                    }
+
                     cp.setChildNode(ROOT, state.getChildNode(ROOT));
 
                     SegmentNodeState newState = builder.getNodeState();
@@ -256,6 +284,28 @@ public class SegmentNodeStore implements NodeStore, Observable {
 
         log.debug("Failed to create checkpoint {}", name);
         return name;
+    }
+
+    @Override @Nonnull
+    public synchronized String checkpoint(long lifetime) {
+        return checkpoint(lifetime, Collections.<String, String>emptyMap());
+    }
+
+    @Nonnull
+    @Override
+    public Map<String, String> checkpointInfo(@Nonnull String checkpoint) {
+        Map<String, String> properties = Maps.newHashMap();
+        checkNotNull(checkpoint);
+        NodeState cp = head.get()
+                .getChildNode("checkpoints")
+                .getChildNode(checkpoint)
+                .getChildNode("properties");
+
+        for (PropertyState prop : cp.getProperties()) {
+            properties.put(prop.getName(), prop.getValue(STRING));
+        }
+
+        return properties;
     }
 
     @Override @CheckForNull

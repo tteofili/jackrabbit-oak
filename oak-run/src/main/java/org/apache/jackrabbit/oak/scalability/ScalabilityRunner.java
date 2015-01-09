@@ -107,10 +107,6 @@ public class ScalabilityRunner {
                         host.value(options), port.value(options),
                         dbName.value(options), dropDBAfterTest.value(options),
                         cacheSize * MB),
-                OakRepositoryFixture.getMongoMK(
-                        host.value(options), port.value(options),
-                        dbName.value(options), dropDBAfterTest.value(options),
-                        cacheSize * MB),
                 OakRepositoryFixture.getTar(
                         base.value(options), 256, cacheSize, mmap.value(options)),
                 OakRepositoryFixture.getTarWithBlobStore(
@@ -126,7 +122,8 @@ public class ScalabilityRunner {
                                         new LastModifiedSearcher(Date.LAST_24_HRS),
                                         new LastModifiedSearcher(Date.LAST_7_DAYS),
                                         new LastModifiedSearcher(Date.LAST_MONTH),
-                                        new LastModifiedSearcher(Date.LAST_YEAR)),
+                                        new LastModifiedSearcher(Date.LAST_YEAR),
+                                        new OrderByDate()),
                         new ScalabilityNodeSuite(withStorage.value(options))
                                 .addBenchmarks(new OrderBySearcher(),
                                         new SplitOrderBySearcher(),

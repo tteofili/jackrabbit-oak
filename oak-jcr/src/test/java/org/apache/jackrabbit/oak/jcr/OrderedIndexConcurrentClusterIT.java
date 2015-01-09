@@ -37,7 +37,8 @@ import javax.jcr.RepositoryException;
 import javax.jcr.Session;
 import javax.jcr.SimpleCredentials;
 
-import org.apache.jackrabbit.oak.jcr.FixturesHelper.Fixture;
+import org.apache.jackrabbit.oak.commons.FixturesHelper;
+import org.apache.jackrabbit.oak.commons.FixturesHelper.Fixture;
 import org.apache.jackrabbit.oak.plugins.document.DocumentMK;
 import org.apache.jackrabbit.oak.plugins.document.util.MongoConnection;
 import org.apache.jackrabbit.oak.plugins.index.IndexConstants;
@@ -77,7 +78,7 @@ public class OrderedIndexConcurrentClusterIT {
     
     @BeforeClass
     public static void mongoDBAvailable() {
-        final boolean mongoAvailable = OakMongoMKRepositoryStub.isMongoDBAvailable();
+        final boolean mongoAvailable = OakMongoNSRepositoryStub.isMongoDBAvailable();
         if (!mongoAvailable) {
             LOG.warn("Mongo DB is not available. Skipping the test");
         }
@@ -85,7 +86,7 @@ public class OrderedIndexConcurrentClusterIT {
     }
     
     private static MongoConnection createConnection() throws Exception {
-        return OakMongoMKRepositoryStub.createConnection(
+        return OakMongoNSRepositoryStub.createConnection(
             OrderedIndexConcurrentClusterIT.class.getSimpleName());
     }
 

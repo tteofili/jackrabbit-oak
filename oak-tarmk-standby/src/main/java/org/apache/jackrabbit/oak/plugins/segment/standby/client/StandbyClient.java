@@ -40,6 +40,7 @@ import java.io.Closeable;
 import java.lang.management.ManagementFactory;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.jackrabbit.oak.plugins.segment.SegmentStore;
 import org.apache.jackrabbit.oak.plugins.segment.standby.codec.RecordIdDecoder;
@@ -63,7 +64,7 @@ public final class StandbyClient implements ClientStandbyStatusMBean, Runnable, 
 
     private final String host;
     private final int port;
-    private int readTimeoutMs = 10000;
+    private final int readTimeoutMs;
 
     private final StandbyStore store;
     private final CommunicationObserver observer;
@@ -72,17 +73,18 @@ public final class StandbyClient implements ClientStandbyStatusMBean, Runnable, 
     private EventExecutorGroup executor;
     private SslContext sslContext;
     private boolean active = false;
-    private boolean running;
     private int failedRequests;
     private long lastSuccessfulRequest;
     private volatile String state;
     private final Object sync = new Object();
 
+    private final AtomicBoolean running = new AtomicBoolean(true);
+
     public StandbyClient(String host, int port, SegmentStore store) throws SSLException {
-        this(host, port, store, false);
+        this(host, port, store, false, 10000);
     }
 
-    public StandbyClient(String host, int port, SegmentStore store, boolean secure) throws SSLException {
+    public StandbyClient(String host, int port, SegmentStore store, boolean secure, int readTimeoutMs) throws SSLException {
         this.state = STATUS_INITIALIZING;
         this.lastSuccessfulRequest = -1;
         this.failedRequests = 0;
@@ -91,6 +93,7 @@ public final class StandbyClient implements ClientStandbyStatusMBean, Runnable, 
         if (secure) {
             this.sslContext = SslContext.newClientContext(InsecureTrustManagerFactory.INSTANCE);
         }
+        this.readTimeoutMs = readTimeoutMs;
         this.store = new StandbyStore(store);
         String s = System.getProperty(CLIENT_ID_PROPERTY_NAME);
         this.observer = new CommunicationObserver((s == null || s.length() == 0) ? UUID.randomUUID().toString() : s);
@@ -124,6 +127,10 @@ public final class StandbyClient implements ClientStandbyStatusMBean, Runnable, 
     }
 
     public void run() {
+        if (!isRunning()) {
+            // manually stopped
+            return;
+        }
 
         Bootstrap b;
         synchronized (this.sync) {
@@ -132,7 +139,8 @@ public final class StandbyClient implements ClientStandbyStatusMBean, Runnable, 
             }
             state = STATUS_STARTING;
             executor = new DefaultEventExecutorGroup(4);
-            handler = new StandbyClientHandler(this.store, executor, this.observer);
+            handler = new StandbyClientHandler(this.store, executor, observer,
+                    running, readTimeoutMs);
             group = new NioEventLoopGroup();
 
             b = new Bootstrap();
@@ -160,7 +168,6 @@ public final class StandbyClient implements ClientStandbyStatusMBean, Runnable, 
                 }
             });
             state = STATUS_RUNNING;
-            this.running = true;
             this.active = true;
         }
 
@@ -200,20 +207,19 @@ public final class StandbyClient implements ClientStandbyStatusMBean, Runnable, 
     }
 
     @Override
-    public boolean isRunning() { return running;}
+    public boolean isRunning() {
+        return running.get();
+    }
 
     @Override
     public void start() {
-        if (!running) run();
+        running.set(true);
     }
 
     @Override
     public void stop() {
-        //TODO running flag doesn't make sense this way, since run() is usually scheduled to be called repeatedly.
-        if (running) {
-            running = false;
-            state = STATUS_STOPPED;
-        }
+        running.set(false);
+        state = STATUS_STOPPED;
     }
 
     @Override

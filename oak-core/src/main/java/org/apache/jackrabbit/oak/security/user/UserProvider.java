@@ -29,7 +29,9 @@ import javax.jcr.RepositoryException;
 import javax.jcr.nodetype.ConstraintViolationException;
 import javax.jcr.query.Query;
 
+import com.google.common.base.Strings;
 import org.apache.jackrabbit.JcrConstants;
+import org.apache.jackrabbit.oak.api.QueryEngine;
 import org.apache.jackrabbit.oak.api.Result;
 import org.apache.jackrabbit.oak.api.ResultRow;
 import org.apache.jackrabbit.oak.api.Root;
@@ -48,6 +50,7 @@ import org.slf4j.LoggerFactory;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 import static org.apache.jackrabbit.oak.api.QueryEngine.NO_MAPPINGS;
+import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.NODE_TYPES_PATH;
 
 /**
  * User provider implementation and manager for group memberships with the
@@ -225,7 +228,8 @@ class UserProvider extends AuthorizableBaseProvider {
         try {
             StringBuilder stmt = new StringBuilder();
             stmt.append("SELECT * FROM [").append(UserConstants.NT_REP_AUTHORIZABLE).append(']');
-            stmt.append("WHERE [").append(UserConstants.REP_PRINCIPAL_NAME).append("] = $principalName");
+            stmt.append(" WHERE [").append(UserConstants.REP_PRINCIPAL_NAME).append("] = $principalName");
+            stmt.append(QueryEngine.INTERNAL_SQL2_QUERY);
 
             Result result = root.getQueryEngine().executeQuery(stmt.toString(),
                     Query.JCR_SQL2, 1, 0,
@@ -250,7 +254,7 @@ class UserProvider extends AuthorizableBaseProvider {
                                         @Nonnull String ntName,
                                         @Nullable String intermediatePath) throws RepositoryException {
         String nodeName = getNodeName(authorizableId);
-        NodeUtil folder = createFolderNodes(nodeName, NT_REP_GROUP.equals(ntName), intermediatePath);
+        Tree folder = createFolderNodes(nodeName, NT_REP_GROUP.equals(ntName), intermediatePath);
 
         if (folder.hasChild(nodeName)) {
             // collision with another authorizable node or some other node type.
@@ -261,10 +265,14 @@ class UserProvider extends AuthorizableBaseProvider {
             }
             nodeName = tmp;
         }
-        NodeUtil authorizableNode = folder.addChild(nodeName, ntName);
-        authorizableNode.setString(REP_AUTHORIZABLE_ID, authorizableId);
-        authorizableNode.setString(JcrConstants.JCR_UUID, getContentID(authorizableId));
-        return authorizableNode.getTree();
+
+        Tree typeRoot = root.getTree(NODE_TYPES_PATH);
+        String userId = Strings.nullToEmpty(root.getContentSession().getAuthInfo().getUserID());
+        Tree authorizableNode = TreeUtil.addChild(folder, nodeName, ntName, typeRoot, userId);
+        authorizableNode.setProperty(REP_AUTHORIZABLE_ID, authorizableId);
+        authorizableNode.setProperty(JcrConstants.JCR_UUID, getContentID(authorizableId));
+
+        return authorizableNode;
     }
 
     /**
@@ -279,7 +287,7 @@ class UserProvider extends AuthorizableBaseProvider {
      * @return The folder node.
      * @throws RepositoryException If an error occurs
      */
-    private NodeUtil createFolderNodes(@Nonnull String nodeName,
+    private Tree createFolderNodes(@Nonnull String nodeName,
                                        boolean isGroup,
                                        @Nullable String intermediatePath) throws RepositoryException {
         String authRoot = (isGroup) ? groupPath : userPath;
@@ -312,7 +320,7 @@ class UserProvider extends AuthorizableBaseProvider {
                 break;
             }
         }
-        return folder;
+        return folder.getTree();
     }
 
     private String getFolderPath(@Nonnull String nodeName,

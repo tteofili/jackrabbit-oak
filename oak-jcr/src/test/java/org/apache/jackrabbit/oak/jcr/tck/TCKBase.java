@@ -24,8 +24,8 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 
-import org.apache.jackrabbit.oak.jcr.FixturesHelper;
-import org.apache.jackrabbit.oak.jcr.FixturesHelper.Fixture;
+import org.apache.jackrabbit.oak.commons.FixturesHelper;
+import org.apache.jackrabbit.oak.commons.FixturesHelper.Fixture;
 import org.apache.jackrabbit.oak.jcr.OakDocumentRDBRepositoryStub;
 import org.apache.jackrabbit.oak.jcr.OakMongoNSRepositoryStub;
 import org.apache.jackrabbit.oak.jcr.OakTarMKRepositoryStub;
@@ -58,12 +58,12 @@ public abstract class TCKBase extends TestSuite {
         if (FIXTURES.contains(Fixture.DOCUMENT_NS)) {
             if (OakMongoNSRepositoryStub.isMongoDBAvailable()) {
                 Setup.wrap(this, OakMongoNSRepositoryStub.class.getName());
-            }            
+            }
         }
-        if (FIXTURES.contains(Fixture.DOCUMENT_JDBC)) {
+        if (FIXTURES.contains(Fixture.DOCUMENT_RDB)) {
             if (OakDocumentRDBRepositoryStub.isAvailable()) {
                 Setup.wrap(this, OakDocumentRDBRepositoryStub.class.getName());
-            }            
+            }
         }
     }
 

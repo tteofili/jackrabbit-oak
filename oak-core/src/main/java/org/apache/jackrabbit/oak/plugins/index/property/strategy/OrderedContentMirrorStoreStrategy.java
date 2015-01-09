@@ -17,10 +17,12 @@
 
 package org.apache.jackrabbit.oak.plugins.index.property.strategy;
 
+import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.collect.Iterators.singletonIterator;
 import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.ENTRY_COUNT_PROPERTY_NAME;
 import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.INDEX_CONTENT_NODE_NAME;
+import static org.apache.jackrabbit.oak.plugins.index.property.OrderedIndex.LANES;
 
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
@@ -104,9 +106,15 @@ public class OrderedContentMirrorStoreStrategy extends ContentMirrorStoreStrateg
     private static final Random RND = new Random(System.currentTimeMillis());
     
     /**
+     * maximum number of attempt for potential recursive processes like seek() 
+     */
+    private static final int MAX_RETRIES = LANES+1;
+        
+    /**
      * the direction of the index.
      */
     private OrderDirection direction = OrderedIndex.DEFAULT_DIRECTION;
+    
 
     public OrderedContentMirrorStoreStrategy() {
         super();
@@ -118,19 +126,21 @@ public class OrderedContentMirrorStoreStrategy extends ContentMirrorStoreStrateg
     }
     
     private static void printWalkedLanes(final String msg, final String[] walked) {
-        String m = (msg == null) ? "" : msg;
-        if (walked == null) {
-            LOG.debug(m + " walked: null");
-        } else {
-            for (int i = 0; i < walked.length; i++) {
-                LOG.debug("{}walked[{}]: {}", new Object[] { m, i, walked[i] });
+        if (LOG.isTraceEnabled()) {
+            String m = (msg == null) ? "" : msg;
+            if (walked == null) {
+                LOG.trace(m + " walked: null");
+            } else {
+                for (int i = 0; i < walked.length; i++) {
+                    LOG.trace("{}walked[{}]: {}", new Object[] { m, i, walked[i] });
+                }
             }
         }
     }
     
     @Override
     NodeBuilder fetchKeyNode(@Nonnull NodeBuilder index, @Nonnull String key) {
-        LOG.debug("fetchKeyNode() - new item '{}' -----------------------------------------", key);
+        LOG.debug("fetchKeyNode() - === new item '{}'", key);
         // this is where the actual adding and maintenance of index's keys happen
         NodeBuilder node = null;
         NodeBuilder start = index.child(START);
@@ -146,7 +156,7 @@ public class OrderedContentMirrorStoreStrategy extends ContentMirrorStoreStrateg
         
         // we use the seek for seeking the right spot. The walkedLanes will have all our
         // predecessors
-        String entry = seek(index, condition, walked);
+        String entry = seek(index, condition, walked, 0, new FixingDanglingLinkCallback(index));
         if (LOG.isDebugEnabled()) {
             LOG.debug("fetchKeyNode() - entry: {} ", entry);
             printWalkedLanes("fetchKeyNode() - ", walked);
@@ -199,7 +209,9 @@ public class OrderedContentMirrorStoreStrategy extends ContentMirrorStoreStrateg
                     do {
                         entry = seek(index,
                             new PredicateEquals(key),
-                            walkedLanes
+                            walkedLanes,
+                            0,
+                            new LoggingDanglinLinkCallback()
                             );
                         lane0Next = getPropertyNext(index.getChildNode(walkedLanes[0]));
                         if (LOG.isDebugEnabled()) {
@@ -666,7 +678,9 @@ public class OrderedContentMirrorStoreStrategy extends ContentMirrorStoreStrateg
         private NodeState start;
         NodeState current;
         private NodeState index;
+        private NodeBuilder builder;
         String currentName;
+        private DanglingLinkCallback dlc = new LoggingDanglinLinkCallback();
 
         public FullIterator(NodeState index, NodeState start, boolean includeStart,
                             NodeState current) {
@@ -674,12 +688,19 @@ public class OrderedContentMirrorStoreStrategy extends ContentMirrorStoreStrateg
             this.start = start;
             this.current = current;
             this.index = index;
+            this.builder = new ReadOnlyBuilder(index);
         }
 
         @Override
         public boolean hasNext() {
+            String next = getPropertyNext(current);
             boolean hasNext = (includeStart && start.equals(current))
-                || (!includeStart && !Strings.isNullOrEmpty(getPropertyNext(current)));
+                || (!includeStart && !Strings.isNullOrEmpty(next)
+                    && ensureAndCleanNode(
+                                  builder, next, 
+                                  currentName == null ? "" : currentName, 
+                                  0,
+                                  dlc));
                         
             return hasNext;
         }
@@ -809,7 +830,7 @@ public class OrderedContentMirrorStoreStrategy extends ContentMirrorStoreStrateg
      * last argument
      */
     String seek(@Nonnull NodeBuilder index, @Nonnull Predicate<String> condition) {
-        return seek(index, condition, null);
+        return seek(index, condition, null, 0, new LoggingDanglinLinkCallback());
     }
     
     /**
@@ -823,11 +844,14 @@ public class OrderedContentMirrorStoreStrategy extends ContentMirrorStoreStrateg
      *            lane represented by the corresponding position in the array. <b>You have</b> to
      *            pass in an array already sized as {@link OrderedIndex#LANES} or an
      *            {@link IllegalArgumentException} will be raised
+     * @param retries the number of retries
      * @return the entry or null if not found
      */
     String seek(@Nonnull final NodeBuilder index,
                                @Nonnull final Predicate<String> condition,
-                               @Nullable final String[] walkedLanes) {
+                               @Nullable final String[] walkedLanes, 
+                               int retries,
+                               @Nullable DanglingLinkCallback callback) {
         boolean keepWalked = false;
         String searchfor = condition.getSearchFor();
         if (LOG.isDebugEnabled()) {
@@ -875,10 +899,13 @@ public class OrderedContentMirrorStoreStrategy extends ContentMirrorStoreStrateg
                     lane++;
                 } else {
                     if (condition.apply(nextkey)) {
+                        // this branch is used so far only for range queries.
+                        // while figuring out how to correctly reproduce the issue is less risky
+                        // to leave this untouched.
                         found = nextkey;
                     } else {
                         currentKey = nextkey;
-                        if (keepWalked && !Strings.isNullOrEmpty(currentKey)) {
+                        if (keepWalked && !Strings.isNullOrEmpty(currentKey) && walkedLanes != null) {
                             walkedLanes[lane] = currentKey;
                         }
                     }
@@ -889,7 +916,11 @@ public class OrderedContentMirrorStoreStrategy extends ContentMirrorStoreStrateg
             
             lane = OrderedIndex.LANES - 1;
             NodeBuilder currentNode = null;
+            int iteration = 0;
+            boolean exitCondition = true;
+            
             do {
+                iteration++;
                 stillLaning = lane > 0;
                 if (currentNode == null) {
                     currentNode = index.getChildNode(currentKey);
@@ -901,21 +932,85 @@ public class OrderedContentMirrorStoreStrategy extends ContentMirrorStoreStrateg
                     lane--;
                 } else {
                     if (condition.apply(nextkey)) {
-                        found = nextkey;
+                        if (ensureAndCleanNode(index, nextkey, currentKey, lane, callback)) {
+                            found = nextkey;
+                        } else {
+                            if (retries < MAX_RETRIES) {
+                                return seek(index, condition, walkedLanes, ++retries, callback);
+                            } else {
+                                LOG.debug(
+                                    "Attempted a lookup and fix for {} times. Leaving it be and returning null",
+                                    retries);
+                                return null;
+                            }
+                        }
                     } else {
                         currentKey = nextkey;
                         currentNode = null;
-                        if (keepWalked && !Strings.isNullOrEmpty(currentKey)) {
+                        if (keepWalked && !Strings.isNullOrEmpty(currentKey) && walkedLanes != null) {
                             for (int l = lane; l >= 0; l--) {
                                 walkedLanes[l] = currentKey;
                             }
                         }
                     }
                 }
-            } while (((!Strings.isNullOrEmpty(nextkey) && walkingPredicate.apply(nextkey)) || stillLaning) && (found == null));
+                
+                exitCondition = ((!Strings.isNullOrEmpty(nextkey) && walkingPredicate
+                    .apply(nextkey)) || stillLaning) && (found == null);
+                
+                if (LOG.isTraceEnabled()) {
+                    LOG.trace("seek()::plain case - --- iteration: {}", iteration);
+                    LOG.trace("seek()::plain case - retries: {},  MAX_RETRIES: {}", retries,
+                        MAX_RETRIES);
+                    LOG.trace("seek()::plain case - lane: {}", lane);
+                    LOG.trace("seek()::plain case - currentKey: {}", currentKey);
+                    LOG.trace("seek()::plain case - nextkey: {}", nextkey);
+                    LOG.trace("seek()::plain case - condition.apply(nextkey): {}",
+                        condition.apply(nextkey));
+                    LOG.trace("seek()::plain case - found: {}", found);
+                    LOG.trace("seek()::plain case - !Strings.isNullOrEmpty(nextkey): {}",
+                        !Strings.isNullOrEmpty(nextkey));
+                    LOG.trace("seek()::plain case - walkingPredicate.apply(nextkey): {}",
+                        walkingPredicate.apply(nextkey));
+                    LOG.trace("seek()::plain case - stillLaning: {}", stillLaning);
+                    LOG.trace(
+                        "seek()::plain case - While Condition: {}",
+                        exitCondition);
+                }
+            } while (exitCondition);
         }
         
         return found;
+    }
+    
+    /**
+     * ensure that the provided {@code next} actually exists as node. Attempt to clean it up
+     * otherwise.
+     * 
+     * @param index the {@code :index} node
+     * @param next the {@code :next} retrieved for the provided lane
+     * @param current the current node from which {@code :next} has been retrieved
+     * @param lane the lane on which we're looking into
+     * @return true if the node exists, false otherwise
+     */
+    private static boolean ensureAndCleanNode(@Nonnull final NodeBuilder index, 
+                                              @Nonnull final String next,
+                                              @Nonnull final String current,
+                                              final int lane,
+                                              @Nullable DanglingLinkCallback callback) {
+        checkNotNull(index);
+        checkNotNull(next);
+        checkNotNull(current);
+        checkArgument(lane < LANES && lane >= 0, "The lane must be between 0 and LANES");
+        
+        if (index.getChildNode(next).exists()) {
+            return true;
+        } else {
+            if (callback != null) {
+                callback.perform(current, next, lane);
+            }
+            return false;
+        }
     }
     
     /**
@@ -1120,7 +1215,7 @@ public class OrderedContentMirrorStoreStrategy extends ContentMirrorStoreStrateg
      * @param value
      * @param lane
      */
-    static void setPropertyNext(@Nonnull final NodeBuilder node, 
+    public static void setPropertyNext(@Nonnull final NodeBuilder node, 
                                 final String value, final int lane) {
         if (node != null && value != null && lane >= 0 && lane < OrderedIndex.LANES) {
             PropertyState next = node.getProperty(NEXT);
@@ -1168,14 +1263,14 @@ public class OrderedContentMirrorStoreStrategy extends ContentMirrorStoreStrateg
     /**
      * short-cut for using NodeBuilder. See {@code getNext(NodeState)}
      */
-    static String getPropertyNext(@Nonnull final NodeBuilder node) {
+    public static String getPropertyNext(@Nonnull final NodeBuilder node) {
         return getPropertyNext(node, 0);
     }
 
     /**
      * short-cut for using NodeBuilder. See {@code getNext(NodeState)}
      */
-    static String getPropertyNext(@Nonnull final NodeBuilder node, final int lane) {
+    public static String getPropertyNext(@Nonnull final NodeBuilder node, final int lane) {
         checkNotNull(node);
         
         String next = "";
@@ -1217,7 +1312,7 @@ public class OrderedContentMirrorStoreStrategy extends ContentMirrorStoreStrateg
      * @param rnd the Random generator to be used for probability
      * @return the lane to be updated. 
      */
-    int getLane(@Nonnull final Random rnd) {
+    protected int getLane(@Nonnull final Random rnd) {
         final int maxLanes = OrderedIndex.LANES - 1;
         int lane = 0;
         
@@ -1226,5 +1321,65 @@ public class OrderedContentMirrorStoreStrategy extends ContentMirrorStoreStrateg
         }
         
         return lane;
+    }
+    
+    /**
+     * implementors of this interface will deal with the dangling link cases along the list
+     * (OAK-2077)
+     */
+    interface DanglingLinkCallback {
+        /**
+         * perform the required operation on the provided {@code current} node for the {@code next}
+         * value on {@code lane}
+         * 
+         * @param current the current node with the dangling link
+         * @param next the value pointing to the missing node
+         * @param lane the lane on which the link is on
+         */
+        void perform(String current, String next, int lane);
+    }
+    
+    /**
+     * implements a "Read-only" version for managing the dangling links which will simply track down
+     * in logs the presence of it
+     */
+    static class LoggingDanglinLinkCallback implements DanglingLinkCallback {
+        private boolean alreadyLogged;
+        
+        @Override
+        public void perform(@Nonnull final String current, 
+                            @Nonnull final String next, 
+                            int lane) {
+            checkNotNull(next);
+            checkNotNull(current);
+            checkArgument(lane < LANES && lane >= 0, "The lane must be between 0 and LANES");
+
+            if (!alreadyLogged) {
+                LOG.warn(
+                    "Dangling link to '{}' found on lane '{}' for key '{}'. Trying to clean it up. You may consider a reindex",
+                    new Object[] { next, lane, current });
+                alreadyLogged = true;
+            }
+        }
+    }
+    
+    static class FixingDanglingLinkCallback extends LoggingDanglinLinkCallback {
+        private final NodeBuilder indexContent;
+        
+        public FixingDanglingLinkCallback(@Nonnull final NodeBuilder indexContent) {
+            this.indexContent = checkNotNull(indexContent);
+        }
+
+        @Override
+        public void perform(String current, String next, int lane) {
+            super.perform(current, next, lane);
+            // as we're already pointing to nowhere it's safe to truncate here and avoid
+            // future errors. We'll fix all the lanes from slowest to fastest starting from the lane
+            // with the error. This should keep the list a bit more consistent with what is
+            // expected.
+            for (int l = lane; l < LANES; l++) {
+                setPropertyNext(indexContent.getChildNode(current), "", lane);                
+            }
+        }
     }
 }

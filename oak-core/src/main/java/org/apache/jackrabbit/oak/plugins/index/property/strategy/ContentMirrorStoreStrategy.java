@@ -26,6 +26,7 @@ import java.util.Iterator;
 import java.util.Set;
 
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Type;
@@ -38,6 +39,7 @@ import org.apache.jackrabbit.oak.spi.state.ChildNodeEntry;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.apache.jackrabbit.oak.spi.state.NodeStateUtils;
+import org.apache.jackrabbit.oak.util.ApproximateCounter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -79,6 +81,8 @@ public class ContentMirrorStoreStrategy implements IndexStoreStrategy {
     @Override
     public void update(
             NodeBuilder index, String path,
+            @Nullable final String indexName,
+            @Nullable final NodeBuilder indexMeta,
             Set<String> beforeKeys, Set<String> afterKeys) {
         for (String key : beforeKeys) {
             remove(index, key, path);
@@ -89,8 +93,10 @@ public class ContentMirrorStoreStrategy implements IndexStoreStrategy {
     }
 
     private void remove(NodeBuilder index, String key, String value) {
+        ApproximateCounter.adjustCountSync(index, -1);
         NodeBuilder builder = index.getChildNode(key);
         if (builder.exists()) {
+            ApproximateCounter.adjustCountSync(builder, -1);
             // Collect all builders along the given path
             Deque<NodeBuilder> builders = newArrayDeque();
             builders.addFirst(builder);
@@ -112,8 +118,10 @@ public class ContentMirrorStoreStrategy implements IndexStoreStrategy {
     }
 
     private void insert(NodeBuilder index, String key, String value) {
+        ApproximateCounter.adjustCountSync(index, 1);
         // NodeBuilder builder = index.child(key);
         NodeBuilder builder = fetchKeyNode(index, key);
+        ApproximateCounter.adjustCountSync(builder, 1);
         for (String name : PathUtils.elements(value)) {
             builder = builder.child(name);
         }
@@ -176,11 +184,20 @@ public class ContentMirrorStoreStrategy implements IndexStoreStrategy {
     public long count(Filter filter, NodeState indexMeta, final String indexStorageNodeName,
             Set<String> values, int max) {
         NodeState index = indexMeta.getChildNode(indexStorageNodeName);
-        int count = 0;
+        long count = 0;
         if (values == null) {
             PropertyState ec = indexMeta.getProperty(ENTRY_COUNT_PROPERTY_NAME);
             if (ec != null) {
-                return ec.getValue(Type.LONG);
+                count = ec.getValue(Type.LONG);
+                if (count >= 0) {
+                    return count;
+                }
+            }
+            if (count == 0) {
+                long approxCount = ApproximateCounter.getCountSync(index);
+                if (approxCount != -1) {
+                    return approxCount;
+                }
             }
             CountingNodeVisitor v = new CountingNodeVisitor(max);
             v.visit(index);
@@ -196,26 +213,50 @@ public class ContentMirrorStoreStrategy implements IndexStoreStrategy {
             }
             PropertyState ec = indexMeta.getProperty(ENTRY_COUNT_PROPERTY_NAME);       
             if (ec != null) {
-                long entryCount = ec.getValue(Type.LONG);
-                // assume 10000 entries per key, so that this index is used
-                // instead of traversal, but not instead of a regular property index
-                long keyCount = entryCount / 10000;
-                ec = indexMeta.getProperty(KEY_COUNT_PROPERTY_NAME);
-                if (ec != null) {
-                    keyCount = ec.getValue(Type.LONG);
+                count = ec.getValue(Type.LONG);
+                if (count >= 0) {
+                    // assume 10000 entries per key, so that this index is used
+                    // instead of traversal, but not instead of a regular property index
+                    long keyCount = count / 10000;
+                    ec = indexMeta.getProperty(KEY_COUNT_PROPERTY_NAME);
+                    if (ec != null) {
+                        keyCount = ec.getValue(Type.LONG);
+                    }
+                    // cast to double to avoid overflow 
+                    // (entryCount could be Long.MAX_VALUE)
+                    // the cost is not multiplied by the size, 
+                    // otherwise the traversing index might be used              
+                    keyCount = Math.max(1, keyCount);
+                    return (long) ((double) count / keyCount) + size;
                 }
-                // cast to double to avoid overflow 
-                // (entryCount could be Long.MAX_VALUE)
-                // the cost is not multiplied by the size, 
-                // otherwise the traversing index might be used
-                return (long) ((double) entryCount / keyCount) + size;
             }
+            long approxMax = 0;
+            if (count == 0) {
+                long approxCount = ApproximateCounter.getCountSync(index);
+                if (approxCount != -1) {
+                    for (String p : values) {
+                        NodeState s = index.getChildNode(p);
+                        if (s.exists()) {
+                            long a = ApproximateCounter.getCountSync(s);
+                            if (a != -1) {
+                                approxMax += a;
+                            }
+                        }
+                    }
+                }
+            }
+            count = 0;
             max = Math.max(10, max / size);
             int i = 0;
             String filterRootPath = null;
             if (filter != null &&
                     filter.getPathRestriction().equals(Filter.PathRestriction.ALL_CHILDREN)) {
                 filterRootPath = filter.getPath();
+            }
+            if (filterRootPath == null && approxMax > 0) {
+                // we do have an approximation, and
+                // there is no path filter
+                return approxMax;
             }
             for (String p : values) {
                 if (count > max && i > 3) {
@@ -241,6 +282,12 @@ public class ContentMirrorStoreStrategy implements IndexStoreStrategy {
                     count += v.getEstimatedCount();
                 }
                 i++;
+            }
+            if (approxMax > 0 && approxMax > count) {
+                // we do have an approximation, and
+                // it is higher than what we counted
+                // (we don't count that far)
+                count = approxMax;
             }
         }
         return count;

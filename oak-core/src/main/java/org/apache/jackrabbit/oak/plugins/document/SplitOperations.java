@@ -39,9 +39,9 @@ import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 
 import static com.google.common.base.Preconditions.checkNotNull;
+import static com.google.common.collect.Sets.filter;
 import static org.apache.jackrabbit.oak.plugins.document.NodeDocument.COMMIT_ROOT;
 import static org.apache.jackrabbit.oak.plugins.document.NodeDocument.DOC_SIZE_THRESHOLD;
-import static org.apache.jackrabbit.oak.plugins.document.NodeDocument.IGNORE_ON_SPLIT;
 import static org.apache.jackrabbit.oak.plugins.document.NodeDocument.NUM_REVS_THRESHOLD;
 import static org.apache.jackrabbit.oak.plugins.document.NodeDocument.PREV_SPLIT_FACTOR;
 import static org.apache.jackrabbit.oak.plugins.document.NodeDocument.REVISIONS;
@@ -52,6 +52,7 @@ import static org.apache.jackrabbit.oak.plugins.document.NodeDocument.isRevision
 import static org.apache.jackrabbit.oak.plugins.document.NodeDocument.removePrevious;
 import static org.apache.jackrabbit.oak.plugins.document.NodeDocument.setHasBinary;
 import static org.apache.jackrabbit.oak.plugins.document.NodeDocument.setPrevious;
+import static org.apache.jackrabbit.oak.plugins.document.util.Utils.PROPERTY_OR_DELETED;
 import static org.apache.jackrabbit.oak.plugins.document.util.Utils.isRevisionNewer;
 
 /**
@@ -344,12 +345,7 @@ class SplitOperations {
     private Map<String, NavigableMap<Revision, String>> getCommittedLocalChanges() {
         Map<String, NavigableMap<Revision, String>> committedLocally
                 = new HashMap<String, NavigableMap<Revision, String>>();
-        for (String property : doc.keySet()) {
-            if (IGNORE_ON_SPLIT.contains(property)
-                    || isRevisionsEntry(property)
-                    || isCommitRootEntry(property)) {
-                continue;
-            }
+        for (String property : filter(doc.keySet(), PROPERTY_OR_DELETED)) {
             NavigableMap<Revision, String> splitMap
                     = new TreeMap<Revision, String>(context.getRevisionComparator());
             committedLocally.put(property, splitMap);

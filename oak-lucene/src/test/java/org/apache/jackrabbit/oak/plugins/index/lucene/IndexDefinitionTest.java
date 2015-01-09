@@ -22,10 +22,11 @@ package org.apache.jackrabbit.oak.plugins.index.lucene;
 import javax.jcr.PropertyType;
 
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Iterables;
 import org.apache.jackrabbit.JcrConstants;
 import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.commons.PathUtils;
+import org.apache.jackrabbit.oak.plugins.index.IndexConstants;
+import org.apache.jackrabbit.oak.plugins.index.lucene.util.TokenizerChain;
 import org.apache.jackrabbit.oak.plugins.tree.ImmutableTree;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
@@ -41,6 +42,8 @@ import static org.apache.jackrabbit.JcrConstants.NT_BASE;
 import static org.apache.jackrabbit.oak.api.Type.NAMES;
 import static org.apache.jackrabbit.oak.api.Type.STRINGS;
 import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.INDEX_DEFINITIONS_NAME;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.ANALYZERS;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.ANL_DEFAULT;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.INCLUDE_PROPERTY_NAMES;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.INCLUDE_PROPERTY_TYPES;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.INDEX_DATA_CHILD_NAME;
@@ -260,6 +263,32 @@ public class IndexDefinitionTest {
     }
 
     @Test
+    public void indexRuleWithPropertyRegEx2() throws Exception{
+        NodeBuilder rules = builder.child(INDEX_RULES);
+        rules.child("nt:folder");
+        child(rules, "nt:folder/properties/prop1")
+                .setProperty(LuceneIndexConstants.PROP_NAME, ".*")
+                .setProperty(LuceneIndexConstants.PROP_IS_REGEX, true);
+        child(rules, "nt:folder/properties/prop2")
+                .setProperty(LuceneIndexConstants.PROP_NAME, "metadata/.*")
+                .setProperty(LuceneIndexConstants.PROP_IS_REGEX, true)
+                .setProperty(LuceneIndexConstants.FIELD_BOOST, 4.0);
+
+
+        IndexDefinition defn = new IndexDefinition(root, builder.getNodeState());
+
+        IndexingRule rule1 = defn.getApplicableIndexingRule(newTree(newNode("nt:folder")));
+        assertNotNull(rule1);
+
+        assertTrue(rule1.isIndexed("prop1"));
+        assertTrue(rule1.isIndexed("prop2"));
+        assertFalse(rule1.isIndexed("jcr:content/prop1"));
+
+        assertTrue(rule1.isIndexed("metadata/foo"));
+        assertFalse(rule1.isIndexed("metadata/foo/bar"));
+    }
+
+    @Test
     public void indexRuleWithPropertyOrdering() throws Exception{
         NodeBuilder rules = builder.child(INDEX_RULES);
         rules.child("nt:folder");
@@ -409,6 +438,52 @@ public class IndexDefinitionTest {
         assertTrue(defn.isFullTextEnabled());
     }
 
+    @Test
+    public void costConfig() throws Exception{
+        NodeBuilder defnb = newLucenePropertyIndexDefinition(builder.child(INDEX_DEFINITIONS_NAME),
+                "lucene", of("foo"), "async");
+        IndexDefinition defn = new IndexDefinition(root, defnb.getNodeState());
+        assertEquals(1.0, defn.getCostPerEntry(), 0);
+        assertEquals(1.0, defn.getCostPerExecution(), 0);
+        assertEquals(IndexDefinition.DEFAULT_ENTRY_COUNT, defn.getEntryCount());
+        assertFalse(defn.isEntryCountDefined());
+
+        defnb.setProperty(LuceneIndexConstants.COST_PER_ENTRY, 2.0);
+        defnb.setProperty(LuceneIndexConstants.COST_PER_EXECUTION, 3.0);
+        defnb.setProperty(IndexConstants.ENTRY_COUNT_PROPERTY_NAME, 500);
+
+        IndexDefinition defn2 = new IndexDefinition(root, defnb.getNodeState());
+        assertEquals(2.0, defn2.getCostPerEntry(), 0);
+        assertEquals(3.0, defn2.getCostPerExecution(), 0);
+        assertEquals(500, defn2.getEntryCount());
+    }
+
+    @Test
+    public void fulltextCost() throws Exception{
+        NodeBuilder defnb = newLucenePropertyIndexDefinition(builder.child(INDEX_DEFINITIONS_NAME),
+                "lucene", of("foo"), "async");
+        IndexDefinition defn = new IndexDefinition(root, defnb.getNodeState());
+        assertEquals(300, defn.getFulltextEntryCount(300));
+        assertEquals(IndexDefinition.DEFAULT_ENTRY_COUNT + 100,
+                defn.getFulltextEntryCount(IndexDefinition.DEFAULT_ENTRY_COUNT + 100));
+
+        //Once count is explicitly defined then it would influence the cost
+        defnb.setProperty(IndexConstants.ENTRY_COUNT_PROPERTY_NAME, 100);
+        defn = new IndexDefinition(root, defnb.getNodeState());
+        assertEquals(100, defn.getFulltextEntryCount(300));
+        assertEquals(50, defn.getFulltextEntryCount(50));
+    }
+
+    @Test
+    public void customAnalyzer() throws Exception{
+        NodeBuilder defnb = newLuceneIndexDefinition(builder.child(INDEX_DEFINITIONS_NAME),
+                "lucene", of(TYPENAME_STRING));
+        defnb.child(ANALYZERS).child(ANL_DEFAULT)
+                .child(LuceneIndexConstants.ANL_TOKENIZER)
+                .setProperty(LuceneIndexConstants.ANL_NAME, "whitespace");
+        IndexDefinition defn = new IndexDefinition(root, defnb.getNodeState());
+        assertEquals(TokenizerChain.class.getName(), defn.getAnalyzer().getClass().getName());
+    }
 
     private static IndexingRule getRule(IndexDefinition defn, String typeName){
         return defn.getApplicableIndexingRule(newTree(newNode(typeName)));

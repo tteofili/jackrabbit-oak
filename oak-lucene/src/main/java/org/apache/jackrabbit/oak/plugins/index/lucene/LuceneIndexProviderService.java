@@ -44,7 +44,9 @@ import org.apache.jackrabbit.oak.spi.query.QueryIndexProvider;
 import org.apache.jackrabbit.oak.spi.whiteboard.Registration;
 import org.apache.jackrabbit.oak.spi.whiteboard.Whiteboard;
 import org.apache.jackrabbit.oak.spi.whiteboard.WhiteboardExecutor;
-import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.util.CharFilterFactory;
+import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.analysis.util.TokenizerFactory;
 import org.apache.lucene.util.InfoStream;
 import org.osgi.framework.BundleContext;
 import org.osgi.framework.ServiceRegistration;
@@ -66,19 +68,11 @@ public class LuceneIndexProviderService {
 
     private final Logger log = LoggerFactory.getLogger(getClass());
 
-    private final Analyzer defaultAnalyzer = LuceneIndexConstants.ANALYZER;
-
     @Reference(cardinality = ReferenceCardinality.OPTIONAL_UNARY,
             policyOption = ReferencePolicyOption.GREEDY,
             policy = ReferencePolicy.DYNAMIC
     )
     private NodeAggregator nodeAggregator;
-
-    @Reference(cardinality = ReferenceCardinality.OPTIONAL_UNARY,
-            policyOption = ReferencePolicyOption.GREEDY,
-            policy = ReferencePolicy.DYNAMIC
-    )
-    protected Analyzer analyzer;
 
     @Property(
             boolValue = false,
@@ -108,6 +102,7 @@ public class LuceneIndexProviderService {
     @Activate
     private void activate(BundleContext bundleContext, Map<String, ?> config)
             throws NotCompliantMBeanException {
+        initializeFactoryClassLoaders(getClass().getClassLoader());
         whiteboard = new OsgiWhiteboard(bundleContext);
 
         indexProvider = new LuceneIndexProvider(createTracker(bundleContext, config));
@@ -156,9 +151,6 @@ public class LuceneIndexProviderService {
         }
 
         indexProvider.setAggregator(nodeAggregator);
-
-        Analyzer analyzer = this.analyzer != null ? this.analyzer : defaultAnalyzer;
-        indexProvider.setAnalyzer(analyzer);
     }
 
     private void initializeLogging(Map<String, ?> config) {
@@ -202,6 +194,33 @@ public class LuceneIndexProviderService {
         return new IndexTracker();
     }
 
+    private void initializeFactoryClassLoaders(ClassLoader classLoader) {
+        ClassLoader originalClassLoader = Thread.currentThread()
+                .getContextClassLoader();
+        try {
+            Thread.currentThread().setContextClassLoader(classLoader);
+            //Access TokenizerFactory etc trigger a static initialization
+            //so switch the TCCL so that static initializer picks up the right
+            //classloader
+            initializeFactoryClassLoaders0(classLoader);
+        } catch (Throwable t) {
+            log.warn("Error occurred while initializing the Lucene " +
+                    "Factories", t);
+        } finally {
+            Thread.currentThread().setContextClassLoader(originalClassLoader);
+        }
+    }
+
+    private void initializeFactoryClassLoaders0(ClassLoader classLoader) {
+        //Factories use the Threads context classloader to perform SPI classes
+        //lookup by default which would not work in OSGi world. So reload the
+        //factories by providing the bundle classloader
+        TokenizerFactory.reloadTokenizers(classLoader);
+        CharFilterFactory.reloadCharFilters(classLoader);
+        TokenFilterFactory.reloadTokenFilters(classLoader);
+    }
+
+
     protected void bindNodeAggregator(NodeAggregator aggregator) {
         this.nodeAggregator = aggregator;
         initialize();
@@ -212,13 +231,4 @@ public class LuceneIndexProviderService {
         initialize();
     }
 
-    protected void bindAnalyzer(Analyzer analyzer) {
-        this.analyzer = analyzer;
-        initialize();
-    }
-
-    protected void unbindAnalyzer(Analyzer analyzer) {
-        this.analyzer = null;
-        initialize();
-    }
 }

@@ -52,6 +52,7 @@ public class RDBDocumentSerializer {
 
     private static final String MODIFIED = "_modified";
     private static final String MODCOUNT = "_modCount";
+    private static final String CMODCOUNT = "_collisionsModCount";
     private static final String ID = "_id";
     private static final String HASBINARY = NodeDocument.HAS_BINARY_FLAG;
 
@@ -62,6 +63,10 @@ public class RDBDocumentSerializer {
         this.columnProperties = columnProperties;
     }
 
+    /**
+     * Serializes all non-column properties of the {@link Document} into
+     * a JSON string.
+     */
     public String asString(@Nonnull Document doc) {
         StringBuilder sb = new StringBuilder(32768);
         sb.append("{");
@@ -183,23 +188,15 @@ public class RDBDocumentSerializer {
         sb.append('"');
     }
 
-    // JSON simple serializer
-    // private static String asString(@Nonnull Document doc) {
-    // JSONObject obj = new JSONObject();
-    // for (String key : doc.keySet()) {
-    // if (! COLUMNPROPERTIES.contains(key)) {
-    // Object value = doc.get(key);
-    // obj.put(key, value);
-    // }
-    // }
-    // return obj.toJSONString();
-    // }
-
-    public <T extends Document> T fromRow(Collection<T> collection, RDBRow row) throws DocumentStoreException {
+    /**
+     * Reconstructs a {@link Document) based on the persisted {@link DBRow}.
+     */
+    public <T extends Document> T fromRow(@Nonnull Collection<T> collection, @Nonnull RDBRow row) throws DocumentStoreException {
         T doc = collection.newDocument(store);
         doc.put(ID, row.getId());
         doc.put(MODIFIED, row.getModified());
         doc.put(MODCOUNT, row.getModcount());
+        doc.put(CMODCOUNT, row.getCollisionsModcount());
         if (row.hasBinaryProperties()) {
             doc.put(HASBINARY, NodeDocument.HAS_BINARY_VAL);
         }
@@ -209,7 +206,10 @@ public class RDBDocumentSerializer {
         Map<String, Object> baseData = null;
         byte[] bdata = row.getBdata();
         JSONArray arr = null;
+        int updatesStartAt = 0;
 
+        // case #1: BDATA (blob) contains base data, DATA (string) contains
+        // update operations
         try {
             if (bdata != null && bdata.length != 0) {
                 baseData = (Map<String, Object>) jp.parse(fromBlobData(bdata));
@@ -220,26 +220,26 @@ public class RDBDocumentSerializer {
             throw new DocumentStoreException(ex);
         }
 
-        int updatesStartAt = 0;
+        // case #2: if we do not have BDATA (blob), the first part of DATA
+        // (string) already is the base data, and update operations can follow
         if (baseData == null) {
-            // if we do not have a blob, the first part of the string data is
-            // the base JSON
             baseData = (Map<String, Object>) arr.get(0);
             updatesStartAt = 1;
         }
 
+        // process the base data
         for (Map.Entry<String, Object> entry : baseData.entrySet()) {
             String key = entry.getKey();
             Object value = entry.getValue();
             if (value == null) {
-                // ???
+                // TODO ???
                 doc.put(key, value);
             } else if (value instanceof Boolean || value instanceof Long || value instanceof String) {
                 doc.put(key, value);
             } else if (value instanceof JSONObject) {
                 doc.put(key, convertJsonObject((JSONObject) value));
             } else {
-                throw new RuntimeException("unexpected type: " + value.getClass());
+                throw new DocumentStoreException("unexpected type: " + value.getClass());
             }
         }
 
@@ -249,78 +249,80 @@ public class RDBDocumentSerializer {
                 JSONArray update = (JSONArray) ob;
                 for (int o = 0; o < update.size(); o++) {
                     JSONArray op = (JSONArray) update.get(o);
-                    String opcode = op.get(0).toString();
-                    String key = op.get(1).toString();
-                    Revision rev = null;
-                    Object value = null;
-                    if (op.size() == 3) {
-                        value = op.get(2);
-                    } else {
-                        rev = Revision.fromString(op.get(2).toString());
-                        value = op.get(3);
-                    }
-                    Object old = doc.get(key);
-
-                    if ("=".equals(opcode)) {
-                        if (rev == null) {
-                            doc.put(key, value);
-                        } else {
-                            @SuppressWarnings("unchecked")
-                            Map<Revision, Object> m = (Map<Revision, Object>) old;
-                            if (m == null) {
-                                m = new TreeMap<Revision, Object>(comparator);
-                                doc.put(key, m);
-                            }
-                            m.put(rev, value);
-                        }
-                    } else if ("*".equals(opcode)) {
-                        if (rev == null) {
-                            throw new RuntimeException("unexpected operation " + op + "in: " + ob);
-                        } else {
-                            @SuppressWarnings("unchecked")
-                            Map<Revision, Object> m = (Map<Revision, Object>) old;
-                            if (m != null) {
-                                m.remove(rev);
-                            }
-                        }
-                    } else if ("+".equals(opcode)) {
-                        if (rev == null) {
-                            Long x = (Long) value;
-                            if (old == null) {
-                                old = 0L;
-                            }
-                            doc.put(key, ((Long) old) + x);
-                        } else {
-                            throw new RuntimeException("unexpected operation " + op + "in: " + ob);
-                        }
-                    } else if ("M".equals(opcode)) {
-                        if (rev == null) {
-                            Comparable newValue = (Comparable) value;
-                            if (old == null || newValue.compareTo(old) > 0) {
-                                doc.put(key, value);
-                            }
-                        } else {
-                            throw new RuntimeException("unexpected operation " + op + "in: " + ob);
-                        }
-                    } else {
-                        throw new RuntimeException("unexpected operation " + op + "in: " + ob);
-                    }
+                    applyUpdate(doc, update, op);
                 }
             } else if (ob.toString().equals("blob") && u == 0) {
                 // expected placeholder
             } else {
-                throw new RuntimeException("unexpected: " + ob);
+                throw new DocumentStoreException("unexpected JSON in DATA column: " + ob);
             }
         }
         return doc;
     }
 
+    private <T extends Document> void applyUpdate(T doc, JSONArray update, JSONArray op) {
+        String opcode = op.get(0).toString();
+        String key = op.get(1).toString();
+        Revision rev = null;
+        Object value = null;
+        if (op.size() == 3) {
+            value = op.get(2);
+        } else {
+            rev = Revision.fromString(op.get(2).toString());
+            value = op.get(3);
+        }
+        Object old = doc.get(key);
+
+        if ("=".equals(opcode)) {
+            if (rev == null) {
+                doc.put(key, value);
+            } else {
+                @SuppressWarnings("unchecked")
+                Map<Revision, Object> m = (Map<Revision, Object>) old;
+                if (m == null) {
+                    m = new TreeMap<Revision, Object>(comparator);
+                    doc.put(key, m);
+                }
+                m.put(rev, value);
+            }
+        } else if ("*".equals(opcode)) {
+            if (rev == null) {
+                throw new DocumentStoreException("unexpected operation " + op + " in: " + update);
+            } else {
+                @SuppressWarnings("unchecked")
+                Map<Revision, Object> m = (Map<Revision, Object>) old;
+                if (m != null) {
+                    m.remove(rev);
+                }
+            }
+        } else if ("+".equals(opcode)) {
+            if (rev == null) {
+                Long x = (Long) value;
+                if (old == null) {
+                    old = 0L;
+                }
+                doc.put(key, ((Long) old) + x);
+            } else {
+                throw new DocumentStoreException("unexpected operation " + op + " in: " + update);
+            }
+        } else if ("M".equals(opcode)) {
+            if (rev == null) {
+                Comparable newValue = (Comparable) value;
+                if (old == null || newValue.compareTo(old) > 0) {
+                    doc.put(key, value);
+                }
+            } else {
+                throw new DocumentStoreException("unexpected operation " + op + " in: " + update);
+            }
+        } else {
+            throw new DocumentStoreException("unexpected operation " + op + " in: " + update);
+        }
+    }
+
     @Nonnull
     private Map<Revision, Object> convertJsonObject(@Nonnull JSONObject obj) {
         Map<Revision, Object> map = new TreeMap<Revision, Object>(comparator);
-        Set<Map.Entry> entries = obj.entrySet();
-        for (Map.Entry entry : entries) {
-            // not clear why every persisted map is a revision map
+        for (Map.Entry entry : (Set<Map.Entry>)obj.entrySet()) {
             map.put(Revision.fromString(entry.getKey().toString()), entry.getValue());
         }
         return map;

@@ -19,7 +19,9 @@ package org.apache.jackrabbit.oak.plugins.index.lucene;
 import static org.apache.jackrabbit.JcrConstants.JCR_DATA;
 import static org.apache.jackrabbit.oak.commons.PathUtils.concat;
 import static org.apache.jackrabbit.oak.commons.PathUtils.getName;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.FieldFactory.newDepthField;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.FieldFactory.newFulltextField;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.FieldFactory.newAncestorsField;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.FieldFactory.newPathField;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.FieldFactory.newPropertyField;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.TermFactory.newPathTerm;
@@ -51,7 +53,6 @@ import org.apache.jackrabbit.oak.plugins.tree.ImmutableTree;
 import org.apache.jackrabbit.oak.spi.commit.Editor;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
-import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.DoubleDocValuesField;
 import org.apache.lucene.document.DoubleField;
@@ -108,12 +109,12 @@ public class LuceneIndexEditor implements IndexEditor, Aggregate.AggregateRoot {
 
     private final MatcherState matcherState;
 
-    LuceneIndexEditor(NodeState root, NodeBuilder definition, Analyzer analyzer,
+    LuceneIndexEditor(NodeState root, NodeBuilder definition,
         IndexUpdateCallback updateCallback) throws CommitFailedException {
         this.parent = null;
         this.name = null;
         this.path = "/";
-        this.context = new LuceneIndexEditorContext(root, definition, analyzer,
+        this.context = new LuceneIndexEditorContext(root, definition,
                 updateCallback);
         this.root = root;
         this.isDeleted = false;
@@ -290,7 +291,7 @@ public class LuceneIndexEditor implements IndexEditor, Aggregate.AggregateRoot {
                 dirty |= addTypedOrderedFields(fields, property, pname, pd);
             }
 
-            dirty |= indexProperty(path, fields, state, property, pname, false, pd);
+            dirty |= indexProperty(path, fields, state, property, pname, pd);
         }
 
         dirty |= indexAggregates(path, fields, state);
@@ -314,6 +315,12 @@ public class LuceneIndexEditor implements IndexEditor, Aggregate.AggregateRoot {
         if (indexingRule.isFulltextEnabled()) {
             document.add(newFulltextField(name));
         }
+
+        if (getDefinition().evaluatePathRestrictions()){
+            document.add(newAncestorsField(PathUtils.getParentPath(path)));
+            document.add(newDepthField(path));
+        }
+
         for (Field f : fields) {
             document.add(f);
         }
@@ -328,7 +335,6 @@ public class LuceneIndexEditor implements IndexEditor, Aggregate.AggregateRoot {
                                   NodeState state,
                                   PropertyState property,
                                   String pname,
-                                  boolean aggregateMode,
                                   PropertyDefinition pd) throws CommitFailedException {
         boolean includeTypeForFullText = indexingRule.includePropertyType(property.getType().tag());
         if (Type.BINARY.tag() == property.getType().tag()
@@ -351,7 +357,7 @@ public class LuceneIndexEditor implements IndexEditor, Aggregate.AggregateRoot {
                         fields.add(newPropertyField(analyzedPropName, value, !pd.skipTokenization(pname), pd.stored));
                     }
 
-                    if (pd.nodeScopeIndex && !aggregateMode) {
+                    if (pd.nodeScopeIndex) {
                         Field field = newFulltextField(value);
                         field.setBoost(pd.boost);
                         fields.add(field);
@@ -526,7 +532,7 @@ public class LuceneIndexEditor implements IndexEditor, Aggregate.AggregateRoot {
                             result.propertyPath, result.pd);
                 }
                 dirty |= indexProperty(path, fields, state, result.propertyState,
-                        result.propertyPath, true, result.pd);
+                        result.propertyPath, result.pd);
 
                 if (dirty) {
                     dirtyFlag.set(true);

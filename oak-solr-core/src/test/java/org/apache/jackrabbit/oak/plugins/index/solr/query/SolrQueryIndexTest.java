@@ -20,6 +20,8 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 
+import javax.annotation.Nonnull;
+
 import org.apache.jackrabbit.oak.plugins.index.solr.TestUtils;
 import org.apache.jackrabbit.oak.plugins.index.solr.configuration.DefaultSolrConfiguration;
 import org.apache.jackrabbit.oak.plugins.index.solr.configuration.OakSolrConfiguration;
@@ -34,7 +36,6 @@ import org.apache.solr.client.solrj.SolrServer;
 import org.apache.solr.common.SolrInputDocument;
 import org.junit.Test;
 
-import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.Matchers.any;
@@ -184,6 +185,7 @@ public class SolrQueryIndexTest {
                 return true;
             }
 
+            @Nonnull
             @Override
             public Collection<String> getIgnoredProperties() {
                 return Arrays.asList("name");
@@ -215,6 +217,7 @@ public class SolrQueryIndexTest {
                 return true;
             }
 
+            @Nonnull
             @Override
             public Collection<String> getIgnoredProperties() {
                 return Arrays.asList("name");
@@ -254,5 +257,30 @@ public class SolrQueryIndexTest {
         String plan = solrQueryIndex.getPlan(filter, root);
         assertNotNull(plan);
         assertTrue(plan.contains("q=name%3Ahello")); // query gets converted to a fielded query on name field
+    }
+
+    @Test
+    public void testUnion() throws Exception {
+        NodeState root = mock(NodeState.class);
+        when(root.getNames(any(String.class))).thenReturn(Collections.<String>emptySet());
+        SelectorImpl selector = new SelectorImpl(root, "a");
+        String sqlQuery = "select [jcr:path], [jcr:score], [rep:excerpt] from [nt:hierarchyNode] as a where" +
+                " isdescendantnode(a, '/content') and contains([jcr:content/*], 'founded') union select [jcr:path]," +
+                " [jcr:score], [rep:excerpt] from [nt:hierarchyNode] as a where isdescendantnode(a, '/content') and " +
+                "contains([jcr:content/jcr:title], 'founded') union select [jcr:path], [jcr:score], [rep:excerpt]" +
+                " from [nt:hierarchyNode] as a where isdescendantnode(a, '/content') and " +
+                "contains([jcr:content/jcr:description], 'founded') order by [jcr:score] desc";
+        SolrServer solrServer = TestUtils.createSolrServer();
+        OakSolrConfiguration configuration = new DefaultSolrConfiguration() {
+            @Override
+            public boolean useForPropertyRestrictions() {
+                return true;
+            }
+        };
+        SolrQueryIndex solrQueryIndex = new SolrQueryIndex("solr", solrServer, configuration);
+        FilterImpl filter = new FilterImpl(selector, sqlQuery, new QueryEngineSettings());
+        Cursor cursor = solrQueryIndex.query(filter, root);
+        assertNotNull(cursor);
+
     }
 }

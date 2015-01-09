@@ -31,6 +31,7 @@ import com.google.common.collect.Iterables;
 import org.apache.jackrabbit.JcrConstants;
 import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.plugins.index.lucene.IndexDefinition.IndexingRule;
+import org.apache.jackrabbit.oak.query.fulltext.FullTextContains;
 import org.apache.jackrabbit.oak.query.fulltext.FullTextExpression;
 import org.apache.jackrabbit.oak.query.fulltext.FullTextTerm;
 import org.apache.jackrabbit.oak.query.fulltext.FullTextVisitor;
@@ -99,11 +100,11 @@ class IndexPlanner {
     }
 
     private IndexPlan.Builder getPlanBuilder() {
-        log.debug("Evaluating plan with index definition {}", defn);
+        log.trace("Evaluating plan with index definition {}", defn);
         FullTextExpression ft = filter.getFullTextConstraint();
 
         if (!defn.getVersion().isAtLeast(IndexFormatVersion.V2)){
-            log.debug("Index is old format. Not supported");
+            log.trace("Index is old format. Not supported");
             return null;
         }
 
@@ -177,7 +178,7 @@ class IndexPlanner {
                 result.enableNonFullTextConstraints();
             }
 
-            return plan.setCostPerEntry(1.0 / costPerEntryFactor);
+            return plan.setCostPerEntry(defn.getCostPerEntry() / costPerEntryFactor);
         }
 
         //TODO Support for property existence queries
@@ -200,8 +201,19 @@ class IndexPlanner {
         final AtomicBoolean relativeParentsFound = new AtomicBoolean();
         ft.accept(new FullTextVisitor.FullTextVisitorBase() {
             @Override
+            public boolean visit(FullTextContains contains) {
+                visitTerm(contains.getPropertyName());
+                return true;
+            }
+
+            @Override
             public boolean visit(FullTextTerm term) {
-                String p = term.getPropertyName();
+                visitTerm(term.getPropertyName());
+                return true;
+            }
+                
+            private void visitTerm(String propertyName) {
+                String p = propertyName;
                 String propertyPath = null;
                 String nodePath = null;
                 if (p == null) {
@@ -229,8 +241,6 @@ class IndexPlanner {
                         && !indexingRule.isIndexed(propertyPath)){
                     nonIndexedPaths.add(p);
                 }
-
-                return true;
             }
         });
 
@@ -267,8 +277,8 @@ class IndexPlanner {
 
     private IndexPlan.Builder defaultPlan() {
         return new IndexPlan.Builder()
-                .setCostPerExecution(1) // we're local. Low-cost
-                .setCostPerEntry(1)
+                .setCostPerExecution(defn.getCostPerExecution())
+                .setCostPerEntry(defn.getCostPerEntry())
                 .setFulltextIndex(defn.isFullTextEnabled())
                 .setIncludesNodeData(false) // we should not include node data
                 .setFilter(filter)
@@ -284,12 +294,13 @@ class IndexPlanner {
         //to be compared fairly
         FullTextExpression ft = filter.getFullTextConstraint();
         if (ft != null && defn.isFullTextEnabled()){
-            return getReader().numDocs();
+            return defn.getFulltextEntryCount(getReader().numDocs());
         }
         return Math.min(defn.getEntryCount(), getReader().numDocs());
     }
 
     private String getPathPrefix() {
+        // 2 = /oak:index/<index name>
         String parentPath = PathUtils.getAncestorPath(indexPath, 2);
         return PathUtils.denotesRoot(parentPath) ? "" : parentPath;
     }
@@ -312,8 +323,12 @@ class IndexPlanner {
                     && !o.getPropertyType().isArray()) {
                 orderEntries.add(o); //Lucene can manage any order desc/asc
                 result.sortedProperties.add(pd);
+            } else if (o.getPropertyName().equals(IndexDefinition.NATIVE_SORT_ORDER.getPropertyName())) {
+                // Supports jcr:score descending natively
+                orderEntries.add(IndexDefinition.NATIVE_SORT_ORDER);
             }
         }
+
         //TODO Should we return order entries only when all order clauses are satisfied
         return orderEntries;
     }
@@ -331,11 +346,19 @@ class IndexPlanner {
                     //some condition defined. So again find a rule which applies
                     IndexingRule matchingRule = defn.getApplicableIndexingRule(rule.getNodeTypeName());
                     if (matchingRule != null){
+                        log.debug("Applicable IndexingRule found {}", matchingRule);
                         return rule;
                     }
                 }
+                //nt:base is applicable for all. This specific condition is
+                //required to support mixin case as filter.getSupertypes() for mixin based
+                //query only includes the mixin type and not nt:base
+                if (rule.getNodeTypeName().equals(JcrConstants.NT_BASE)){
+                    return rule;
+                }
             }
-            log.debug("No applicable IndexingRule found for any of the superTypes {}", filter.getSupertypes());
+            log.trace("No applicable IndexingRule found for any of the superTypes {}",
+                filter.getSupertypes());
         }
         return null;
     }
