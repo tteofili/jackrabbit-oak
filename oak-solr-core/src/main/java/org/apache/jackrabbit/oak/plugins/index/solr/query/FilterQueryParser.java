@@ -351,7 +351,6 @@ class FilterQueryParser {
             }
             stringBuilder.append(partialEscape(p));
         }
-        System.err.println("filter on " + nodes.size() + " paths");
 
         query.addFilterQuery(configuration.getFieldForPathRestriction(
                 Filter.PathRestriction.EXACT) + ":(" + stringBuilder.toString() + ")");
