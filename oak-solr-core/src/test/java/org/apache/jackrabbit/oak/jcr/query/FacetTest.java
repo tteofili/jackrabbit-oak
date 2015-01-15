@@ -21,6 +21,7 @@ package org.apache.jackrabbit.oak.jcr.query;
 import javax.jcr.Node;
 import javax.jcr.RepositoryException;
 import javax.jcr.Session;
+import javax.jcr.SimpleCredentials;
 import javax.jcr.Value;
 import javax.jcr.query.Query;
 import javax.jcr.query.QueryManager;
@@ -45,6 +46,28 @@ public class FacetTest extends AbstractQueryTest {
         Node n3 = testRootNode.addNode("node3");
         n3.setProperty("text", "oh hallo");
         session.save();
+
+        String sql2 = "select [jcr:path], [facet(text)] from [nt:base] " +
+                "where contains([text], 'hello OR hallo') order by [jcr:path]";
+        Query q = qm.createQuery(sql2, Query.JCR_SQL2);
+        QueryResult result = q.execute();
+        String facetResult = "text:[hallo (2), hello (1), oh (1)]";
+        assertEquals(facetResult + ", " + facetResult + ", " + facetResult, getResult(result, "facet(text)"));
+    }
+
+    public void testFacetRetrievalWithAnonymousUser() throws Exception {
+        Session session = superuser;
+
+        Node n1 = testRootNode.addNode("node1");
+        n1.setProperty("text", "hello");
+        Node n2 = testRootNode.addNode("node2");
+        n2.setProperty("text", "hallo");
+        Node n3 = testRootNode.addNode("node3");
+        n3.setProperty("text", "oh hallo");
+        session.save();
+
+        session = getHelper().getReadOnlySession();
+        QueryManager qm = session.getWorkspace().getQueryManager();
 
         String sql2 = "select [jcr:path], [facet(text)] from [nt:base] " +
                 "where contains([text], 'hello OR hallo') order by [jcr:path]";

@@ -423,7 +423,7 @@ Lucene will flush based on whichever limit is hit first.  -->
            be based on the last SolrCore to be initialized.
 
         -->
-        <maxBooleanClauses>1024</maxBooleanClauses>
+        <maxBooleanClauses>10240000</maxBooleanClauses>
 
 
         <!-- Solr Internal Query Caches

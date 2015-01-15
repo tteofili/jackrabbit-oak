@@ -79,6 +79,9 @@ class FilterQueryParser {
             if (start > 0) {
                 solrQuery.setFacetMinCount(1);
             }
+            if (solrQuery.getFacetFields() != null && solrQuery.getFacetFields().length > 0) {
+                addACLPathsFilterQuery(solrQuery, nodeState, configuration);
+            }
         }
 
         Collection<Filter.PropertyRestriction> propertyRestrictions = filter.getPropertyRestrictions();
@@ -218,10 +221,6 @@ class FilterQueryParser {
                     filter.getQueryStatement(), solrQuery.toString());
         }
 
-        if (configuration.getACLCheckPathDepth() > 0) {
-            addACLPathsFilterQuery(solrQuery, nodeState, configuration);
-        }
-
         return solrQuery;
     }
 
@@ -344,32 +343,34 @@ class FilterQueryParser {
     private static void addACLPathsFilterQuery(SolrQuery query, NodeState root, OakSolrConfiguration configuration) {
         StringBuilder stringBuilder = new StringBuilder();
 
-        // add direct children filters
-        for (String p : getNodes(root, "", configuration.getACLCheckPathDepth())) {
+        // add path exact filters
+        Collection<String> nodes = getNodes(root, "", configuration.getACLCheckPathDepth());
+        for (String p : nodes) {
             if (stringBuilder.length() > 0) {
                 stringBuilder.append(" OR ");
             }
             stringBuilder.append(partialEscape(p));
         }
+        System.err.println("filter on " + nodes.size() + " paths");
 
         query.addFilterQuery(configuration.getFieldForPathRestriction(
-                Filter.PathRestriction.DIRECT_CHILDREN) + ":(" + stringBuilder.toString() + ")");
+                Filter.PathRestriction.EXACT) + ":(" + stringBuilder.toString() + ")");
 
         // add all children filters
-        stringBuilder = new StringBuilder();
-        for (String p : collectReadableRoots(root)) {
-            if (stringBuilder.length() > 0) {
-                stringBuilder.append(" OR ");
-            }
-            stringBuilder.append(partialEscape(p));
-        }
-        query.addFilterQuery(configuration.getFieldForPathRestriction(Filter.PathRestriction.ALL_CHILDREN) +
-                ":(" + stringBuilder.toString() + ")");
+//        stringBuilder = new StringBuilder();
+//        for (String p : collectReadableRoots(root)) {
+//            if (stringBuilder.length() > 0) {
+//                stringBuilder.append(" OR ");
+//            }
+//            stringBuilder.append(partialEscape(p));
+//        }
+//        query.addFilterQuery(configuration.getFieldForPathRestriction(Filter.PathRestriction.ALL_CHILDREN) +
+//                ":(" + stringBuilder.toString() + ")");
     }
 
     private static Collection<String> getNodes(NodeState nodeState, String path, int depth) {
         Collection<String> paths = new LinkedList<String>();
-        if (depth > 0) {
+        if (depth != 0) {
             for (String name : nodeState.getChildNodeNames()) {
                 NodeState child = nodeState.getChildNode(checkNotNull(name));
                 String childPath = path + "/" + name;

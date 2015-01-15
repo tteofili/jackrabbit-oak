@@ -18,6 +18,7 @@ package org.apache.jackrabbit.oak.plugins.index.solr.query;
 
 import org.apache.jackrabbit.oak.plugins.index.solr.configuration.OakSolrConfiguration;
 import org.apache.jackrabbit.oak.spi.query.Filter;
+import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.apache.solr.client.solrj.SolrQuery;
 import org.junit.Test;
 
@@ -34,7 +35,8 @@ public class FilterQueryParserTest {
     public void testMatchAllConversionWithNoConstraints() throws Exception {
         Filter filter = mock(Filter.class);
         OakSolrConfiguration configuration = mock(OakSolrConfiguration.class);
-        SolrQuery solrQuery = FilterQueryParser.getQuery(filter, configuration);
+        NodeState nodeState = mock(NodeState.class);
+        SolrQuery solrQuery = FilterQueryParser.getQuery(filter, configuration, nodeState);
         assertNotNull(solrQuery);
         assertEquals("*:*", solrQuery.getQuery());
     }
