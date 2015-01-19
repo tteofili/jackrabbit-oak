@@ -16,9 +16,10 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package org.apache.jackrabbit.oak.plugins.tree;
+package org.apache.jackrabbit.oak.plugins.tree.impl;
 
 import static com.google.common.base.Preconditions.checkNotNull;
+import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.base.Predicates.notNull;
 import static com.google.common.collect.Iterables.filter;
 import static com.google.common.collect.Iterables.size;
@@ -29,12 +30,12 @@ import static org.apache.jackrabbit.oak.api.Tree.Status.MODIFIED;
 import static org.apache.jackrabbit.oak.api.Tree.Status.NEW;
 import static org.apache.jackrabbit.oak.api.Tree.Status.UNCHANGED;
 import static org.apache.jackrabbit.oak.api.Type.NAMES;
-import static org.apache.jackrabbit.oak.plugins.tree.TreeConstants.OAK_CHILD_ORDER;
-import static org.apache.jackrabbit.oak.spi.state.NodeStateUtils.isHidden;
+import static org.apache.jackrabbit.oak.plugins.tree.impl.TreeConstants.OAK_CHILD_ORDER;
 
 import java.util.List;
 import java.util.Set;
 
+import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
 
 import com.google.common.base.Function;
@@ -47,12 +48,12 @@ import org.apache.jackrabbit.oak.plugins.index.reference.NodeReferenceConstants;
 import org.apache.jackrabbit.oak.spi.state.ConflictAnnotatingRebaseDiff;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
+import org.apache.jackrabbit.oak.spi.state.NodeStateUtils;
 
 /**
  * {@code AbstractTree} provides default implementations for most
- * read methods of {@code Tree}. Furthermore it handles the
- * {@link #setOrderableChildren(boolean) ordering} of child nodes
- * and hides internal items.
+ * read methods of {@code Tree}. Furthermore it handles hides hidden
+ * items.
  */
 public abstract class AbstractTree implements Tree {
 
@@ -64,34 +65,6 @@ public abstract class AbstractTree implements Tree {
             ConflictAnnotatingRebaseDiff.CONFLICT};
 
     /**
-     * Name of this tree
-     */
-    protected String name;
-
-    /**
-     * The {@code NodeBuilder} for the underlying node state
-     */
-    protected NodeBuilder nodeBuilder;
-
-    /**
-     * Create a new {@code AbstractTree} instance
-     * @param name  name of the tree
-     * @param nodeBuilder  {@code NodeBuilder} for the underlying node state
-     */
-    protected AbstractTree(@Nonnull String name, @Nonnull NodeBuilder nodeBuilder) {
-        this.name = checkNotNull(name);
-        this.nodeBuilder = checkNotNull(nodeBuilder);
-    }
-
-    /**
-     * @return  the underlying {@code NodeState} of this tree
-     */
-    @Nonnull
-    public NodeState getNodeState() {
-        return nodeBuilder.getNodeState();
-    }
-
-    /**
      * Factory method for creating child trees
      * @param name  name of the child tree
      * @return child tree of this tree with the given {@code name}
@@ -99,21 +72,42 @@ public abstract class AbstractTree implements Tree {
      *                                  or contains the forward slash character
      */
     @Nonnull
-    protected abstract AbstractTree createChild(@Nonnull String name)
-            throws IllegalArgumentException;
+    protected abstract AbstractTree createChild(@Nonnull String name) throws IllegalArgumentException;
 
     /**
-     * @return  {@code true} iff {@code getStatus() == Status.NEW}
+     * @return  the parent of this tree or {@code null} for the root
      */
-    protected boolean isNew() {
-        return nodeBuilder.isNew();
+    @CheckForNull
+    protected abstract AbstractTree getParentOrNull();
+
+    /**
+     * @return  The {@code NodeBuilder} for the underlying node state
+     */
+    @Nonnull
+    protected abstract NodeBuilder getNodeBuilder();
+
+    /**
+     * Determine whether an item should be hidden. I.e. not exposed through this
+     * tree.
+     *
+     * @param name  name of an item
+     * @return  {@code true} if the item is hidden, {@code false} otherwise.
+     */
+    protected boolean isHidden(String name) {
+        return NodeStateUtils.isHidden(name);
+    }
+
+    @Nonnull
+    protected String[] getInternalNodeNames() {
+        return INTERNAL_NODE_NAMES;
     }
 
     /**
-     * @return  {@code true} iff {@code getStatus() == Status.MODIFIED}
+     * @return  the underlying {@code NodeState} of this tree
      */
-    protected boolean isModified() {
-        return nodeBuilder.isModified();
+    @Nonnull
+    public NodeState getNodeState() {
+        return getNodeBuilder().getNodeState();
     }
 
     /**
@@ -121,7 +115,7 @@ public abstract class AbstractTree implements Tree {
      *         {@code false} otherwise.
      */
     protected boolean hasOrderableChildren() {
-        return nodeBuilder.hasProperty(OAK_CHILD_ORDER);
+        return getNodeBuilder().hasProperty(OAK_CHILD_ORDER);
     }
 
     /**
@@ -132,6 +126,7 @@ public abstract class AbstractTree implements Tree {
      */
     @Nonnull
     protected Iterable<String> getChildNames() {
+        NodeBuilder nodeBuilder = getNodeBuilder();
         PropertyState order = nodeBuilder.getProperty(OAK_CHILD_ORDER);
         if (order != null && order.getType() == NAMES) {
             Set<String> names = newLinkedHashSet(nodeBuilder.getChildNodeNames());
@@ -175,16 +170,12 @@ public abstract class AbstractTree implements Tree {
     //---------------------------------------------------------------< Tree >---
 
     @Override
-    public String getName() {
-        return name;
-    }
-
-    @Override
     public boolean isRoot() {
-        return name.isEmpty();
+        return getParentOrNull() == null;
     }
 
     @Override
+    @Nonnull
     public String getPath() {
         if (isRoot()) {
             return "/";
@@ -195,15 +186,18 @@ public abstract class AbstractTree implements Tree {
         }
     }
 
-    protected void buildPath(StringBuilder sb) {
-        if (!isRoot()) {
-            getParent().buildPath(sb);
-            sb.append('/').append(name);
+    protected void buildPath(@Nonnull StringBuilder sb) {
+        AbstractTree parent = getParentOrNull();
+        if (parent != null) {
+            parent.buildPath(checkNotNull(sb));
+            sb.append('/').append(getName());
         }
     }
 
     @Override
+    @Nonnull
     public Status getStatus() {
+        NodeBuilder nodeBuilder = getNodeBuilder();
         if (nodeBuilder.isNew() || nodeBuilder.isReplaced()) {
             return NEW;
         } else if (nodeBuilder.isModified()) {
@@ -215,22 +209,38 @@ public abstract class AbstractTree implements Tree {
 
     @Override
     public boolean exists() {
-        return nodeBuilder.exists() && !isHidden(name);
+        return getNodeBuilder().exists() && !isHidden(getName());
     }
 
     @Override
-    public abstract AbstractTree getParent();
+    @Nonnull
+    public AbstractTree getParent() {
+        AbstractTree parent = getParentOrNull();
+        checkState(parent != null, "root tree does not have a parent");
+        return parent;
+    }
 
     @Override
-    public PropertyState getProperty(String name) {
+    @Nonnull
+    public Tree getChild(@Nonnull String name) throws IllegalArgumentException {
+        if (!isHidden(checkNotNull(name))) {
+            return createChild(name);
+        } else {
+            return new HiddenTree(this, name);
+        }
+    }
+
+    @Override
+    @CheckForNull
+    public PropertyState getProperty(@Nonnull String name) {
         return !isHidden(checkNotNull(name))
-            ? nodeBuilder.getProperty(name)
+            ? getNodeBuilder().getProperty(name)
             : null;
     }
 
     @Override
-    public boolean hasProperty(String name) {
-        return (!isHidden(checkNotNull(name))) && nodeBuilder.hasProperty(name);
+    public boolean hasProperty(@Nonnull String name) {
+        return (!isHidden(checkNotNull(name))) && getNodeBuilder().hasProperty(name);
     }
 
     @Override
@@ -239,8 +249,10 @@ public abstract class AbstractTree implements Tree {
     }
 
     @Override
+    @CheckForNull
     public Status getPropertyStatus(@Nonnull String name) {
-        if (!hasProperty(name)) {
+        NodeBuilder nodeBuilder = getNodeBuilder();
+        if (!hasProperty(checkNotNull(name))) {
             return null;
         } else if (nodeBuilder.isNew(name)) {
             return NEW;
@@ -252,8 +264,9 @@ public abstract class AbstractTree implements Tree {
     }
 
     @Override
+    @Nonnull
     public Iterable<? extends PropertyState> getProperties() {
-        return filter(nodeBuilder.getProperties(),
+        return filter(getNodeBuilder().getProperties(),
             new Predicate<PropertyState>() {
                 @Override
                 public boolean apply(PropertyState propertyState) {
@@ -263,22 +276,25 @@ public abstract class AbstractTree implements Tree {
     }
 
     @Override
-    public boolean hasChild(String name) {
-        return nodeBuilder.hasChildNode(name) && !isHidden(name);
+    public boolean hasChild(@Nonnull String name) {
+        return getNodeBuilder().hasChildNode(checkNotNull(name)) && !isHidden(name);
     }
 
     @Override
     public long getChildrenCount(long max) {
-        if (max + INTERNAL_NODE_NAMES.length < 0) {
+        String[] internalNodeNames = getInternalNodeNames();
+        int len = internalNodeNames.length;
+        if (max + len < 0) {
             // avoid overflow (if max is near Long.MAX_VALUE)
             max = Long.MAX_VALUE;
         } else {
             // fetch a few more
-            max += INTERNAL_NODE_NAMES.length;
+            max += len;
         }
+        NodeBuilder nodeBuilder = getNodeBuilder();
         long count = nodeBuilder.getChildNodeCount(max);
         if (count > 0) {
-            for (String name : INTERNAL_NODE_NAMES) {
+            for (String name : internalNodeNames) {
                 if (nodeBuilder.hasChildNode(name)) {
                     count--;
                 }
@@ -288,6 +304,7 @@ public abstract class AbstractTree implements Tree {
     }
 
     @Override
+    @Nonnull
     public Iterable<Tree> getChildren() {
         Iterable<Tree> children = transform(getChildNames(),
             new Function<String, Tree>() {

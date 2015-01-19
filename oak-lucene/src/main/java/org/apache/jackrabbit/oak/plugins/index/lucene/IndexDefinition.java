@@ -48,7 +48,7 @@ import org.apache.jackrabbit.oak.namepath.NamePathMapper;
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.TokenizerChain;
 import org.apache.jackrabbit.oak.plugins.memory.PropertyStates;
 import org.apache.jackrabbit.oak.plugins.nodetype.ReadOnlyNodeTypeManager;
-import org.apache.jackrabbit.oak.plugins.tree.ImmutableTree;
+import org.apache.jackrabbit.oak.plugins.tree.TreeFactory;
 import org.apache.jackrabbit.oak.spi.query.QueryIndex.OrderEntry;
 import org.apache.jackrabbit.oak.spi.state.ChildNodeEntry;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
@@ -90,16 +90,21 @@ import static org.apache.jackrabbit.oak.plugins.index.lucene.PropertyDefinition.
 import static org.apache.jackrabbit.oak.plugins.index.lucene.util.ConfigUtil.getOptionalValue;
 import static org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState.EMPTY_NODE;
 import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.NODE_TYPES_PATH;
-import static org.apache.jackrabbit.oak.plugins.tree.TreeConstants.OAK_CHILD_ORDER;
 
 class IndexDefinition implements Aggregate.AggregateMapper{
+    /**
+     * Name of the internal property that contains the child order defined in
+     * org.apache.jackrabbit.oak.plugins.tree.impl.TreeConstants
+     */
+    private static final String OAK_CHILD_ORDER = ":childOrder";
+
     private static final Logger log = LoggerFactory.getLogger(IndexDefinition.class);
 
     /**
      * Blob size to use by default. To avoid issues in OAK-2105 the size should not
      * be power of 2.
      */
-    static final int DEFAULT_BLOB_SIZE = OakDirectory.DEFAULT_BLOB_SIZE - 300;
+    static final int DEFAULT_BLOB_SIZE = 1024 * 1024 - 1024;
 
     /**
      * Default entry count to keep estimated entry count low.
@@ -456,10 +461,10 @@ class IndexDefinition implements Aggregate.AggregateMapper{
         }
 
         Map<String, List<IndexingRule>> nt2rules = newHashMap();
-        ReadOnlyNodeTypeManager ntReg = createNodeTypeManager(new ImmutableTree(root));
+        ReadOnlyNodeTypeManager ntReg = createNodeTypeManager(TreeFactory.createReadOnlyTree(root));
 
         //Use Tree API to read ordered child nodes
-        ImmutableTree ruleTree = new ImmutableTree(indexRules);
+        Tree ruleTree = TreeFactory.createReadOnlyTree(indexRules);
         final List<String> allNames = getAllNodeTypes(ntReg);
         for (Tree ruleEntry : ruleTree.getChildren()) {
             IndexingRule rule = new IndexingRule(ruleEntry.getName(), indexRules.getChildNode(ruleEntry.getName()));
@@ -665,7 +670,7 @@ class IndexDefinition implements Aggregate.AggregateMapper{
             }
 
             //Include all immediate child nodes to 'properties' node by default
-            Tree propTree = new ImmutableTree(propNode);
+            Tree propTree = TreeFactory.createReadOnlyTree(propNode);
             for (Tree prop : propTree.getChildren()) {
                 String propName = prop.getName();
                 NodeState propDefnNode = propNode.getChildNode(propName);

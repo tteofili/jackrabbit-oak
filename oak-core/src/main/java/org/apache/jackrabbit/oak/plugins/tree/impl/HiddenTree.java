@@ -17,12 +17,13 @@
  * under the License.
  */
 
-package org.apache.jackrabbit.oak.core;
+package org.apache.jackrabbit.oak.plugins.tree.impl;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 
 import java.util.Collections;
 
+import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
@@ -38,11 +39,11 @@ import org.apache.jackrabbit.oak.commons.PathUtils;
  * Calls to any of the mutator methods on this class throws an
  * {@code IllegalStateException}.
  */
-public class HiddenTree implements Tree {
+class HiddenTree implements Tree {
     private final Tree parent;
     private final String name;
 
-    public HiddenTree(Tree parent, String name) {
+    HiddenTree(Tree parent, String name) {
         this.parent = parent;
         this.name = name;
     }
@@ -91,11 +92,13 @@ public class HiddenTree implements Tree {
     }
 
     @Override
+    @CheckForNull
     public PropertyState getProperty(@Nonnull String name) {
         return null;
     }
 
     @Override
+    @CheckForNull
     public Status getPropertyStatus(@Nonnull String name) {
         return null;
     }
@@ -170,7 +173,7 @@ public class HiddenTree implements Tree {
     }
 
     @Override
-    public <T> void setProperty(@Nonnull String name, @Nonnull T value, Type<T> type) {
+    public <T> void setProperty(@Nonnull String name, @Nonnull T value, @Nonnull Type<T> type) {
         throw nonExistingTree();
     }
 

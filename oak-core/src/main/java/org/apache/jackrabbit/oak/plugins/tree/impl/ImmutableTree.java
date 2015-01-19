@@ -14,15 +14,19 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.jackrabbit.oak.plugins.tree;
+package org.apache.jackrabbit.oak.plugins.tree.impl;
+
+import static com.google.common.base.Preconditions.checkNotNull;
 
 import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
 import com.google.common.base.Objects;
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.api.Type;
+import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.apache.jackrabbit.oak.spi.state.ReadOnlyBuilder;
 
@@ -60,8 +64,15 @@ import org.apache.jackrabbit.oak.spi.state.ReadOnlyBuilder;
  *     upon hierarchy related methods like {@link #getParent()}, {@link #getPath()}</li>
  * </ul>
  *
+ * <h3>Filtering 'hidden' items</h3>
+ * This {@code Tree} implementation reflects the item hierarchy as exposed by the
+ * underlying {@code NodeState}. In contrast to the mutable implementations it
+ * does not filter out 'hidden' items as identified by
+ * {@code org.apache.jackrabbit.oak.spi.state.NodeStateUtils#isHidden(String)}.
+ *
  * <h3>Equality and hash code</h3>
- * In contrast to {@link org.apache.jackrabbit.oak.core.MutableTree} the {@code ImmutableTree} implements
+ * In contrast to {@link org.apache.jackrabbit.oak.plugins.tree.impl.AbstractMutableTree}
+ * the {@code ImmutableTree} implements
  * {@link Object#equals(Object)} and {@link Object#hashCode()}: Two {@code ImmutableTree}s
  * are consider equal if their name and the underlying {@code NodeState}s are equal. Note
  * however, that according to the contract defined in {@code NodeState} these
@@ -72,7 +83,12 @@ public final class ImmutableTree extends AbstractTree {
     /**
      * Underlying node state
      */
-    private final NodeState state;
+    private final NodeBuilder nodeBuilder;
+
+    /**
+     * Name of this tree
+     */
+    private final String name;
 
     private final ParentProvider parentProvider;
 
@@ -87,19 +103,51 @@ public final class ImmutableTree extends AbstractTree {
     }
 
     public ImmutableTree(@Nonnull ParentProvider parentProvider, @Nonnull String name, @Nonnull NodeState state) {
-        super(name, new ReadOnlyBuilder(state));
-        this.state = state;
-        this.parentProvider = parentProvider;
+        this.nodeBuilder = new ReadOnlyBuilder(state);
+        this.name = name;
+        this.parentProvider = checkNotNull(parentProvider);
+    }
+
+    //-------------------------------------------------------< AbstractTree >---
+    @Override
+    @Nonnull
+    protected ImmutableTree createChild(String name) {
+        return new ImmutableTree(this, name, nodeBuilder.getNodeState().getChildNode(name));
     }
 
     @Override
-    protected ImmutableTree createChild(String name) {
-        return new ImmutableTree(this, name, state.getChildNode(name));
+    @CheckForNull
+    protected AbstractTree getParentOrNull() {
+        return parentProvider.getParent();
+    }
+
+    @Nonnull
+    @Override
+    protected NodeBuilder getNodeBuilder() {
+        return nodeBuilder;
+    }
+
+    @Override
+    protected boolean isHidden(String name) {
+        return false;
+    }
+
+    @Nonnull
+    @Override
+    protected String[] getInternalNodeNames() {
+        return new String[0];
     }
 
     //---------------------------------------------------------------< Tree >---
 
+    @Nonnull
     @Override
+    public String getName() {
+        return name;
+    }
+
+    @Override
+    @Nonnull
     public String getPath() {
         if (path == null) {
             path = super.getPath();
@@ -107,43 +155,11 @@ public final class ImmutableTree extends AbstractTree {
         return path;
     }
 
+    @Nonnull
     @Override
-    public boolean hasChild(String name) {
-        return state.hasChildNode(name);
-    }
-
-    @Override
-    public Status getStatus() {
-        return Status.UNCHANGED;
-    }
-
-    @Override
-    protected boolean isNew() {
-        return false;
-    }
-
-    @Override
-    protected boolean isModified() {
-        return false;
-    }
-
-    @Override
-    public ImmutableTree getParent() {
-        return parentProvider.getParent();
-    }
-
-    @Override
-    public Status getPropertyStatus(String name) {
-        if (hasProperty(name)) {
-            return Status.UNCHANGED;
-        } else {
-            return null;
-        }
-    }
-
-    @Override
-    public ImmutableTree getChild(String name) {
+    public ImmutableTree getChild(@Nonnull String name) throws IllegalArgumentException {
         return createChild(name);
+
     }
 
     @Override
@@ -152,7 +168,8 @@ public final class ImmutableTree extends AbstractTree {
     }
 
     @Override
-    public Tree addChild(String name) {
+    @Nonnull
+    public Tree addChild(@Nonnull String name) {
         throw new UnsupportedOperationException();
     }
 
@@ -162,27 +179,27 @@ public final class ImmutableTree extends AbstractTree {
     }
 
     @Override
-    public boolean orderBefore(String name) {
+    public boolean orderBefore(@Nullable String name) {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public void setProperty(PropertyState property) {
+    public void setProperty(@Nonnull PropertyState property) {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public <T> void setProperty(String name, T value) {
+    public <T> void setProperty(@Nonnull String name, @Nonnull T value) {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public <T> void setProperty(String name, T value, Type<T> type) {
+    public <T> void setProperty(@Nonnull String name, @Nonnull T value, @Nonnull Type<T> type) {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public void removeProperty(String name) {
+    public void removeProperty(@Nonnull String name) {
         throw new UnsupportedOperationException();
     }
 
@@ -190,7 +207,7 @@ public final class ImmutableTree extends AbstractTree {
 
     @Override
     public int hashCode() {
-        return Objects.hashCode(getName(), state);
+        return Objects.hashCode(getName(), nodeBuilder.getNodeState());
     }
 
     @Override
@@ -200,7 +217,7 @@ public final class ImmutableTree extends AbstractTree {
         }
         if (o instanceof ImmutableTree) {
             ImmutableTree other = (ImmutableTree) o;
-            return getName().equals(other.getName()) && state.equals(other.state);
+            return getName().equals(other.getName()) && nodeBuilder.getNodeState().equals(other.nodeBuilder.getNodeState());
         }
         return false;
     }
@@ -219,7 +236,7 @@ public final class ImmutableTree extends AbstractTree {
         ParentProvider ROOT_PROVIDER = new ParentProvider() {
             @Override
             public ImmutableTree getParent() {
-                throw new IllegalStateException("root tree does not have a parent");
+                return null;
             }
         };
 
@@ -231,7 +248,7 @@ public final class ImmutableTree extends AbstractTree {
         private final ImmutableTree parent;
 
         DefaultParentProvider(@Nonnull ImmutableTree parent) {
-            this.parent = parent;
+            this.parent = checkNotNull(parent);
         }
 
         @Override

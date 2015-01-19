@@ -101,19 +101,20 @@
         <configuration>
           <instructions>
             <!-- TODO: Should only provide services, not export packages  -->
+            <_exportcontents>
+              org.apache.lucene.*;version=${lucene.version}
+            </_exportcontents>
             <Export-Package>
               org.apache.jackrabbit.oak.plugins.index.lucene,
               org.apache.jackrabbit.oak.plugins.index.lucene.util
             </Export-Package>
             <Import-Package>
                 org.apache.lucene.sandbox.*;resolution:=optional,
+                !org.apache.lucene.*,
                 *
             </Import-Package>
             <Embed-Dependency>
-                lucene-*;inline=true,
-                <!-- TODO FIXME OAK-2270 -->
-                oak-core;inline="org/apache/jackrabbit/oak/plugins/tree/AbstractTree*|org/apache/jackrabbit/oak/plugins/tree/ImmutableTree*"
-                <!-- TODO FIXME OAK-2270 -->
+                lucene-*;inline=true
             </Embed-Dependency>
           </instructions>
         </configuration>
