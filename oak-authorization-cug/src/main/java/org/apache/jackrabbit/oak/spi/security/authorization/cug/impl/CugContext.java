@@ -56,7 +56,12 @@ final class CugContext implements Context, CugConstants {
             return (p == null) ? definesTree(tree) : definesProperty(tree, p);
         } else {
             String path = location.getPath();
-            return REP_CUG_POLICY.equals(Text.getName(path)) || path.endsWith(REP_CUG_POLICY + '/' + REP_PRINCIPAL_NAMES);
+            return definesPath(path, Text.getName(path));
         }
+    }
+
+    @Override
+    public boolean definesPath(@Nonnull String treePath, String propertyName) {
+        return treePath.contains('/' + REP_CUG_POLICY) || REP_PRINCIPAL_NAMES.equals(propertyName);
     }
 }

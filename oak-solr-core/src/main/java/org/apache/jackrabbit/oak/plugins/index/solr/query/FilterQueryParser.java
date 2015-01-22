@@ -79,9 +79,6 @@ class FilterQueryParser {
             if (start > 0) {
                 solrQuery.setFacetMinCount(1);
             }
-            if (solrQuery.getFacetFields() != null && solrQuery.getFacetFields().length > 0) {
-                addACLPathsFilterQuery(solrQuery, nodeState, configuration);
-            }
         }
 
         Collection<Filter.PropertyRestriction> propertyRestrictions = filter.getPropertyRestrictions();
@@ -221,6 +218,15 @@ class FilterQueryParser {
                     filter.getQueryStatement(), solrQuery.toString());
         }
 
+//        if (solrQuery.getFacetFields() != null && solrQuery.getFacetFields().length > 0) {
+//            Long matchAllCount = AdvancedSolrQueryIndex.cache.get("*:*");
+
+//            Long currentQueryCount = AdvancedSolrQueryIndex.getCache().get(escapedQuery);
+//            if (currentQueryCount != null && currentQueryCount.intValue() <= 1024) {
+//                addACLPathsFilterQuery(solrQuery, nodeState, configuration);
+//            }
+
+//        }
         return solrQuery;
     }
 

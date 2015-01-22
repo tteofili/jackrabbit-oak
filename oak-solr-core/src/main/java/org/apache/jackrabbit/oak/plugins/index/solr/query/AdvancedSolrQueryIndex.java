@@ -100,6 +100,10 @@ public class AdvancedSolrQueryIndex extends SolrQueryIndex implements QueryIndex
                 .setDelayed(true); //Solr is most usually async
     }
 
+    static Map<String, Long> getCache() {
+        return cache;
+    }
+
     @Override
     void onRetrievedResults(Filter filter, SolrDocumentList docs) {
         // update estimates cache

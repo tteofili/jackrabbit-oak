@@ -19,6 +19,7 @@ package org.apache.jackrabbit.oak.plugins.index.solr.query;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.LinkedList;
 
 import javax.annotation.Nonnull;
 
@@ -284,4 +285,5 @@ public class SolrQueryIndexTest {
         assertNotNull(cursor);
 
     }
+
 }

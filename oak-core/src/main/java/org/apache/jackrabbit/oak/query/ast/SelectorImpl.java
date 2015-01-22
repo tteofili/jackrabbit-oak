@@ -419,9 +419,12 @@ public class SelectorImpl extends SourceImpl {
                 // inner join [nt:base] as [b] 
                 // on isdescendantnode([b], [a]) 
                 // where [a].[jcr:path] = $path"
-                // because not checking would reveal existence
+                // because not checking would. reveal existence
                 // of the child node
-                Tree tree = getTree(currentRow.getPath());
+
+
+
+                Tree tree = getTree(currentRow.getPath()); // TODO : incorporate angela's patch for OAK-2423
                 if (tree == null || !tree.exists()) {
                     continue;
                 }

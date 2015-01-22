@@ -22,6 +22,7 @@ import java.util.HashSet;
 import java.util.Set;
 import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 import javax.jcr.Session;
 
 import com.google.common.base.Predicates;
@@ -205,6 +206,12 @@ class CugPermissionProvider implements PermissionProvider, AggregatedPermissionP
         } else {
             return false;
         }
+    }
+
+    @Override
+    public boolean canRead(@Nonnull String oakTreePath, @Nullable String propertyName) {
+        // TODO
+        return false;
     }
 
     //--------------------------------------------------------------------------

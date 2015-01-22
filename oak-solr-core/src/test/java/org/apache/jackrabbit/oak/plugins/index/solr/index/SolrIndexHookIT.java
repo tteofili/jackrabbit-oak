@@ -17,6 +17,8 @@
 package org.apache.jackrabbit.oak.plugins.index.solr.index;
 
 import java.util.Set;
+
+import org.apache.jackrabbit.oak.api.PropertyValue;
 import org.apache.jackrabbit.oak.plugins.index.solr.SolrBaseTest;
 import org.apache.jackrabbit.oak.plugins.index.solr.query.SolrQueryIndex;
 import org.apache.jackrabbit.oak.query.QueryEngineSettings;
@@ -138,6 +140,49 @@ public class SolrIndexHookIT extends SolrBaseTest {
         assertTrue(paths.remove("/a/b"));
         assertTrue(paths.remove("/a/b/c"));
         assertTrue(paths.isEmpty());
+    }
+
+    @Test
+    public void testUnauthorizedFacet() throws Exception {
+        NodeState root = EMPTY_NODE;
+
+        NodeBuilder builder = root.builder();
+        builder.child("oak:index").child("solr")
+                .setProperty(JCR_PRIMARYTYPE, "oak:QueryIndexDefinition")
+                .setProperty("type", "solr");
+
+        NodeState before = builder.getNodeState();
+        builder.child("newnode").setProperty("prop", "val").child("child").setProperty("prop", "val");
+        NodeState after = builder.getNodeState();
+
+        builder.child("newnode").child("child").remove();
+        NodeState searchState = builder.getNodeState();
+
+        hook.processCommit(before, after, CommitInfo.EMPTY);
+
+        QueryIndex queryIndex = new SolrQueryIndex("solr", server, configuration);
+
+        FilterImpl filter = new FilterImpl(mock(SelectorImpl.class),
+                "select [jcr:path], [facet(prop)] from [nt:base] where prop='val'", new QueryEngineSettings());
+        filter.restrictProperty("prop", Operator.EQUAL, PropertyValues.newString("val"));
+
+        Cursor cursor = queryIndex.query(filter, searchState);
+        assertNotNull(cursor);
+        assertTrue("no results found", cursor.hasNext());
+        IndexRow next = cursor.next();
+        assertNotNull("first returned item should not be null", next);
+        assertEquals("/newnode/child", next.getPath()); // nodes do not get filtered
+        PropertyValue facetValue = next.getValue("facet(prop)");
+        assertNotNull(facetValue);
+        assertEquals("prop:[val (1)]", facetValue.toString());
+        assertTrue(cursor.hasNext());
+        next = cursor.next();
+        assertNotNull("second returned item should not be null", next);
+        assertEquals("/newnode", next.getPath()); // nodes do not get filtered
+        facetValue = next.getValue("facet(prop)");
+        assertNotNull(facetValue);
+        assertEquals("prop:[val (1)]", facetValue.toString());
+        assertFalse(cursor.hasNext());
     }
 
 }

@@ -22,11 +22,10 @@ import java.util.Collections;
 import java.util.Deque;
 import java.util.HashSet;
 import java.util.Iterator;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import javax.annotation.CheckForNull;
 
 import org.apache.jackrabbit.oak.api.PropertyValue;
@@ -59,7 +58,6 @@ import com.google.common.collect.AbstractIterator;
 import com.google.common.collect.Queues;
 import com.google.common.collect.Sets;
 
-import static com.google.common.base.Preconditions.checkNotNull;
 import static org.apache.jackrabbit.oak.commons.PathUtils.getAncestorPath;
 import static org.apache.jackrabbit.oak.commons.PathUtils.getDepth;
 import static org.apache.jackrabbit.oak.commons.PathUtils.getParentPath;
@@ -198,6 +196,8 @@ public class SolrQueryIndex implements FulltextQueryIndex {
 
             final int parentDepth = getDepth(parent);
 
+            final List<FacetField> facetFields = new CopyOnWriteArrayList<FacetField>();
+
             cursor = new SolrRowCursor(new AbstractIterator<SolrResultRow>() {
 
                 private final Set<String> seenPaths = Sets.newHashSet();
@@ -207,7 +207,6 @@ public class SolrQueryIndex implements FulltextQueryIndex {
                 private int lastFacet = 0;
 
                 public int offset = 0;
-                public List<FacetField> facetFields;
 
                 @Override
                 protected SolrResultRow computeNext() {
@@ -217,7 +216,7 @@ public class SolrQueryIndex implements FulltextQueryIndex {
                     return endOfData();
                 }
 
-                private SolrResultRow convertToRow(SolrDocument doc, List<FacetField> facetFields) throws IOException {
+                private SolrResultRow convertToRow(SolrDocument doc) throws IOException {
                     String path = String.valueOf(doc.getFieldValue(configuration.getPathField()));
                     if (path != null) {
                         if ("".equals(path)) {
@@ -267,8 +266,23 @@ public class SolrQueryIndex implements FulltextQueryIndex {
 
                         QueryResponse queryResponse = solrServer.query(query);
 
-                        facetFields = queryResponse.getFacetFields();
+                        // get docs
                         SolrDocumentList docs = queryResponse.getResults();
+
+                        // get facets
+                        List<FacetField> returnedFieldFacet = queryResponse.getFacetFields();
+                        if (returnedFieldFacet != null) {
+                            facetFields.addAll(returnedFieldFacet);
+                        }
+
+                        // filter facets on doc paths
+                        for (SolrDocument doc : docs) {
+                            String path = String.valueOf(doc.getFieldValue(configuration.getPathField()));
+                            // if path doesn't exist in the node state, filter the facets
+                            if (!exists(path, root) && facetFields.size() > 0) {
+                                filterFacets(doc, facetFields);
+                            }
+                        }
 
                         onRetrievedResults(filter, docs);
 
@@ -277,7 +291,7 @@ public class SolrQueryIndex implements FulltextQueryIndex {
                         }
 
                         for (SolrDocument doc : docs) {
-                            SolrResultRow row = convertToRow(doc, facetFields);
+                            SolrResultRow row = convertToRow(doc);
                             if (row != null) {
                                 queue.add(row);
                             }
@@ -303,20 +317,36 @@ public class SolrQueryIndex implements FulltextQueryIndex {
     }
 
 
-
-
     void onRetrievedResults(Filter filter, SolrDocumentList docs) {
         // do nothing
     }
 
-    private boolean exists(SolrResultRow row, NodeState root) {
+    private void filterFacets(SolrDocument doc, List<FacetField> facetFields) {
+        for (FacetField facetField : facetFields) {
+            if (doc.getFieldNames().contains(facetField.getName())) {
+                // decrease facet value
+                Collection<Object> docFieldValues = doc.getFieldValues(facetField.getName());
+                if (docFieldValues != null) {
+                    for (Object docFieldValue : docFieldValues) {
+                        String valueString = String.valueOf(docFieldValue);
+                        for (FacetField.Count count : facetField.getValues()) {
+                            if (valueString.equals(count.getName())) {
+                                count.setCount(count.getCount() - 1);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private boolean exists(String path, NodeState root) {
         boolean result = true;
         NodeState nodeState = root;
-        for (String n : PathUtils.elements(row.path)) {
+        for (String n : PathUtils.elements(path)) {
             if (nodeState.hasChildNode(n)) {
                 nodeState = nodeState.getChildNode(n);
-            }
-            else {
+            } else {
                 result = false;
                 break;
             }

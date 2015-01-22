@@ -18,8 +18,6 @@
  */
 package org.apache.jackrabbit.oak.scalability;
 
-import static java.util.Arrays.asList;
-
 import java.io.File;
 import java.io.PrintStream;
 import java.util.Arrays;
@@ -27,6 +25,13 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+
+import org.apache.commons.io.FileUtils;
+import org.apache.jackrabbit.oak.benchmark.CSVResultGenerator;
+import org.apache.jackrabbit.oak.benchmark.util.Date;
+import org.apache.jackrabbit.oak.fixture.JackrabbitRepositoryFixture;
+import org.apache.jackrabbit.oak.fixture.OakRepositoryFixture;
+import org.apache.jackrabbit.oak.fixture.RepositoryFixture;
 
 import com.google.common.base.Charsets;
 import com.google.common.base.Splitter;
@@ -36,16 +41,11 @@ import com.google.common.collect.Sets;
 import joptsimple.OptionParser;
 import joptsimple.OptionSet;
 import joptsimple.OptionSpec;
-import org.apache.commons.io.FileUtils;
-import org.apache.jackrabbit.oak.benchmark.CSVResultGenerator;
-import org.apache.jackrabbit.oak.benchmark.util.Date;
-import org.apache.jackrabbit.oak.fixture.JackrabbitRepositoryFixture;
-import org.apache.jackrabbit.oak.fixture.OakRepositoryFixture;
-import org.apache.jackrabbit.oak.fixture.RepositoryFixture;
+
+import static java.util.Arrays.asList;
 
 /**
  * Main class for running scalability/longevity tests.
- * 
  */
 public class ScalabilityRunner {
 
@@ -90,7 +90,7 @@ public class ScalabilityRunner {
         }
 
         int cacheSize = cache.value(options);
-        RepositoryFixture[] allFixtures = new RepositoryFixture[] {
+        RepositoryFixture[] allFixtures = new RepositoryFixture[]{
                 new JackrabbitRepositoryFixture(base.value(options), cacheSize),
                 OakRepositoryFixture.getMemoryNS(cacheSize * MB),
                 OakRepositoryFixture.getMongo(
@@ -113,7 +113,7 @@ public class ScalabilityRunner {
                         base.value(options), 256, cacheSize, mmap.value(options))
         };
         ScalabilitySuite[] allSuites =
-                new ScalabilitySuite[] {
+                new ScalabilitySuite[]{
                         new ScalabilityBlobSearchSuite(withStorage.value(options))
                                 .addBenchmarks(new FullTextSearcher(),
                                         new NodeTypeSearcher(),
@@ -137,6 +137,8 @@ public class ScalabilityRunner {
                                         new MultiFilterSplitOrderByOffsetPageSearcher(),
                                         new MultiFilterOrderByKeysetPageSearcher(),
                                         new MultiFilterSplitOrderByKeysetPageSearcher()),
+                        new SolrScalabilityNodeSearchSuite(withStorage.value(options)).
+                                addBenchmarks(new FacetSearcher()),
                         new ScalabilityNodeRelationshipSuite(withStorage.value(options))
                                 .addBenchmarks(new AggregateNodeSearcher())
                 };
@@ -148,10 +150,10 @@ public class ScalabilityRunner {
                 fixtures.add(fixture);
             }
         }
-        
+
         Map<String, List<String>> argmap = Maps.newHashMap();
         // Split the args to get suites and benchmarks (i.e. suite:benchmark1,benchmark2)
-        for(String arg : argset) {
+        for (String arg : argset) {
             List<String> tokens = Splitter.on(":").limit(2).splitToList(arg);
             if (tokens.size() > 1) {
                 argmap.put(tokens.get(0), Splitter.on(",").trimResults().splitToList(tokens.get(1)));
@@ -163,7 +165,7 @@ public class ScalabilityRunner {
 
         if (argmap.isEmpty()) {
             System.err.println("Warning: no scalability suites specified, " +
-                "supported  are: " + Arrays.asList(allSuites));
+                    "supported  are: " + Arrays.asList(allSuites));
         }
 
         List<ScalabilitySuite> suites = Lists.newArrayList();
@@ -173,7 +175,7 @@ public class ScalabilityRunner {
                 // Only keep requested benchmarks
                 if (benchmarks != null) {
                     Iterator<String> iter = suite.getBenchmarks().keySet().iterator();
-                    for (;iter.hasNext();) {
+                    for (; iter.hasNext(); ) {
                         String availBenchmark = iter.next();
                         if (!benchmarks.contains(availBenchmark)) {
                             iter.remove();
@@ -189,8 +191,8 @@ public class ScalabilityRunner {
             PrintStream out = null;
             if (options.has(csvFile)) {
                 out =
-                    new PrintStream(FileUtils.openOutputStream(csvFile.value(options), true), false,
-                                            Charsets.UTF_8.name());
+                        new PrintStream(FileUtils.openOutputStream(csvFile.value(options), true), false,
+                                Charsets.UTF_8.name());
             }
             for (ScalabilitySuite suite : suites) {
                 if (suite instanceof CSVResultGenerator) {

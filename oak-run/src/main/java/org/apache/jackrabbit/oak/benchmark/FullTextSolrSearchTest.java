@@ -22,6 +22,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.StringReader;
+import javax.annotation.Nonnull;
 import javax.jcr.Repository;
 
 import org.apache.commons.io.FileUtils;
@@ -67,6 +68,7 @@ public class FullTextSolrSearchTest extends FullTextSearchTest {
                 @Override
                 public Jcr customize(Oak oak) {
                     OakSolrConfigurationProvider configurationProvider = new OakSolrConfigurationProvider() {
+                        @Nonnull
                         public OakSolrConfiguration getConfiguration() {
                             return new DefaultSolrConfiguration() {
                                 @Override

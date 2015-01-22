@@ -118,5 +118,5 @@
     <copyField source="path_exact" dest="path_des"/>
     <copyField source="path_exact" dest="path_child"/>
     <copyField source="path_exact" dest=":path"/>
-    <copyField source="*" dest="catch_all"/>
+    <copyField source="jrc:*" dest="catch_all"/>
 </schema>

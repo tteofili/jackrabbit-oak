@@ -368,7 +368,7 @@ public class ScalabilityNodeSuite extends ScalabilityAbstractSuite {
     @Override
     protected void executeBenchmark(final ScalabilityBenchmark benchmark,
             final ExecutionContext context) throws Exception {
-      LOG.info("Stated execution : " + benchmark.toString());
+      LOG.info("Started execution : " + benchmark.toString());
         if (PROFILE) {
             context.startProfiler();
         }
