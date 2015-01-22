@@ -131,4 +131,12 @@ public interface OakSolrConfiguration {
      * @return the depth of the nodes that should be ACL checked by the Solr index
      */
     int getACLCheckPathDepth();
+
+    /**
+     * Provide the names of the properties that should be indexed and searched by the Solr index
+     *
+     * @return a {@link java.util.Collection} of property names for properties to be ignored
+     */
+    @Nonnull
+    Collection<String> getUsedProperties();
 }

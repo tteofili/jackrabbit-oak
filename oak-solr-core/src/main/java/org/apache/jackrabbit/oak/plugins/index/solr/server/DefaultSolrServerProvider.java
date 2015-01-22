@@ -54,7 +54,7 @@ public class DefaultSolrServerProvider implements SolrServerProvider {
 
     private String getUrl() {
         return SolrServerConfigurationDefaults.LOCAL_BASE_URL + ':' +
-                    SolrServerConfigurationDefaults.HTTP_PORT + SolrServerConfigurationDefaults.CONTEXT +
-                    '/' + SolrServerConfigurationDefaults.CORE_NAME;
+                SolrServerConfigurationDefaults.HTTP_PORT + SolrServerConfigurationDefaults.CONTEXT +
+                '/' + SolrServerConfigurationDefaults.CORE_NAME;
     }
 }
