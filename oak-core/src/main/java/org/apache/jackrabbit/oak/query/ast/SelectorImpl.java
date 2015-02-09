@@ -630,12 +630,12 @@ public class SelectorImpl extends SourceImpl {
         Matcher matcher = FACET_REGEX.matcher(oakPropertyName);
         if (matcher.matches()) {
             String prop = matcher.group(1);
-            PermissionProvider permissionProvider = query.getExecutionContext().getPermissionProvider();
-            if (t == null || (permissionProvider != null && permissionProvider.canRead(t.getPath(), prop))) {
+//            PermissionProvider permissionProvider = query.getExecutionContext().getPermissionProvider();
+//            if (t == null || (permissionProvider != null && permissionProvider.canRead(t.getPath(), prop))) {
                 result = currentRow.getValue(oakPropertyName);
-            } else {
-                return null;
-            }
+//            } else {
+//                return null;
+//            }
         } else if (t == null || !t.exists()) {
 //        if (t == null || !t.exists()) {
             return null;

@@ -44,6 +44,7 @@ import org.apache.jackrabbit.oak.spi.query.IndexRow;
 import org.apache.jackrabbit.oak.spi.query.PropertyValues;
 import org.apache.jackrabbit.oak.spi.query.QueryIndex;
 import org.apache.jackrabbit.oak.spi.query.QueryIndex.FulltextQueryIndex;
+import org.apache.jackrabbit.oak.spi.security.authorization.permission.PermissionProvider;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.apache.solr.client.solrj.SolrQuery;
 import org.apache.solr.client.solrj.SolrServer;
@@ -277,9 +278,15 @@ public class SolrQueryIndex implements FulltextQueryIndex {
                         for (SolrDocument doc : docs) {
                             String path = String.valueOf(doc.getFieldValue(configuration.getPathField()));
                             // if path doesn't exist in the node state, filter the facets
-                            if (!exists(path, root) && facetFields.size() > 0) {
-                                filterFacets(doc, facetFields);
+                            PermissionProvider permissionProvider = filter.getSelector().getQuery().getExecutionContext().getPermissionProvider();
+                            for (FacetField ff : facetFields) {
+                                if (permissionProvider != null && !permissionProvider.canRead(path, ff.getName())) {
+                                    filterFacet(doc, ff);
+                                }
                             }
+//                            if (!exists(path, root) && facetFields.size() > 0) {
+//                                filterFacets(doc, facetFields);
+//                            }
                         }
 
                         onRetrievedResults(filter, docs);
@@ -312,6 +319,23 @@ public class SolrQueryIndex implements FulltextQueryIndex {
             throw new RuntimeException(e);
         }
         return cursor;
+    }
+
+    private void filterFacet(SolrDocument doc, FacetField facetField) {
+        if (doc.getFieldNames().contains(facetField.getName())) {
+            // decrease facet value
+            Collection<Object> docFieldValues = doc.getFieldValues(facetField.getName());
+            if (docFieldValues != null) {
+                for (Object docFieldValue : docFieldValues) {
+                    String valueString = String.valueOf(docFieldValue);
+                    for (FacetField.Count count : facetField.getValues()) {
+                        if (valueString.equals(count.getName())) {
+                            count.setCount(count.getCount() - 1);
+                        }
+                    }
+                }
+            }
+        }
     }
 
 

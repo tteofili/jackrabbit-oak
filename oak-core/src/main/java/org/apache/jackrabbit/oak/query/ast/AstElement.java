@@ -143,5 +143,9 @@ abstract class AstElement {
         return path;
     }
 
+    public QueryImpl getQuery() {
+        return query;
+    }
+
 }
 
