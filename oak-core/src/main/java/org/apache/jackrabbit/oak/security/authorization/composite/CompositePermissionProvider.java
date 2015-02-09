@@ -23,6 +23,7 @@ import java.util.Map;
 import java.util.Set;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
+import javax.jcr.Session;
 
 import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableMap;
@@ -160,6 +161,18 @@ class CompositePermissionProvider implements PermissionProvider {
         }
     }
 
+    @Override
+    public boolean canRead(@Nonnull final String oakTreePath, @Nullable String propertyName) {
+        Iterable<AggregatedPermissionProvider> providers = Iterables.filter(pps, new Predicate<AggregatedPermissionProvider>() {
+            @Override
+            public boolean apply(@Nullable AggregatedPermissionProvider pp) {
+                // TODO separate 'handles' required?
+                return pp != null && pp.handles(oakTreePath, Session.ACTION_READ);
+            }
+        });
+        return grantsRead(oakTreePath, propertyName, providers);
+    }
+
     //--------------------------------------------------------------------------
     private PrivilegeBits getPrivilegeBits(@Nullable final Tree tree) {
         PrivilegeBits sufficient = PrivilegeBits.getInstance();
@@ -209,6 +222,19 @@ class CompositePermissionProvider implements PermissionProvider {
         return false;
     }
 
+    private static boolean grantsRead(@Nonnull final String oakTreePath,
+                                      @Nullable String propertyName,
+                                      @Nonnull Iterable<AggregatedPermissionProvider> providers) {
+        Iterator<AggregatedPermissionProvider> it = providers.iterator();
+        while (it.hasNext()) {
+            AggregatedPermissionProvider pp = it.next();
+            boolean isGranted = pp.canRead(oakTreePath, propertyName);
+            if (!it.hasNext() || evalComplete(isGranted, pp.getFlag())) {
+                return isGranted;
+            }
+        }
+        return false;
+    }
     private static boolean grantsAction(@Nonnull final String oakPath,
                                         @Nonnull final String action,
                                         @Nonnull Iterable<AggregatedPermissionProvider> providers) {

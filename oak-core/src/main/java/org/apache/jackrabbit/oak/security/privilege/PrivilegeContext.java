@@ -54,7 +54,11 @@ final class PrivilegeContext implements Context, PrivilegeConstants {
 
     @Override
     public boolean definesLocation(TreeLocation location) {
-        return location.getPath().startsWith(PRIVILEGES_PATH);
+        return definesPath(location.getPath(), null);
     }
 
+    @Override
+    public boolean definesPath(@Nonnull String treePath, String propertyName) {
+        return treePath.startsWith(PRIVILEGES_PATH);
+    }
 }

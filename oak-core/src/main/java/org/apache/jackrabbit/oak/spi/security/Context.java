@@ -17,6 +17,7 @@
 package org.apache.jackrabbit.oak.spi.security;
 
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Tree;
@@ -75,6 +76,18 @@ public interface Context {
     boolean definesLocation(@Nonnull TreeLocation location);
 
     /**
+     * Reveals if the specified {@code path} is defined by the security
+     * module that exposes this {@link Context} instance.
+     *
+     *
+     * @param treePath The tree path to be tested.
+     * @param propertyName An optional property name to be tested.
+     * @return {@code true} if the specified path is related to or
+     * defined by the security module.
+     */
+    boolean definesPath(@Nonnull String treePath, @Nullable String propertyName);
+
+    /**
      * Default implementation of the {@code Context} interface that always returns
      * {@code false}.
      */
@@ -96,6 +109,11 @@ public interface Context {
 
         @Override
         public boolean definesLocation(@Nonnull TreeLocation location) {
+            return false;
+        }
+
+        @Override
+        public boolean definesPath(@Nonnull String treePath, String propertyName) {
             return false;
         }
 

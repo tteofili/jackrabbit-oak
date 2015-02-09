@@ -33,13 +33,11 @@ import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexEditorProvider;
 import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexProvider;
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.LuceneInitializerHelper;
 import org.apache.jackrabbit.oak.plugins.index.solr.configuration.DefaultSolrConfiguration;
-import org.apache.jackrabbit.oak.plugins.index.solr.configuration.DefaultSolrConfigurationProvider;
 import org.apache.jackrabbit.oak.plugins.index.solr.configuration.EmbeddedSolrServerConfiguration;
 import org.apache.jackrabbit.oak.plugins.index.solr.configuration.OakSolrConfiguration;
 import org.apache.jackrabbit.oak.plugins.index.solr.configuration.OakSolrConfigurationProvider;
 import org.apache.jackrabbit.oak.plugins.index.solr.index.SolrIndexEditorProvider;
 import org.apache.jackrabbit.oak.plugins.index.solr.query.SolrQueryIndexProvider;
-import org.apache.jackrabbit.oak.plugins.index.solr.server.DefaultSolrServerProvider;
 import org.apache.jackrabbit.oak.plugins.index.solr.server.EmbeddedSolrServerProvider;
 import org.apache.jackrabbit.oak.plugins.index.solr.server.SolrServerProvider;
 import org.apache.jackrabbit.oak.plugins.index.solr.util.SolrIndexInitializer;
@@ -105,11 +103,11 @@ public class SolrScalabilityNodeSearchSuite extends ScalabilityNodeSuite {
                 @Override
                 public Jcr customize(Oak oak) {
                     LuceneIndexProvider provider = new LuceneIndexProvider();
-                    OakSolrConfigurationProvider configurationProvider = new OakSolrConfigurationProvider(){
+                    OakSolrConfigurationProvider configurationProvider = new OakSolrConfigurationProvider() {
                         @Nonnull
                         @Override
                         public OakSolrConfiguration getConfiguration() {
-                            return new DefaultSolrConfiguration(){
+                            return new DefaultSolrConfiguration() {
                                 @Override
                                 public boolean useForPropertyRestrictions() {
                                     return true;

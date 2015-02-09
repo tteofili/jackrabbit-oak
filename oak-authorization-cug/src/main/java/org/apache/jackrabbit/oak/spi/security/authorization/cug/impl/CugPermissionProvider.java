@@ -189,6 +189,12 @@ class CugPermissionProvider implements PermissionProvider, AggregatedPermissionP
         }
     }
 
+    @Override
+    public boolean canRead(@Nonnull String oakTreePath, @Nullable String propertyName) {
+        // TODO
+        return false;
+    }
+
     public boolean isGranted(String oakPath, String jcrActions) {
         TreeLocation location = TreeLocation.create(immutableRoot, oakPath);
         boolean isAcContent = ctx.definesLocation(location);

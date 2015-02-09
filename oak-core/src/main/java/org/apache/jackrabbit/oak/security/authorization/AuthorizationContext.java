@@ -17,6 +17,7 @@
 package org.apache.jackrabbit.oak.security.authorization;
 
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Tree;
@@ -64,9 +65,22 @@ final class AuthorizationContext implements Context, AccessControlConstants, Per
             return (p == null) ? definesTree(tree) : definesProperty(tree, p);
         } else {
             String path = location.getPath();
-            String name = Text.getName(location.getPath());
-            return POLICY_NODE_NAMES.contains(name) || ACE_PROPERTY_NAMES.contains(name) || path.startsWith(PERMISSIONS_STORE_PATH);
+            return definesPath(path, Text.getName(path));
         }
     }
 
+    @Override
+    public boolean definesPath(@Nonnull String treePath, @Nullable String propertyName) {
+        boolean definesProperty = (propertyName != null) && ACE_PROPERTY_NAMES.contains(propertyName);
+        return definesProperty || treePath.startsWith(PERMISSIONS_STORE_PATH) || containsPolicyName(treePath);
+    }
+
+    private static boolean containsPolicyName(@Nonnull String treePath) {
+        for (String pName : POLICY_NODE_NAMES) {
+            if (treePath.contains('/' + pName)) {
+                return true;
+            }
+        }
+        return false;
+    }
 }

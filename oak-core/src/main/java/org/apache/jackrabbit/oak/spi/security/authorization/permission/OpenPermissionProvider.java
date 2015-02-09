@@ -74,4 +74,9 @@ public final class OpenPermissionProvider implements PermissionProvider {
     public boolean isGranted(@Nonnull String oakPath, @Nonnull String jcrActions) {
         return true;
     }
+
+    @Override
+    public boolean canRead(@Nonnull String oakTreePath, @Nullable String propertyName) {
+        return true;
+    }
 }

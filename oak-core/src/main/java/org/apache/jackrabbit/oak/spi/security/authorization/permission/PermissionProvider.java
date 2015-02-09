@@ -123,4 +123,20 @@ public interface PermissionProvider {
      * {@code false} otherwise.
      */
     boolean isGranted(@Nonnull String oakPath, @Nonnull String jcrActions);
+
+    /**
+     * Test if the item identified by the given {@code oakTreePath} and (optionally)
+     * {@code propertyName} can be accessed by the editing session. Whether or
+     * not the path is resolved to the corresponding item is an implementation
+     * detail and might be omitted for performance reasons. In this case the
+     * permission evaluation might not be able to properly evaluate restrictions
+     * that require access to the item and is required to not expose items
+     * that would not be accessible when evaluated calling
+     * {@code #isGranted(Tree, PropertyState, long)}.
+     *
+     * @param oakTreePath The path of the tree.
+     * @param propertyName Optional name of the property or {@code null}.
+     * @return {@code true} if the item can be read; {@code false} otherwise.
+     */
+    boolean canRead(@Nonnull String oakTreePath, @Nullable String propertyName);
 }

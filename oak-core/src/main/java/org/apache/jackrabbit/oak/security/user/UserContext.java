@@ -17,6 +17,7 @@
 package org.apache.jackrabbit.oak.security.user;
 
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Tree;
@@ -75,19 +76,24 @@ final class UserContext implements Context, UserConstants {
             return (p == null) ? definesTree(tree) : definesProperty(tree, p);
         } else {
             String path = location.getPath();
-            String name = Text.getName(path);
-            if (USER_PROPERTY_NAMES.contains(name)
-                    || GROUP_PROPERTY_NAMES.contains(name)
-                    || path.contains(REP_MEMBERS)
-                    || path.contains(REP_MEMBERS_LIST)
-                    || path.contains(REP_PWD)) {
-                return true;
-            } else {
-                // undefined: unable to determine if the specified location
-                // defines a user or group node (missing node type information
-                // on non-existing location
-                return false;
-            }
+            return definesPath(path, Text.getName(path));
+        }
+    }
+
+    @Override
+    public boolean definesPath(@Nonnull String treePath, @Nullable String propertyName) {
+        if (USER_PROPERTY_NAMES.contains(propertyName)
+                || GROUP_PROPERTY_NAMES.contains(propertyName)
+                || treePath.contains(REP_MEMBERS)
+                || treePath.contains(REP_MEMBERS_LIST)
+                || treePath.contains(REP_PWD)) {
+            return true;
+        } else {
+            // TODO
+            // undefined: unable to determine if the specified location
+            // defines a user or group node (missing node type information
+            // on non-existing location
+            return false;
         }
     }
 

@@ -24,6 +24,7 @@ import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
 import com.google.common.base.Function;
 import com.google.common.collect.ImmutableList;
@@ -223,6 +224,16 @@ public abstract class CompositeConfiguration<T extends SecurityConfiguration> im
             public boolean definesLocation(@Nonnull TreeLocation location) {
                 for (SecurityConfiguration sc : configs) {
                     if (sc.getContext().definesLocation(location)) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            @Override
+            public boolean definesPath(@Nonnull String treePath, @Nullable String propertyName) {
+                for (SecurityConfiguration sc : configs) {
+                    if (sc.getContext().definesPath(treePath, propertyName)) {
                         return true;
                     }
                 }

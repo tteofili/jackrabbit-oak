@@ -21,6 +21,7 @@ import java.util.Collections;
 import java.util.Set;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
+import javax.jcr.Session;
 
 import org.apache.jackrabbit.JcrConstants;
 import org.apache.jackrabbit.oak.api.PropertyState;
@@ -120,6 +121,23 @@ public class PermissionProviderImpl implements PermissionProvider, AccessControl
             isGranted = compiledPermissions.isGranted(oakPath, permissions);
         }
         return isGranted;
+    }
+
+    @Override
+    public boolean canRead(@Nonnull String oakTreePath, @Nullable String propertyName) {
+        String path = (propertyName != null) ? oakTreePath + '/' + propertyName : oakTreePath;
+        if (isVersionStorePath(oakTreePath)) {
+            return isGranted(path, Session.ACTION_READ);
+        } else {
+            boolean isAcContent = acConfig.getContext().definesPath(oakTreePath, propertyName);
+            long permission;
+            if (isAcContent) {
+                permission = Permissions.READ_ACCESS_CONTROL;
+            } else {
+                permission = (propertyName == null) ? Permissions.READ_NODE : Permissions.READ_PROPERTY;
+            }
+            return compiledPermissions.isGranted(path, permission);
+        }
     }
 
     //---------------------------------------< AggregatedPermissionProvider >---

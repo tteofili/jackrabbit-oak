@@ -203,7 +203,6 @@ public class SolrQueryIndex implements FulltextQueryIndex {
                 private final Deque<SolrResultRow> queue = Queues.newArrayDeque();
 
                 private SolrDocument lastDoc;
-                private int lastFacet = 0;
 
                 public int offset = 0;
 
@@ -321,6 +320,8 @@ public class SolrQueryIndex implements FulltextQueryIndex {
     }
 
     private void filterFacets(SolrDocument doc, List<FacetField> facetFields) {
+        // TODO : facet filtering by value requires that the facet values match the stored values
+        // TODO : a *_facet field must exist, storing docValues instead of values and that should be used for faceting and at filtering time
         for (FacetField facetField : facetFields) {
             if (doc.getFieldNames().contains(facetField.getName())) {
                 // decrease facet value
@@ -340,17 +341,18 @@ public class SolrQueryIndex implements FulltextQueryIndex {
     }
 
     private boolean exists(String path, NodeState root) {
-        boolean result = true;
+        // need to enable the check at the property level too
+        boolean nodeExists = true;
         NodeState nodeState = root;
         for (String n : PathUtils.elements(path)) {
             if (nodeState.hasChildNode(n)) {
                 nodeState = nodeState.getChildNode(n);
             } else {
-                result = false;
+                nodeExists = false;
                 break;
             }
         }
-        return result;
+        return nodeExists;
     }
 
     static boolean isIgnoredProperty(String propertyName, OakSolrConfiguration configuration) {

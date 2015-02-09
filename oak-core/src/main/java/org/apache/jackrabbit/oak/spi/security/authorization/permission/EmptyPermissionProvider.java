@@ -73,4 +73,9 @@ public final class EmptyPermissionProvider implements PermissionProvider {
     public boolean isGranted(@Nonnull String oakPath, @Nonnull String jcrActions) {
         return false;
     }
+
+    @Override
+    public boolean canRead(@Nonnull String oakTreePath, @Nullable String propertyName) {
+        return false;
+    }
 }

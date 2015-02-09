@@ -31,7 +31,7 @@ public class FacetSearcher extends SearchScalabilityBenchmark {
     @Override
     protected Query getQuery(@Nonnull QueryManager qm, ScalabilityAbstractSuite.ExecutionContext context) throws RepositoryException {
 
-        final String statement = "select [jcr:path], [facet(jcr:primaryType)] from [nt:base]";
+        final String statement = "select [jcr:path], [facet(jcr:primaryType)] from [nt:base] where native('solr','*:*')";
 
         LOG.debug("statement: {}", statement);
 
