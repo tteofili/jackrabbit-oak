@@ -36,6 +36,8 @@ import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.REP_S
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import javax.annotation.Nonnull;
 
@@ -57,6 +59,7 @@ import org.apache.jackrabbit.oak.spi.query.PropertyValues;
 import org.apache.jackrabbit.oak.spi.query.QueryIndex;
 import org.apache.jackrabbit.oak.spi.query.QueryIndex.AdvancedQueryIndex;
 import org.apache.jackrabbit.oak.spi.query.QueryIndex.IndexPlan;
+import org.apache.jackrabbit.oak.spi.security.authorization.permission.PermissionProvider;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -69,6 +72,8 @@ import com.google.common.collect.Iterables;
  */
 public class SelectorImpl extends SourceImpl {
     private static final Logger LOG = LoggerFactory.getLogger(SelectorImpl.class);
+
+    static final Pattern FACET_REGEX = Pattern.compile("facet\\((\\w+(\\:\\w+)?)\\)");
     
     // TODO possibly support using multiple indexes (using index intersection / index merge)
     private SelectorExecutionPlan plan;
@@ -622,8 +627,15 @@ public class SelectorImpl extends SourceImpl {
     
     private PropertyValue currentOakProperty(Tree t, String oakPropertyName, Integer propertyType) {
         PropertyValue result;
-        if (oakPropertyName.startsWith("facet(") && oakPropertyName.endsWith(")")) {
-            result = currentRow.getValue(oakPropertyName); // TODO : check ACLs
+        Matcher matcher = FACET_REGEX.matcher(oakPropertyName);
+        if (matcher.matches()) {
+            String prop = matcher.group(1);
+            PermissionProvider permissionProvider = query.getExecutionContext().getPermissionProvider();
+            if (t == null || (permissionProvider != null && permissionProvider.canRead(t.getPath(), prop))) {
+                result = currentRow.getValue(oakPropertyName);
+            } else {
+                return null;
+            }
         } else if (t == null || !t.exists()) {
 //        if (t == null || !t.exists()) {
             return null;

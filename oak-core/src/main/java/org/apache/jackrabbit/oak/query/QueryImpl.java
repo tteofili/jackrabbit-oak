@@ -874,6 +874,10 @@ public class QueryImpl implements Query {
         this.context = context;
     }
 
+    public ExecutionContext getExecutionContext() {
+        return context;
+    }
+
     @Override
     public void setOrderings(OrderingImpl[] orderings) {
         this.orderings = orderings;

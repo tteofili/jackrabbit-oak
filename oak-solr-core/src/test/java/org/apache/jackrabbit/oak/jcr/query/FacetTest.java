@@ -55,6 +55,31 @@ public class FacetTest extends AbstractQueryTest {
         assertEquals(facetResult + ", " + facetResult + ", " + facetResult, getResult(result, "facet(text)"));
     }
 
+    public void testFacetRetrieval4() throws Exception {
+        Session session = superuser;
+        QueryManager qm = session.getWorkspace().getQueryManager();
+        Node n1 = testRootNode.addNode("node1");
+        n1.setProperty("jcr:title", "apache jackrabbit oak");
+        n1.setProperty("tags", new String[]{"software", "repository", "apache"});
+        Node n2 = testRootNode.addNode("node2");
+        n2.setProperty("jcr:title", "oak furniture");
+        n2.setProperty("tags", "furniture");
+        Node n3 = testRootNode.addNode("node3");
+        n3.setProperty("jcr:title", "oak cosmetics");
+        n3.setProperty("tags", "cosmetics");
+        Node n4 = testRootNode.addNode("node4");
+        n4.setProperty("jcr:title", "oak and aem");
+        n4.setProperty("tags", new String[]{"software", "repository", "aem"});
+        session.save();
+
+        String sql2 = "select [jcr:path], [facet(tags)] from [nt:base] " +
+                "where contains([jcr:title], 'oak') order by [jcr:path]";
+        Query q = qm.createQuery(sql2, Query.JCR_SQL2);
+        QueryResult result = q.execute();
+        String facetResult = "tags:[repository (2), software (2), aem (1), apache (1), cosmetics (1), furniture (1)], tags:[repository (2), software (2), aem (1), apache (1), cosmetics (1), furniture (1)], tags:[repository (2), software (2), aem (1), apache (1), cosmetics (1), furniture (1)], tags:[repository (2), software (2), aem (1), apache (1), cosmetics (1), furniture (1)]";
+        assertEquals(facetResult, getResult(result, "facet(tags)"));
+    }
+
     public void testFacetRetrievalWithAnonymousUser() throws Exception {
         Session session = superuser;
 
