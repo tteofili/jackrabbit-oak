@@ -22,6 +22,7 @@ import java.util.Collections;
 import java.util.Deque;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -76,17 +77,28 @@ public class SolrQueryIndex implements FulltextQueryIndex {
 
     private final Logger log = LoggerFactory.getLogger(SolrQueryIndex.class);
 
-    private final String name;
-    private final SolrServer solrServer;
+    final String name;
+    final SolrServer solrServer;
     private final OakSolrConfiguration configuration;
 
-    private final NodeAggregator aggregator;
+    final NodeAggregator aggregator;
+
+    private final boolean secureFacets;
 
     public SolrQueryIndex(String name, SolrServer solrServer, OakSolrConfiguration configuration, NodeAggregator aggregator) {
         this.name = name;
         this.solrServer = solrServer;
         this.configuration = configuration;
         this.aggregator = aggregator;
+        this.secureFacets = true;
+    }
+
+    public SolrQueryIndex(String name, SolrServer solrServer, OakSolrConfiguration configuration, NodeAggregator aggregator, boolean secureFacets) {
+        this.name = name;
+        this.solrServer = solrServer;
+        this.configuration = configuration;
+        this.aggregator = aggregator;
+        this.secureFacets = secureFacets;
     }
 
     public SolrQueryIndex(String name, SolrServer solrServer, OakSolrConfiguration configuration) {
@@ -275,18 +287,24 @@ public class SolrQueryIndex implements FulltextQueryIndex {
                         }
 
                         // filter facets on doc paths
-                        for (SolrDocument doc : docs) {
-                            String path = String.valueOf(doc.getFieldValue(configuration.getPathField()));
-                            // if path doesn't exist in the node state, filter the facets
-                            PermissionProvider permissionProvider = filter.getSelector().getQuery().getExecutionContext().getPermissionProvider();
-                            for (FacetField ff : facetFields) {
-                                if (permissionProvider != null && !permissionProvider.canRead(path, ff.getName())) {
-                                    filterFacet(doc, ff);
+                        if (secureFacets && !facetFields.isEmpty()) {
+                            for (SolrDocument doc : docs) {
+                                String path = String.valueOf(doc.getFieldValue(configuration.getPathField()));
+                                // if path doesn't exist in the node state, filter the facets
+                                PermissionProvider permissionProvider = filter.getSelector().getQuery().getExecutionContext().getPermissionProvider();
+                                for (FacetField ff : facetFields) {
+                                    if (permissionProvider != null) {
+                                        if (!permissionProvider.canRead(path, ff.getName())) {
+                                            filterFacet(doc, ff);
+                                        }
+                                    } else { // fallback in case of missing PermissionProvider
+                                        if (!exists(path, root)) { // this will only work in case the NodeState is a SecureNodeState
+                                            filterFacet(doc, ff);
+                                        }
+                                    }
                                 }
+
                             }
-//                            if (!exists(path, root) && facetFields.size() > 0) {
-//                                filterFacets(doc, facetFields);
-//                            }
                         }
 
                         onRetrievedResults(filter, docs);
@@ -322,16 +340,29 @@ public class SolrQueryIndex implements FulltextQueryIndex {
     }
 
     private void filterFacet(SolrDocument doc, FacetField facetField) {
+        // TODO : facet filtering by value requires that the facet values match the stored values
+        // TODO : a *_facet field must exist, storing docValues instead of values and that should be used for faceting and at filtering time
         if (doc.getFieldNames().contains(facetField.getName())) {
             // decrease facet value
             Collection<Object> docFieldValues = doc.getFieldValues(facetField.getName());
             if (docFieldValues != null) {
                 for (Object docFieldValue : docFieldValues) {
                     String valueString = String.valueOf(docFieldValue);
+                    List<FacetField.Count> toRemove = new LinkedList<FacetField.Count>();
                     for (FacetField.Count count : facetField.getValues()) {
+                        long existingCount = count.getCount();
                         if (valueString.equals(count.getName())) {
-                            count.setCount(count.getCount() - 1);
+                            if (existingCount > 1) {
+                                // decrease the count
+                                count.setCount(existingCount - 1);
+                            } else {
+                                // remove the entire entry
+                                toRemove.add(count);
+                            }
                         }
+                    }
+                    for (FacetField.Count f : toRemove) {
+                        assert facetField.getValues().remove(f);
                     }
                 }
             }
@@ -341,27 +372,6 @@ public class SolrQueryIndex implements FulltextQueryIndex {
 
     void onRetrievedResults(Filter filter, SolrDocumentList docs) {
         // do nothing
-    }
-
-    private void filterFacets(SolrDocument doc, List<FacetField> facetFields) {
-        // TODO : facet filtering by value requires that the facet values match the stored values
-        // TODO : a *_facet field must exist, storing docValues instead of values and that should be used for faceting and at filtering time
-        for (FacetField facetField : facetFields) {
-            if (doc.getFieldNames().contains(facetField.getName())) {
-                // decrease facet value
-                Collection<Object> docFieldValues = doc.getFieldValues(facetField.getName());
-                if (docFieldValues != null) {
-                    for (Object docFieldValue : docFieldValues) {
-                        String valueString = String.valueOf(docFieldValue);
-                        for (FacetField.Count count : facetField.getValues()) {
-                            if (valueString.equals(count.getName())) {
-                                count.setCount(count.getCount() - 1);
-                            }
-                        }
-                    }
-                }
-            }
-        }
     }
 
     private boolean exists(String path, NodeState root) {

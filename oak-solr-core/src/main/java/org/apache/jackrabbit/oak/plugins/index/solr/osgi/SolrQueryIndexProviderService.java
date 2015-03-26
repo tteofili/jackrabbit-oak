@@ -52,6 +52,7 @@ import org.slf4j.LoggerFactory;
 public class SolrQueryIndexProviderService implements QueryIndexProvider {
 
     private static final boolean QUERY_TIME_AGGREGATION_DEFAULT = false;
+    private static final boolean SECURE_FACETS_DEFAULT = true;
 
     private final Logger log = LoggerFactory.getLogger(getClass());
 
@@ -71,12 +72,20 @@ public class SolrQueryIndexProviderService implements QueryIndexProvider {
             description = "enable query time aggregation for Solr index")
     private static final String QUERY_TIME_AGGREGATION = "query.aggregation";
 
+    @Property(boolValue = SECURE_FACETS_DEFAULT, label = "secure facets",
+            description = "make facets returned by Solr index ACL checked")
+    private static final String SECURE_FACETS = "secure.facets";
+
+
     private boolean queryTimeAggregation;
+    private boolean secureFacets;
 
     @Activate
     protected void activate(ComponentContext componentContext) {
         Object value = componentContext.getProperties().get(QUERY_TIME_AGGREGATION);
         queryTimeAggregation = PropertiesUtil.toBoolean(value, QUERY_TIME_AGGREGATION_DEFAULT);
+        value = componentContext.getProperties().get(SECURE_FACETS);
+        secureFacets = PropertiesUtil.toBoolean(value, SECURE_FACETS_DEFAULT);
     }
 
     @Override
@@ -84,7 +93,7 @@ public class SolrQueryIndexProviderService implements QueryIndexProvider {
     public List<? extends QueryIndex> getQueryIndexes(NodeState nodeState) {
         if (solrServerProvider != null && oakSolrConfigurationProvider != null) {
             SolrQueryIndexProvider solrQueryIndexProvider = new SolrQueryIndexProvider(solrServerProvider,
-                    oakSolrConfigurationProvider, nodeAggregator);
+                    oakSolrConfigurationProvider, nodeAggregator, secureFacets);
             log.debug("creating Solr query index provider {} query time aggregation", queryTimeAggregation ? "with" : "without");
             return queryTimeAggregation ? AggregateIndexProvider.wrap(solrQueryIndexProvider).getQueryIndexes(nodeState) :
                     solrQueryIndexProvider.getQueryIndexes(nodeState);

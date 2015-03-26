@@ -48,15 +48,23 @@ public class SolrQueryIndexProvider implements QueryIndexProvider {
 
     private final NodeAggregator aggregator;
 
+    private final boolean secureFacets;
+
     public SolrQueryIndexProvider(SolrServerProvider solrServerProvider, OakSolrConfigurationProvider oakSolrConfigurationProvider,
                                   NodeAggregator nodeAggregator) {
+        this(solrServerProvider, oakSolrConfigurationProvider, nodeAggregator, true);
+    }
+
+    public SolrQueryIndexProvider(SolrServerProvider solrServerProvider, OakSolrConfigurationProvider oakSolrConfigurationProvider,
+                                  NodeAggregator nodeAggregator, boolean secureFacets) {
         this.oakSolrConfigurationProvider = oakSolrConfigurationProvider;
         this.solrServerProvider = solrServerProvider;
         this.aggregator = nodeAggregator;
+        this.secureFacets = secureFacets;
     }
 
     public SolrQueryIndexProvider(SolrServerProvider solrServerProvider, OakSolrConfigurationProvider oakSolrConfigurationProvider) {
-        this(solrServerProvider, oakSolrConfigurationProvider, null);
+        this(solrServerProvider, oakSolrConfigurationProvider, null, true);
     }
 
     @Nonnull
@@ -81,7 +89,7 @@ public class SolrQueryIndexProvider implements QueryIndexProvider {
                                 entry.getName(),
                                 solrServer,
                                 oakSolrConfigurationProvider.getConfiguration(),
-                                aggregator));
+                                aggregator, secureFacets));
                     }
                     else {
                         if (log.isWarnEnabled()) {
