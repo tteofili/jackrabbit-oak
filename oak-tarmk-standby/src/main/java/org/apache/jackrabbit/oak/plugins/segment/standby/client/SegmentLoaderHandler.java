@@ -18,6 +18,8 @@
  */
 package org.apache.jackrabbit.oak.plugins.segment.standby.client;
 
+import static org.apache.jackrabbit.oak.commons.IOUtils.humanReadableByteCount;
+import static org.apache.jackrabbit.oak.plugins.segment.standby.codec.Messages.newGetBlobReq;
 import static org.apache.jackrabbit.oak.plugins.segment.standby.codec.Messages.newGetSegmentReq;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
@@ -28,16 +30,17 @@ import java.io.IOException;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
+import org.apache.jackrabbit.oak.api.Blob;
 import org.apache.jackrabbit.oak.plugins.segment.RecordId;
 import org.apache.jackrabbit.oak.plugins.segment.Segment;
 import org.apache.jackrabbit.oak.plugins.segment.SegmentNodeBuilder;
 import org.apache.jackrabbit.oak.plugins.segment.SegmentNodeState;
 import org.apache.jackrabbit.oak.plugins.segment.SegmentNotFoundException;
 import org.apache.jackrabbit.oak.plugins.segment.standby.codec.SegmentReply;
-import org.apache.jackrabbit.oak.plugins.segment.standby.store.StandbyStore;
 import org.apache.jackrabbit.oak.plugins.segment.standby.store.RemoteSegmentLoader;
-import org.apache.jackrabbit.oak.spi.state.ApplyDiff;
+import org.apache.jackrabbit.oak.plugins.segment.standby.store.StandbyStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -50,24 +53,25 @@ public class SegmentLoaderHandler extends ChannelInboundHandlerAdapter
     private final StandbyStore store;
     private final String clientID;
     private final RecordId head;
-    private final EventExecutorGroup preloaderExecutor;
     private final EventExecutorGroup loaderExecutor;
-
-    private int timeoutMs = 5000;
+    private final AtomicBoolean running;
+    private final int readTimeoutMs;
+    private final boolean autoClean;
 
     private ChannelHandlerContext ctx;
 
-    final BlockingQueue<Segment> segment = new LinkedBlockingQueue<Segment>();
+    final BlockingQueue<SegmentReply> segment = new LinkedBlockingQueue<SegmentReply>();
 
     public SegmentLoaderHandler(final StandbyStore store, RecordId head,
-            EventExecutorGroup preloaderExecutor,
             EventExecutorGroup loaderExecutor,
-            String clientID) {
+            String clientID, AtomicBoolean running, int readTimeoutMs, boolean autoClean) {
         this.store = store;
         this.head = head;
-        this.preloaderExecutor = preloaderExecutor;
         this.loaderExecutor = loaderExecutor;
         this.clientID = clientID;
+        this.running = running;
+        this.readTimeoutMs = readTimeoutMs;
+        this.autoClean = autoClean;
     }
 
     @Override
@@ -80,14 +84,17 @@ public class SegmentLoaderHandler extends ChannelInboundHandlerAdapter
     public void userEventTriggered(ChannelHandlerContext ctx, Object evt)
             throws Exception {
         if (evt instanceof SegmentReply) {
-            //log.debug("offering segment " + ((SegmentReply) evt).getSegment());
-            segment.offer(((SegmentReply) evt).getSegment());
+            segment.offer((SegmentReply) evt);
         }
     }
 
     private void initSync() {
         log.debug("new head id " + head);
         long t = System.currentTimeMillis();
+        long preSyncSize = -1;
+        if (autoClean) {
+            preSyncSize = store.size();
+        }
 
         try {
             store.setLoader(this);
@@ -97,10 +104,10 @@ public class SegmentLoaderHandler extends ChannelInboundHandlerAdapter
             SegmentNodeState current = new SegmentNodeState(head);
             do {
                 try {
-                    current.compareAgainstBaseState(before, new ApplyDiff(builder));
+                    current.compareAgainstBaseState(before,
+                            new StandbyApplyDiff(builder, store, this));
                     break;
-                }
-                catch (SegmentNotFoundException e) {
+                } catch (SegmentNotFoundException e) {
                     // the segment is locally damaged or not present anymore
                     // lets try to read this from the primary again
                     String id = e.getSegmentId();
@@ -114,8 +121,7 @@ public class SegmentLoaderHandler extends ChannelInboundHandlerAdapter
                     ByteArrayOutputStream bout = new ByteArrayOutputStream(s.size());
                     try {
                         s.writeTo(bout);
-                    }
-                    catch (IOException f) {
+                    } catch (IOException f) {
                         log.error("can't wrap segment to output stream", f);
                         throw e;
                     }
@@ -125,6 +131,18 @@ public class SegmentLoaderHandler extends ChannelInboundHandlerAdapter
             boolean ok = store.setHead(before, builder.getNodeState());
             log.debug("updated head state successfully: {} in {}ms.", ok,
                     System.currentTimeMillis() - t);
+
+            if (autoClean && preSyncSize > 0) {
+                long postSyncSize = store.size();
+                // if size gain is over 25% call cleanup
+                if (postSyncSize - preSyncSize > 0.25 * preSyncSize) {
+                    log.info(
+                            "Store size increased from {} to {}, will run cleanup.",
+                            humanReadableByteCount(preSyncSize),
+                            humanReadableByteCount(postSyncSize));
+                    store.cleanup();
+                }
+            }
         } finally {
             close();
         }
@@ -137,25 +155,51 @@ public class SegmentLoaderHandler extends ChannelInboundHandlerAdapter
     }
 
     @Override
-    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause)
-            throws Exception {
-        log.warn("Closing channel. Got exception: " + cause);
-        ctx.close();
+    public Blob readBlob(String blobId) {
+        ctx.writeAndFlush(newGetBlobReq(this.clientID, blobId));
+        return getBlob(blobId);
     }
 
-    // implementation of RemoteSegmentLoader
+    @Override
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause)
+            throws Exception {
+        log.error("Exception caught, closing channel.", cause);
+        close();
+    }
 
-    public Segment getSegment(final String id) {
+    private Segment getSegment(final String id) {
+        return getReply(id, SegmentReply.SEGMENT).getSegment();
+    }
+
+    private Blob getBlob(final String id) {
+        return getReply(id, SegmentReply.BLOB).getBlob();
+    }
+
+    private SegmentReply getReply(final String id, int type) {
         boolean interrupted = false;
         try {
             for (;;) {
                 try {
-                    Segment s = segment.poll(timeoutMs, TimeUnit.MILLISECONDS);
-                    if (s == null) {
-                        return null;
+                    SegmentReply r = segment.poll(readTimeoutMs,
+                            TimeUnit.MILLISECONDS);
+                    if (r == null) {
+                        log.warn("timeout waiting for {}", id);
+                        return SegmentReply.empty();
                     }
-                    if (s.getSegmentId().toString().equals(id)) {
-                        return s;
+                    if (r.getType() == type) {
+                        switch (r.getType()) {
+                        case SegmentReply.SEGMENT:
+                            if (r.getSegment().getSegmentId().toString()
+                                    .equals(id)) {
+                                return r;
+                            }
+                            break;
+                        case SegmentReply.BLOB:
+                            if (r.getBlob().getBlobId().equals(id)) {
+                                return r;
+                            }
+                            break;
+                        }
                     }
                 } catch (InterruptedException ignore) {
                     interrupted = true;
@@ -166,24 +210,26 @@ public class SegmentLoaderHandler extends ChannelInboundHandlerAdapter
                 Thread.currentThread().interrupt();
             }
         }
-
     }
 
+    @Override
     public void close() {
         ctx.close();
-        if (preloaderExecutor != null && !preloaderExecutor.isShuttingDown()) {
-            preloaderExecutor.shutdownGracefully(1, 2, TimeUnit.SECONDS)
-                    .syncUninterruptibly();
-        }
         if (loaderExecutor != null && !loaderExecutor.isShuttingDown()) {
             loaderExecutor.shutdownGracefully(1, 2, TimeUnit.SECONDS)
                     .syncUninterruptibly();
         }
     }
 
+    @Override
     public boolean isClosed() {
         return (loaderExecutor != null && (loaderExecutor.isShuttingDown() || loaderExecutor
                 .isShutdown()));
+    }
+
+    @Override
+    public boolean isRunning() {
+        return running.get();
     }
 
 }

@@ -39,12 +39,16 @@ import org.apache.felix.scr.annotations.ReferencePolicyOption;
 import org.apache.jackrabbit.oak.commons.PropertiesUtil;
 import org.apache.jackrabbit.oak.osgi.OsgiWhiteboard;
 import org.apache.jackrabbit.oak.plugins.index.aggregate.NodeAggregator;
+import org.apache.jackrabbit.oak.spi.commit.BackgroundObserver;
+import org.apache.jackrabbit.oak.plugins.index.lucene.score.ScorerProviderFactory;
 import org.apache.jackrabbit.oak.spi.commit.Observer;
 import org.apache.jackrabbit.oak.spi.query.QueryIndexProvider;
 import org.apache.jackrabbit.oak.spi.whiteboard.Registration;
 import org.apache.jackrabbit.oak.spi.whiteboard.Whiteboard;
 import org.apache.jackrabbit.oak.spi.whiteboard.WhiteboardExecutor;
-import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.util.CharFilterFactory;
+import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.analysis.util.TokenizerFactory;
 import org.apache.lucene.util.InfoStream;
 import org.osgi.framework.BundleContext;
 import org.osgi.framework.ServiceRegistration;
@@ -66,19 +70,11 @@ public class LuceneIndexProviderService {
 
     private final Logger log = LoggerFactory.getLogger(getClass());
 
-    private final Analyzer defaultAnalyzer = LuceneIndexConstants.ANALYZER;
-
     @Reference(cardinality = ReferenceCardinality.OPTIONAL_UNARY,
             policyOption = ReferencePolicyOption.GREEDY,
             policy = ReferencePolicy.DYNAMIC
     )
     private NodeAggregator nodeAggregator;
-
-    @Reference(cardinality = ReferenceCardinality.OPTIONAL_UNARY,
-            policyOption = ReferencePolicyOption.GREEDY,
-            policy = ReferencePolicy.DYNAMIC
-    )
-    protected Analyzer analyzer;
 
     @Property(
             boolValue = false,
@@ -101,21 +97,36 @@ public class LuceneIndexProviderService {
     )
     private static final String PROP_LOCAL_INDEX_DIR = "localIndexDir";
 
+    @Property(
+            boolValue = true,
+            label = "Open index asynchronously",
+            description = "Enable opening of indexes in asynchronous mode"
+    )
+    private static final String PROP_ASYNC_INDEX_OPEN = "enableOpenIndexAsync";
+
     private Whiteboard whiteboard;
 
     private WhiteboardExecutor executor;
 
+    private BackgroundObserver backgroundObserver;
+
+    @Reference
+    ScorerProviderFactory scorerFactory;
+
     @Activate
     private void activate(BundleContext bundleContext, Map<String, ?> config)
             throws NotCompliantMBeanException {
+        initializeFactoryClassLoaders(getClass().getClassLoader());
         whiteboard = new OsgiWhiteboard(bundleContext);
+        executor = new WhiteboardExecutor();
+        executor.start(whiteboard);
 
-        indexProvider = new LuceneIndexProvider(createTracker(bundleContext, config));
+        indexProvider = new LuceneIndexProvider(createTracker(bundleContext, config), scorerFactory);
         initializeLogging(config);
         initialize();
 
         regs.add(bundleContext.registerService(QueryIndexProvider.class.getName(), indexProvider, null));
-        regs.add(bundleContext.registerService(Observer.class.getName(), indexProvider, null));
+        registerObserver(bundleContext, config);
 
         oakRegs.add(registerMBean(whiteboard,
                 LuceneIndexMBean.class,
@@ -132,6 +143,10 @@ public class LuceneIndexProviderService {
 
         for (Registration reg : oakRegs){
             reg.unregister();
+        }
+
+        if (backgroundObserver != null){
+            backgroundObserver.close();
         }
 
         if (indexProvider != null) {
@@ -156,9 +171,6 @@ public class LuceneIndexProviderService {
         }
 
         indexProvider.setAggregator(nodeAggregator);
-
-        Analyzer analyzer = this.analyzer != null ? this.analyzer : defaultAnalyzer;
-        indexProvider.setAnalyzer(analyzer);
     }
 
     private void initializeLogging(Map<String, ?> config) {
@@ -185,8 +197,6 @@ public class LuceneIndexProviderService {
                     "directory path [%s] nor repository home [%s] defined", PROP_LOCAL_INDEX_DIR, REPOSITORY_HOME);
 
             File indexDir = new File(indexDirPath);
-            executor = new WhiteboardExecutor();
-            executor.start(whiteboard);
             IndexCopier copier = new IndexCopier(executor, indexDir);
             log.info("Enabling CopyOnRead support. Index files would be copied under {}", indexDir.getAbsolutePath());
 
@@ -202,6 +212,44 @@ public class LuceneIndexProviderService {
         return new IndexTracker();
     }
 
+    private void registerObserver(BundleContext bundleContext, Map<String, ?> config) {
+        boolean enableAsyncIndexOpen = PropertiesUtil.toBoolean(config.get(PROP_ASYNC_INDEX_OPEN), true);
+        Observer observer = indexProvider;
+        if (enableAsyncIndexOpen) {
+            backgroundObserver = new BackgroundObserver(indexProvider, executor, 5);
+            observer = backgroundObserver;
+            log.info("Registering the LuceneIndexProvider as a BackgroundObserver");
+        }
+        regs.add(bundleContext.registerService(Observer.class.getName(), observer, null));
+    }
+
+    private void initializeFactoryClassLoaders(ClassLoader classLoader) {
+        ClassLoader originalClassLoader = Thread.currentThread()
+                .getContextClassLoader();
+        try {
+            Thread.currentThread().setContextClassLoader(classLoader);
+            //Access TokenizerFactory etc trigger a static initialization
+            //so switch the TCCL so that static initializer picks up the right
+            //classloader
+            initializeFactoryClassLoaders0(classLoader);
+        } catch (Throwable t) {
+            log.warn("Error occurred while initializing the Lucene " +
+                    "Factories", t);
+        } finally {
+            Thread.currentThread().setContextClassLoader(originalClassLoader);
+        }
+    }
+
+    private void initializeFactoryClassLoaders0(ClassLoader classLoader) {
+        //Factories use the Threads context classloader to perform SPI classes
+        //lookup by default which would not work in OSGi world. So reload the
+        //factories by providing the bundle classloader
+        TokenizerFactory.reloadTokenizers(classLoader);
+        CharFilterFactory.reloadCharFilters(classLoader);
+        TokenFilterFactory.reloadTokenFilters(classLoader);
+    }
+
+
     protected void bindNodeAggregator(NodeAggregator aggregator) {
         this.nodeAggregator = aggregator;
         initialize();
@@ -212,13 +260,4 @@ public class LuceneIndexProviderService {
         initialize();
     }
 
-    protected void bindAnalyzer(Analyzer analyzer) {
-        this.analyzer = analyzer;
-        initialize();
-    }
-
-    protected void unbindAnalyzer(Analyzer analyzer) {
-        this.analyzer = null;
-        initialize();
-    }
 }

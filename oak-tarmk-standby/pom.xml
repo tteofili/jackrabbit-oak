@@ -74,6 +74,7 @@
             <configuration>
               <portNames>
                 <portName>standby.server.port</portName>
+                <portName>standby.proxy.port</portName>
               </portNames>
             </configuration>
           </execution>
@@ -82,8 +83,9 @@
       <plugin>
         <artifactId>maven-surefire-plugin</artifactId>
         <configuration>
-          <systemPropertyVariables combine.children="append">
+          <systemPropertyVariables>
             <standby.server.port>${standby.server.port}</standby.server.port>
+            <standby.proxy.port>${standby.poxy.port}</standby.proxy.port>
           </systemPropertyVariables>
           <excludes>
             <!-- excluding long running tests -->
@@ -92,6 +94,15 @@
             <exclude>**/BulkTest.java</exclude>
             <exclude>**/MBeanTest.java</exclude>
           </excludes>
+        </configuration>
+      </plugin>
+      <plugin>
+        <artifactId>maven-failsafe-plugin</artifactId>
+        <configuration>
+          <systemPropertyVariables>
+            <standby.server.port>${standby.server.port}</standby.server.port>
+            <standby.proxy.port>${standby.poxy.port}</standby.proxy.port>
+          </systemPropertyVariables>
         </configuration>
       </plugin>
     </plugins>
@@ -138,6 +149,12 @@
     <dependency>
       <groupId>org.apache.jackrabbit</groupId>
       <artifactId>oak-core</artifactId>
+      <version>${project.version}</version>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.jackrabbit</groupId>
+      <artifactId>oak-blob</artifactId>
       <version>${project.version}</version>
       <scope>provided</scope>
     </dependency>
@@ -200,6 +217,12 @@
     <dependency>
       <groupId>ch.qos.logback</groupId>
       <artifactId>logback-classic</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.jackrabbit</groupId>
+      <artifactId>jackrabbit-data</artifactId>
+      <version>2.9.0</version>
       <scope>test</scope>
     </dependency>
   </dependencies>

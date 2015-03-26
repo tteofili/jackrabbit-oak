@@ -24,6 +24,30 @@
 # * new tests are typically be added on top, after the syntax docs
 # * use ascii character only
 
+explain select * from [nt:base] where [jcr:uuid] <> '1'
+[nt:base] as [nt:base] /* property uuid IS NOT NULL
+  where [nt:base].[jcr:uuid] <> '1' */
+
+explain select * from [nt:base] as a
+    left outer join [nt:base] as b on a.x=b.y
+    where a.y is null and b.z = 1
+[nt:base] as [a] /* traverse "*"
+  where [a].[y] is null */ left outer join [nt:base] as [b] /* traverse "*"
+  where [b].[z] = 1 */
+  on [a].[x] = [b].[y]
+
+explain select * from [nt:base] as a
+    right outer join [nt:base] as b on a.x=b.y
+    where a.y is null and b.z = 1
+[nt:base] as [b] /* traverse "*"
+  where [b].[z] = 1 */ left outer join [nt:base] as [a] /* traverse "*" */
+  on [a].[x] = [b].[y]
+
+explain select * from [nt:base] where (p=1 or p=2) and (p=3 or p=4)
+[nt:base] as [nt:base] /* traverse "*"
+  where ([nt:base].[p] in(1, 2))
+  and ([nt:base].[p] in(3, 4)) */
+
 explain select *
   from [nt:base]
   where [jcr:uuid] like '%'
@@ -37,7 +61,7 @@ explain select e.[jcr:path]
   inner join [nt:base] as d on ischildnode(d, c)
   inner join [nt:base] as e on ischildnode(e, d)
   where name(a) = 'a'
-  and isdescendantnode(a, '/b')
+  and isdescendantnode(a, '/')
   and name(b) = 'c'
   and name(c) = 'd'
   and name(d) = 'e'
@@ -53,9 +77,9 @@ explain select e.[jcr:path]
   inner join [nt:base] as [b] /* traverse "* && //parent/of/join"
   where name([b]) = 'c' */
   on ischildnode([c], [b])
-  inner join [nt:base] as [a] /* traverse "/b//* && //parent/of/join"
+  inner join [nt:base] as [a] /* traverse "//* && //parent/of/join"
   where (name([a]) = 'a')
-  and (isdescendantnode([a], [/b])) */
+  and (isdescendantnode([a], [/])) */
   on ischildnode([b], [a])
 
 explain select e.[jcr:path]
@@ -65,7 +89,7 @@ explain select e.[jcr:path]
   inner join [nt:base] as d on ischildnode(d, c)
   inner join [nt:base] as e on ischildnode(e, d)
   where name(a) = 'a'
-  and isdescendantnode(a, '/b')
+  and isdescendantnode(a, '/')
   and name(b) = 'c'
   and name(c) = 'd'
   and name(d) = 'e'
@@ -81,9 +105,9 @@ explain select e.[jcr:path]
   inner join [nt:base] as [b] /* traverse "* && //parent/of/join"
   where name([b]) = 'c' */
   on ischildnode([c], [b])
-  inner join [nt:base] as [a] /* traverse "/b//* && //parent/of/join"
+  inner join [nt:base] as [a] /* traverse "//* && //parent/of/join"
   where (name([a]) = 'a')
-  and (isdescendantnode([a], [/b])) */
+  and (isdescendantnode([a], [/])) */
   on ischildnode([b], [a])
 
 explain select excerpt(.)

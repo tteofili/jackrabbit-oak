@@ -26,10 +26,13 @@ import java.util.Iterator;
 import java.util.Set;
 
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.commons.PathUtils;
+import org.apache.jackrabbit.oak.plugins.index.counter.NodeCounterEditor;
+import org.apache.jackrabbit.oak.plugins.index.counter.jmx.NodeCounter;
 import org.apache.jackrabbit.oak.plugins.memory.MemoryChildNodeEntry;
 import org.apache.jackrabbit.oak.query.FilterIterators;
 import org.apache.jackrabbit.oak.query.QueryEngineSettings;
@@ -80,6 +83,8 @@ public class ContentMirrorStoreStrategy implements IndexStoreStrategy {
     @Override
     public void update(
             NodeBuilder index, String path,
+            @Nullable final String indexName,
+            @Nullable final NodeBuilder indexMeta,
             Set<String> beforeKeys, Set<String> afterKeys) {
         for (String key : beforeKeys) {
             remove(index, key, path);
@@ -90,10 +95,10 @@ public class ContentMirrorStoreStrategy implements IndexStoreStrategy {
     }
 
     private void remove(NodeBuilder index, String key, String value) {
-        ApproximateCounter.adjustCount(index, -1);
+        ApproximateCounter.adjustCountSync(index, -1);
         NodeBuilder builder = index.getChildNode(key);
         if (builder.exists()) {
-            ApproximateCounter.adjustCount(builder, -1);
+            ApproximateCounter.adjustCountSync(builder, -1);
             // Collect all builders along the given path
             Deque<NodeBuilder> builders = newArrayDeque();
             builders.addFirst(builder);
@@ -115,10 +120,10 @@ public class ContentMirrorStoreStrategy implements IndexStoreStrategy {
     }
 
     private void insert(NodeBuilder index, String key, String value) {
-        ApproximateCounter.adjustCount(index, 1);
+        ApproximateCounter.adjustCountSync(index, 1);
         // NodeBuilder builder = index.child(key);
         NodeBuilder builder = fetchKeyNode(index, key);
-        ApproximateCounter.adjustCount(builder, 1);
+        ApproximateCounter.adjustCountSync(builder, 1);
         for (String name : PathUtils.elements(value)) {
             builder = builder.child(name);
         }
@@ -164,89 +169,129 @@ public class ContentMirrorStoreStrategy implements IndexStoreStrategy {
     }
 
     @Override
-    public long count(NodeState indexMeta, Set<String> values, int max) {
-        return count(indexMeta, INDEX_CONTENT_NODE_NAME, values, max);
+    public long count(NodeState root, NodeState indexMeta, Set<String> values, int max) {
+        return count(root, indexMeta, INDEX_CONTENT_NODE_NAME, values, max);
     }
 
     @Override
-    public long count(final Filter filter, NodeState indexMeta, Set<String> values, int max) {
-        return count(filter, indexMeta, INDEX_CONTENT_NODE_NAME, values, max);
+    public long count(final Filter filter, NodeState root, NodeState indexMeta, Set<String> values, int max) {
+        return count(filter, root, indexMeta, INDEX_CONTENT_NODE_NAME, values, max);
     }
 
-    public long count(NodeState indexMeta, final String indexStorageNodeName,
+    public long count(NodeState root, NodeState indexMeta, final String indexStorageNodeName,
             Set<String> values, int max) {
-        return count(null, indexMeta, indexStorageNodeName, values, max);
+        return count(null, root, indexMeta, indexStorageNodeName, values, max);
     }
 
-    public long count(Filter filter, NodeState indexMeta, final String indexStorageNodeName,
+    public long count(Filter filter, NodeState root, NodeState indexMeta, final String indexStorageNodeName,
             Set<String> values, int max) {
         NodeState index = indexMeta.getChildNode(indexStorageNodeName);
-        int count = 0;
+        long count = -1;
         if (values == null) {
+            // property is not null
             PropertyState ec = indexMeta.getProperty(ENTRY_COUNT_PROPERTY_NAME);
             if (ec != null) {
-                return ec.getValue(Type.LONG);
+                // negative value implies fall-back to counting
+                count = ec.getValue(Type.LONG);
+            } else {
+                // negative value means that approximation isn't available
+                count = ApproximateCounter.getCountSync(index);
             }
-            CountingNodeVisitor v = new CountingNodeVisitor(max);
-            v.visit(index);
-            count = v.getEstimatedCount();
-            if (count >= max) {
-                // "is not null" queries typically read more data
-                count *= 10;
+            if (count < 0) {
+                CountingNodeVisitor v = new CountingNodeVisitor(max);
+                v.visit(index);
+                count = v.getEstimatedCount();
+                if (count >= max) {
+                    // "is not null" queries typically read more data
+                    count *= 10;
+                }
             }
         } else {
+            // property = x, or property in (x, y, z)
             int size = values.size();
             if (size == 0) {
                 return 0;
             }
             PropertyState ec = indexMeta.getProperty(ENTRY_COUNT_PROPERTY_NAME);       
             if (ec != null) {
-                long entryCount = ec.getValue(Type.LONG);
-                // assume 10000 entries per key, so that this index is used
-                // instead of traversal, but not instead of a regular property index
-                long keyCount = entryCount / 10000;
-                ec = indexMeta.getProperty(KEY_COUNT_PROPERTY_NAME);
-                if (ec != null) {
-                    keyCount = ec.getValue(Type.LONG);
+                count = ec.getValue(Type.LONG);
+                if (count >= 0) {
+                    // assume 10*NodeCounterEditor.DEFAULT_RESOLUTION entries per key, so that this index is used
+                    // instead of traversal, but not instead of a regular property index
+                    long keyCount = count / (10 * NodeCounterEditor.DEFAULT_RESOLUTION);
+                    ec = indexMeta.getProperty(KEY_COUNT_PROPERTY_NAME);
+                    if (ec != null) {
+                        keyCount = ec.getValue(Type.LONG);
+                    }
+                    // cast to double to avoid overflow 
+                    // (entryCount could be Long.MAX_VALUE)
+                    // the cost is not multiplied by the size, 
+                    // otherwise the traversing index might be used              
+                    keyCount = Math.max(1, keyCount);
+                    count = (long) ((double) count / keyCount) + size;
                 }
-                // cast to double to avoid overflow 
-                // (entryCount could be Long.MAX_VALUE)
-                // the cost is not multiplied by the size, 
-                // otherwise the traversing index might be used
-                keyCount = Math.max(1, keyCount);
-                return (long) ((double) entryCount / keyCount) + size;
-            }
-            max = Math.max(10, max / size);
-            int i = 0;
-            String filterRootPath = null;
-            if (filter != null &&
-                    filter.getPathRestriction().equals(Filter.PathRestriction.ALL_CHILDREN)) {
-                filterRootPath = filter.getPath();
-            }
-            for (String p : values) {
-                if (count > max && i > 3) {
-                    // the total count is extrapolated from the the number 
-                    // of values counted so far to the total number of values
-                    count = count * size / i;
-                    break;
-                }
-                NodeState s = index.getChildNode(p);
-                if (filterRootPath != null && s.exists()) {
-                    // Descend directly to path restriction inside index tree
-                    for (String pathFragment : PathUtils
-                            .elements(filterRootPath)) {
-                        s = s.getChildNode(pathFragment);
-                        if (!s.exists()) {
-                            break;
+            } else {
+                // for this index, property "entryCount" is not set
+                long approxMax = 0;
+                long approxCount = ApproximateCounter.getCountSync(index);
+                if (approxCount != -1) {
+                    // approximate count is available for the index:
+                    // check approximate counts for each value
+                    for (String p : values) {
+                        NodeState s = index.getChildNode(p);
+                        if (s.exists()) {
+                            long a = ApproximateCounter.getCountSync(s);
+                            if (a != -1) {
+                                approxMax += a;
+                            } else if (approxMax > 0) {
+                                // in absence of approx count for a key we should be conservative
+                                approxMax += 10 * NodeCounterEditor.DEFAULT_RESOLUTION;
+                            }
                         }
                     }
+                    if (approxMax > 0) {
+                        count = approxMax;
+                    }
                 }
-                if (s.exists()) {
-                    CountingNodeVisitor v = new CountingNodeVisitor(max);
-                    v.visit(s);
-                    count += v.getEstimatedCount();
+            }
+            // still, property = x, or property in (x, y, z),
+            // and we don't know the count ("entryCount" = -1)
+            if (count < 0) {
+                count = 0;
+                max = Math.max(10, max / size);
+                int i = 0;
+                for (String p : values) {
+                    if (count > max && i > 3) {
+                        // the total count is extrapolated from the the number
+                        // of values counted so far to the total number of values
+                        count = count * size / i;
+                        break;
+                    }
+                    NodeState s = index.getChildNode(p);
+                    if (s.exists()) {
+                        CountingNodeVisitor v = new CountingNodeVisitor(max);
+                        v.visit(s);
+                        count += v.getEstimatedCount();
+                    }
+                    i++;
                 }
-                i++;
+            }
+        }
+
+        String filterRootPath = null;
+        if (filter != null &&
+                filter.getPathRestriction().equals(Filter.PathRestriction.ALL_CHILDREN)) {
+            filterRootPath = filter.getPath();
+        }
+
+        if (filterRootPath != null) {
+            // scale cost according to path restriction
+            long totalNodesCount = NodeCounter.getEstimatedNodeCount(root, "/", true);
+            if (totalNodesCount != -1) {
+                long filterPathCount = NodeCounter.getEstimatedNodeCount(root, filterRootPath, true);
+                if (filterPathCount != -1) {
+                    count = (long) ((double) count / totalNodesCount * filterPathCount);
+                }
             }
         }
         return count;

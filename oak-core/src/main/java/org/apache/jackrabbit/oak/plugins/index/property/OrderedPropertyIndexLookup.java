@@ -177,7 +177,7 @@ public class OrderedPropertyIndexLookup {
         if (indexMeta != null) {
             // we relay then on the standard property index for the cost
             cost = COST_OVERHEAD
-                   + getStrategy(indexMeta).count(indexMeta, PropertyIndex.encode(value), MAX_COST);
+                   + getStrategy(indexMeta).count(root, indexMeta, PropertyIndex.encode(value), MAX_COST);
         }
         return cost;
     }
@@ -266,24 +266,19 @@ public class OrderedPropertyIndexLookup {
         String propertyName = PathUtils.getName(pr.propertyName);
         NodeState definition = getIndexNode(root, propertyName, filter);
         if (definition != null) {
-            PropertyValue value = null;
             boolean createPlan = false;
-            if (pr.first == null && pr.last == null) {
+            if (pr.isNotNullRestriction() || pr.list != null) {
                 // open query: [property] is not null
-                value = null;
                 createPlan = true;
             } else if (pr.first != null && pr.first.equals(pr.last) && pr.firstIncluding
                     && pr.lastIncluding) {
                 // [property]=[value]
-                value = pr.first;
                 createPlan = true;
             } else if (pr.first != null && !pr.first.equals(pr.last)) {
                 // '>' & '>=' use cases
-                value = pr.first;
                 createPlan = true;
             } else if (pr.last != null && !pr.last.equals(pr.first)) {
                 // '<' & '<='
-                value = pr.last;
                 createPlan = true;
             }
             if (createPlan) {

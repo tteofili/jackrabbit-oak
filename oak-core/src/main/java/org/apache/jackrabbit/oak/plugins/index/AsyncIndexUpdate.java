@@ -264,9 +264,11 @@ public class AsyncIndexUpdate implements Runnable {
 
         // check for concurrent updates
         NodeState async = root.getChildNode(ASYNC);
-        if (async.getLong(name + "-lease") > System.currentTimeMillis()) {
+        long leaseEndTime = async.getLong(name + "-lease");
+        long currentTime = System.currentTimeMillis();
+        if (leaseEndTime > currentTime) {
             log.debug("Another copy of the {} index update is already running;"
-                    + " skipping this update", name);
+                    + " skipping this update. Time left for lease to expire {}s", name, (leaseEndTime - currentTime)/1000);
             return;
         }
 
@@ -347,6 +349,7 @@ public class AsyncIndexUpdate implements Runnable {
             NodeState before, String beforeCheckpoint,
             NodeState after, String afterCheckpoint, String afterTime)
             throws CommitFailedException {
+        Stopwatch watch = Stopwatch.createStarted();
         // start collecting runtime statistics
         preAsyncRunStatsStats(indexStats);
 
@@ -368,12 +371,14 @@ public class AsyncIndexUpdate implements Runnable {
 
             builder.child(ASYNC).setProperty(name, afterCheckpoint);
             builder.child(ASYNC).setProperty(PropertyStates.createProperty(lastIndexedTo, afterTime, Type.DATE));
+            boolean updatePostRunStatus = true;
             if (callback.isDirty() || before == MISSING_NODE) {
                 if (switchOnSync) {
-                    reindexedDefinitions.addAll(
-                            indexUpdate.getReindexedDefinitions());
+                    reindexedDefinitions.addAll(indexUpdate
+                            .getReindexedDefinitions());
+                    updatePostRunStatus = false;
                 } else {
-                    postAsyncRunStatsStatus(indexStats);
+                    updatePostRunStatus = true;
                 }
             } else {
                 if (switchOnSync) {
@@ -393,9 +398,15 @@ public class AsyncIndexUpdate implements Runnable {
                     }
                     reindexedDefinitions.clear();
                 }
-                postAsyncRunStatsStatus(indexStats);
+                updatePostRunStatus = true;
             }
             mergeWithConcurrencyCheck(builder, beforeCheckpoint, callback.lease);
+            if (updatePostRunStatus) {
+                postAsyncRunStatsStatus(indexStats);
+            }
+            if (indexUpdate.isReindexingPerformed()) {
+                log.info("Reindexing completed for indexes: {} in {}", indexUpdate.getReindexStats(), watch);
+            }
         } finally {
             callback.close();
         }

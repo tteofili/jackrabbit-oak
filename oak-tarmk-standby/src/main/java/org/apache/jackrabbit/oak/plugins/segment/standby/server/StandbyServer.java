@@ -20,6 +20,7 @@ package org.apache.jackrabbit.oak.plugins.segment.standby.server;
 
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.ChannelPipeline;
@@ -33,15 +34,15 @@ import io.netty.handler.codec.string.StringDecoder;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.util.SelfSignedCertificate;
 import io.netty.util.CharsetUtil;
+import io.netty.util.concurrent.Future;
 
 import java.io.Closeable;
 import java.lang.management.ManagementFactory;
 import java.security.cert.CertificateException;
 import java.util.concurrent.TimeUnit;
 
-import io.netty.util.concurrent.Future;
-
 import org.apache.jackrabbit.oak.plugins.segment.SegmentStore;
+import org.apache.jackrabbit.oak.plugins.segment.standby.codec.BlobEncoder;
 import org.apache.jackrabbit.oak.plugins.segment.standby.codec.RecordIdEncoder;
 import org.apache.jackrabbit.oak.plugins.segment.standby.codec.SegmentEncoder;
 import org.apache.jackrabbit.oak.plugins.segment.standby.jmx.StandbyStatusMBean;
@@ -49,6 +50,7 @@ import org.apache.jackrabbit.oak.plugins.segment.standby.store.CommunicationObse
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.management.InstanceNotFoundException;
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
 import javax.management.StandardMBean;
@@ -129,6 +131,7 @@ public class StandbyServer implements StandbyStatusMBean, Closeable {
                 p.addLast(new SnappyFramedEncoder());
                 p.addLast(new RecordIdEncoder());
                 p.addLast(new SegmentEncoder());
+                p.addLast(new BlobEncoder());
                 p.addLast(handler);
             }
         });
@@ -145,9 +148,10 @@ public class StandbyServer implements StandbyStatusMBean, Closeable {
         final MBeanServer jmxServer = ManagementFactory.getPlatformMBeanServer();
         try {
             jmxServer.unregisterMBean(new ObjectName(this.getMBeanName()));
-        }
-        catch (Exception e) {
-            log.error("can unregister standby status mbean", e);
+        } catch (InstanceNotFoundException e) {
+            // ignore
+        } catch (Exception e) {
+            log.error("can't unregister standby status mbean", e);
         }
         if (bossGroup != null && !bossGroup.isShuttingDown()) {
             bossGroup.shutdownGracefully(1, 2, TimeUnit.SECONDS).syncUninterruptibly();
@@ -161,7 +165,6 @@ public class StandbyServer implements StandbyStatusMBean, Closeable {
     private void start(boolean wait) {
         if (running) return;
 
-        running = true;
         this.handler.state = STATUS_STARTING;
 
         final Thread close = new Thread() {
@@ -169,9 +172,28 @@ public class StandbyServer implements StandbyStatusMBean, Closeable {
             public void run() {
                 try {
                     running = true;
+                    handler.state = STATUS_RUNNING;
                     channelFuture.sync().channel().closeFuture().sync();
                 } catch (InterruptedException e) {
                     StandbyServer.this.stop();
+                }
+            }
+        };
+        final ChannelFutureListener bindListener = new ChannelFutureListener() {
+            @Override
+            public void operationComplete(ChannelFuture future) {
+                if (future.isSuccess()) {
+                    close.start();
+                } else {
+                    log.error("Server failed to start on port " + port
+                            + ", will be canceled", future.cause());
+                    future.channel().close();
+                    new Thread() {
+                        @Override
+                        public void run() {
+                            close();
+                        }
+                    }.start();
                 }
             }
         };
@@ -184,7 +206,7 @@ public class StandbyServer implements StandbyStatusMBean, Closeable {
                 //the channel registration synchronous.
                 //Note that now this method will return immediately.
                 channelFuture = b.bind(port);
-                close.start();
+                channelFuture.addListener(bindListener);
             }
         });
         if (!startup.awaitUninterruptibly(10000)) {

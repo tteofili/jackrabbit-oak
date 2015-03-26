@@ -16,6 +16,7 @@
  */
 package org.apache.jackrabbit.oak.plugins.segment.file;
 
+import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.collect.Lists.newArrayList;
@@ -26,10 +27,9 @@ import static com.google.common.collect.Sets.newHashSet;
 import static java.lang.String.format;
 import static java.util.Collections.emptyMap;
 import static java.util.Collections.singletonMap;
-import static java.util.concurrent.TimeUnit.MILLISECONDS;
-import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.jackrabbit.oak.commons.IOUtils.humanReadableByteCount;
 import static org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState.EMPTY_NODE;
+import static org.apache.jackrabbit.oak.plugins.segment.compaction.CompactionStrategy.NO_COMPACTION;
 
 import java.io.File;
 import java.io.IOException;
@@ -44,15 +44,19 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import javax.annotation.Nonnull;
+
 import com.google.common.base.Stopwatch;
 import com.google.common.collect.Maps;
 import org.apache.jackrabbit.oak.api.Blob;
 import org.apache.jackrabbit.oak.plugins.blob.BlobStoreBlob;
+import org.apache.jackrabbit.oak.plugins.segment.CompactionMap;
 import org.apache.jackrabbit.oak.plugins.segment.Compactor;
 import org.apache.jackrabbit.oak.plugins.segment.RecordId;
 import org.apache.jackrabbit.oak.plugins.segment.Segment;
@@ -62,8 +66,11 @@ import org.apache.jackrabbit.oak.plugins.segment.SegmentNodeStore;
 import org.apache.jackrabbit.oak.plugins.segment.SegmentNotFoundException;
 import org.apache.jackrabbit.oak.plugins.segment.SegmentStore;
 import org.apache.jackrabbit.oak.plugins.segment.SegmentTracker;
+import org.apache.jackrabbit.oak.plugins.segment.SegmentVersion;
 import org.apache.jackrabbit.oak.plugins.segment.SegmentWriter;
+import org.apache.jackrabbit.oak.plugins.segment.compaction.CompactionStrategy;
 import org.apache.jackrabbit.oak.spi.blob.BlobStore;
+import org.apache.jackrabbit.oak.spi.gc.GCMonitor;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.slf4j.Logger;
@@ -86,7 +93,9 @@ public class FileStore implements SegmentStore {
 
     private static final String JOURNAL_FILE_NAME = "journal.log";
 
-    private static final boolean MEMORY_MAPPING_DEFAULT =
+    private static final String LOCK_FILE_NAME = "repo.lock";
+
+    static final boolean MEMORY_MAPPING_DEFAULT =
             "64".equals(System.getProperty("sun.arch.data.model", "32"));
 
     private final SegmentTracker tracker;
@@ -109,7 +118,9 @@ public class FileStore implements SegmentStore {
 
     private final RandomAccessFile journalFile;
 
-    private final FileLock journalLock;
+    private final RandomAccessFile lockFile;
+
+    private final FileLock lock;
 
     /**
      * The latest head state.
@@ -134,15 +145,12 @@ public class FileStore implements SegmentStore {
      */
     private final BackgroundThread compactionThread;
 
+    private CompactionStrategy compactionStrategy = NO_COMPACTION;
+
     /**
      * Flag to request revision cleanup during the next flush.
      */
     private final AtomicBoolean cleanupNeeded = new AtomicBoolean(false);
-
-    /**
-     * Flag to set the compaction on pause.
-     */
-    private volatile boolean pauseCompaction = true;
 
     /**
      * List of old tar file generations that are waiting to be removed. They can
@@ -151,44 +159,197 @@ public class FileStore implements SegmentStore {
      */
     private final LinkedList<File> toBeRemoved = newLinkedList();
 
-    public FileStore(BlobStore blobStore, File directory, int maxFileSizeMB, boolean memoryMapping)
-            throws IOException {
-        this(blobStore, directory, EMPTY_NODE, maxFileSizeMB, 0, memoryMapping);
+    /**
+     * Version of the segment storage format.
+     */
+    private final SegmentVersion version = SegmentVersion.V_11;
+
+    /**
+     * {@code GCMonitor} monitoring this instance's gc progress
+     */
+    private final GCMonitor gcMonitor;
+
+    /**
+     * Create a new instance of a {@link Builder} for a file store.
+     * @param directory  directory where the tar files are stored
+     * @return a new {@link Builder} instance.
+     */
+    @Nonnull
+    public static Builder newFileStore(@Nonnull File directory) {
+        return new Builder(checkNotNull(directory));
     }
 
+    /**
+     * Builder for creating {@link FileStore} instances.
+     */
+    public static class Builder {
+        private final File directory;
+        private BlobStore blobStore;   // null ->  store blobs inline
+        private NodeState root = EMPTY_NODE;
+        private int maxFileSize = 256;
+        private int cacheSize;   // 0 -> DEFAULT_MEMORY_CACHE_SIZE
+        private boolean memoryMapping;
+        private final LoggingGCMonitor gcMonitor = new LoggingGCMonitor();
+
+        private Builder(File directory) {
+            this.directory = directory;
+        }
+
+        /**
+         * Specify the {@link BlobStore}.
+         * @param blobStore
+         * @return this instance
+         */
+        @Nonnull
+        public Builder withBlobStore(@Nonnull BlobStore blobStore) {
+            this.blobStore = checkNotNull(blobStore);
+            return this;
+        }
+
+        /**
+         * Specify the initial root node state for the file store
+         * @param root
+         * @return this instance
+         */
+        @Nonnull
+        public Builder withRoot(@Nonnull NodeState root) {
+            this.root = checkNotNull(root);
+            return this;
+        }
+
+        /**
+         * Maximal size of the generated tar files in MB.
+         * @param maxFileSize
+         * @return this instance
+         */
+        @Nonnull
+        public Builder withMaxFileSize(int maxFileSize) {
+            this.maxFileSize = maxFileSize;
+            return this;
+        }
+
+        /**
+         * Size of the cache in MB.
+         * @param cacheSize
+         * @return this instance
+         */
+        @Nonnull
+        public Builder withCacheSize(int cacheSize) {
+            this.cacheSize = cacheSize;
+            return this;
+        }
+
+        /**
+         * Turn caching off
+         * @return this instance
+         */
+        @Nonnull
+        public Builder withNoCache() {
+            this.cacheSize = -1;
+            return this;
+        }
+
+        /**
+         * Turn memory mapping on or off
+         * @param memoryMapping
+         * @return this instance
+         */
+        @Nonnull
+        public Builder withMemoryMapping(boolean memoryMapping) {
+            this.memoryMapping = memoryMapping;
+            return this;
+        }
+
+        /**
+         * {@link GCMonitor} for monitoring this files store's gc process.
+         * @param gcMonitor
+         * @return this instance
+         */
+        @Nonnull
+        public Builder withGCMonitor(@Nonnull GCMonitor gcMonitor) {
+            this.gcMonitor.delegatee = checkNotNull(gcMonitor);
+            return this;
+        }
+
+        /**
+         * Create a new {@link FileStore} instance with the settings specified in this
+         * builder. If none of the {@code with} methods have been called before calling
+         * this method, a file store with the following default settings is returned:
+         * <ul>
+         * <li>blob store: inline</li>
+         * <li>root: empty node</li>
+         * <li>max file size: 256MB</li>
+         * <li>cache size: 256MB</li>
+         * <li>memory mapping: on for 64 bit JVMs off otherwise</li>
+         * <li>whiteboard: none. No {@link GCMonitor} tracking</li>
+         * </ul>
+         *
+         * @return a new file store instance
+         * @throws IOException
+         */
+        @Nonnull
+        public FileStore create() throws IOException {
+            return new FileStore(
+                    blobStore, directory, root, maxFileSize, cacheSize, memoryMapping, gcMonitor);
+        }
+    }
+
+    @Deprecated
+    public FileStore(BlobStore blobStore, File directory, int maxFileSizeMB, boolean memoryMapping)
+            throws IOException {
+        this(blobStore, directory, EMPTY_NODE, maxFileSizeMB, 0, memoryMapping, GCMonitor.EMPTY);
+    }
+
+    @Deprecated
     public FileStore(File directory, int maxFileSizeMB, boolean memoryMapping)
             throws IOException {
         this(null, directory, maxFileSizeMB, memoryMapping);
     }
 
+    @Deprecated
     public FileStore(File directory, int maxFileSizeMB)
             throws IOException {
         this(null, directory, maxFileSizeMB, MEMORY_MAPPING_DEFAULT);
     }
 
+    @Deprecated
     public FileStore(File directory, int maxFileSizeMB, int cacheSizeMB,
             boolean memoryMapping) throws IOException {
-        this(null, directory, EMPTY_NODE, maxFileSizeMB, cacheSizeMB, memoryMapping);
+        this(null, directory, EMPTY_NODE, maxFileSizeMB, cacheSizeMB, memoryMapping, GCMonitor.EMPTY);
     }
 
+    @Deprecated
+    FileStore(File directory, NodeState initial, int maxFileSize) throws IOException {
+        this(null, directory, initial, maxFileSize, -1, MEMORY_MAPPING_DEFAULT, GCMonitor.EMPTY);
+    }
+
+    @Deprecated
     public FileStore(
-            BlobStore blobStore, final File directory, NodeState initial,
-            int maxFileSizeMB, int cacheSizeMB, boolean memoryMapping)
+            BlobStore blobStore, final File directory, NodeState initial, int maxFileSizeMB,
+            int cacheSizeMB, boolean memoryMapping) throws IOException {
+        this(blobStore, directory, initial, maxFileSizeMB, cacheSizeMB, memoryMapping, GCMonitor.EMPTY);
+    }
+
+    private FileStore(
+            BlobStore blobStore, final File directory, NodeState initial, int maxFileSizeMB,
+            int cacheSizeMB, boolean memoryMapping, GCMonitor gcMonitor)
             throws IOException {
         checkNotNull(directory).mkdirs();
-        if (cacheSizeMB > 0) {
-            this.tracker = new SegmentTracker(this, cacheSizeMB);
+        if (cacheSizeMB < 0) {
+            this.tracker = new SegmentTracker(this, 0, getVersion());
+        } else if (cacheSizeMB > 0) {
+            this.tracker = new SegmentTracker(this, cacheSizeMB, getVersion());
         } else {
-            this.tracker = new SegmentTracker(this);
+            this.tracker = new SegmentTracker(this, getVersion());
         }
         this.blobStore = blobStore;
         this.directory = directory;
         this.maxFileSize = maxFileSizeMB * MB;
         this.memoryMapping = memoryMapping;
+        this.gcMonitor = gcMonitor;
 
-        journalFile = new RandomAccessFile(
-                new File(directory, JOURNAL_FILE_NAME), "rw");
-        journalLock = journalFile.getChannel().lock();
+        journalFile = new RandomAccessFile(new File(directory, JOURNAL_FILE_NAME), "rw");
+        lockFile = new RandomAccessFile(new File(directory, LOCK_FILE_NAME), "rw");
 
         Map<Integer, Map<Character, File>> map = collectFiles(directory);
         this.readers = newArrayListWithCapacity(map.size());
@@ -208,28 +369,27 @@ public class FileStore implements SegmentStore {
                 String.format(FILE_NAME_FORMAT, writeNumber, "a"));
         this.writer = new TarWriter(writeFile);
 
-        LinkedList<String> heads = newLinkedList();
-        String line = journalFile.readLine();
-        while (line != null) {
-            int space = line.indexOf(' ');
-            if (space != -1) {
-                heads.add(line.substring(0, space));
+        RecordId id = null;
+        JournalReader journalReader = new JournalReader(new File(directory, JOURNAL_FILE_NAME));
+        try {
+            Iterator<String> heads = journalReader.iterator();
+            while (id == null && heads.hasNext()) {
+                RecordId last = RecordId.fromString(tracker, heads.next());
+                SegmentId segmentId = last.getSegmentId();
+                if (containsSegment(
+                        segmentId.getMostSignificantBits(),
+                        segmentId.getLeastSignificantBits())) {
+                    id = last;
+                } else {
+                    log.warn("Unable to access revision {}, rewinding...", last);
+                }
             }
-            line = journalFile.readLine();
+        } finally {
+            journalReader.close();
         }
 
-        RecordId id = null;
-        while (id == null && !heads.isEmpty()) {
-            RecordId last = RecordId.fromString(tracker, heads.removeLast());
-            SegmentId segmentId = last.getSegmentId();
-            if (containsSegment(
-                    segmentId.getMostSignificantBits(),
-                    segmentId.getLeastSignificantBits())) {
-                id = last;
-            } else {
-                log.warn("Unable to access revision {}, rewinding...", last);
-            }
-        }
+        journalFile.seek(journalFile.length());
+        lock = lockFile.getChannel().lock();
 
         if (id != null) {
             head = new AtomicReference<RecordId>(id);
@@ -260,37 +420,66 @@ public class FileStore implements SegmentStore {
                 new Runnable() {
                     @Override
                     public void run() {
-                        log.info("TarMK compaction started");
-                        Stopwatch watch = Stopwatch.createStarted();
-                        CompactionGainEstimate estimate = estimateCompactionGain();
-                        long gain = estimate.estimateCompactionGain();
-                        if (gain >= 10) {
-                            log.info(
-                                    "Estimated compaction in {}, gain is {}% ({}/{}) or ({}/{}), so running compaction",
-                                    watch, gain,
-                                    estimate.getReachableSize(),
-                                    estimate.getTotalSize(),
-                                    humanReadableByteCount(estimate.getReachableSize()),
-                                    humanReadableByteCount(estimate.getTotalSize()));
-                            if (!pauseCompaction) {
-                                compact();
-                            } else {
-                                log.info("TarMK compaction paused");
-                            }
-                        } else {
-                            log.info(
-                                    "Estimated compaction in {}ms, gain is {}% ({}/{}) or ({}/{}), so skipping compaction for now",
-                                    watch, gain,
-                                    estimate.getReachableSize(),
-                                    estimate.getTotalSize(),
-                                    humanReadableByteCount(estimate.getReachableSize()),
-                                    humanReadableByteCount(estimate.getTotalSize()));
-                        }
-                        cleanupNeeded.set(true);
+                        maybeCompact(true);
                     }
                 });
 
         log.info("TarMK opened: {} (mmap={})", directory, memoryMapping);
+    }
+
+    public boolean maybeCompact(boolean cleanup) {
+        log.info("TarMK compaction started");
+
+        Runtime runtime = Runtime.getRuntime();
+        long avail = runtime.totalMemory() - runtime.freeMemory();
+        long delta = 0;
+        if (compactionStrategy.getCompactionMap() != null) {
+            delta = compactionStrategy.getCompactionMap().getLastMergeWeight();
+        }
+        long needed = delta * compactionStrategy.getMemoryThreshold();
+        if (needed >= avail) {
+            gcMonitor.skipped(
+                    "Not enough available memory {}, needed {}, last merge delta {}, so skipping compaction for now",
+                    humanReadableByteCount(avail),
+                    humanReadableByteCount(needed),
+                    humanReadableByteCount(delta));
+            if (cleanup) {
+                cleanupNeeded.set(true);
+            }
+            return false;
+        }
+
+        Stopwatch watch = Stopwatch.createStarted();
+        compactionStrategy.setCompactionStart(System.currentTimeMillis());
+        boolean compacted = false;
+
+        CompactionGainEstimate estimate = estimateCompactionGain();
+        long gain = estimate.estimateCompactionGain();
+        if (gain >= 10) {
+            gcMonitor.info(
+                    "Estimated compaction in {}, gain is {}% ({}/{}) or ({}/{}), so running compaction",
+                    watch, gain, estimate.getReachableSize(),
+                    estimate.getTotalSize(),
+                    humanReadableByteCount(estimate.getReachableSize()),
+                    humanReadableByteCount(estimate.getTotalSize()));
+            if (!compactionStrategy.isPaused()) {
+                compact();
+                compacted = true;
+            } else {
+                gcMonitor.skipped("TarMK compaction paused");
+            }
+        } else {
+            gcMonitor.skipped(
+                    "Estimated compaction in {}, gain is {}% ({}/{}) or ({}/{}), so skipping compaction for now",
+                    watch, gain, estimate.getReachableSize(),
+                    estimate.getTotalSize(),
+                    humanReadableByteCount(estimate.getReachableSize()),
+                    humanReadableByteCount(estimate.getTotalSize()));
+        }
+        if (cleanup) {
+            cleanupNeeded.set(true);
+        }
+        return compacted;
     }
 
     static Map<Integer, Map<Character, File>> collectFiles(File directory)
@@ -449,7 +638,7 @@ public class FileStore implements SegmentStore {
     public synchronized void cleanup() throws IOException {
         Stopwatch watch = Stopwatch.createStarted();
         long initialSize = size();
-        log.info("TarMK revision cleanup started. Current repository size {}",
+        gcMonitor.info("TarMK revision cleanup started. Current repository size {}",
                 humanReadableByteCount(initialSize));
 
         // Suggest to the JVM that now would be a good time
@@ -464,10 +653,10 @@ public class FileStore implements SegmentStore {
         }
         writer.cleanup(ids);
 
-        List<TarReader> list =
-                newArrayListWithCapacity(readers.size());
+        CompactionMap cm = tracker.getCompactionMap();
+        List<TarReader> list = newArrayListWithCapacity(readers.size());
         for (TarReader reader : readers) {
-            TarReader cleaned = reader.cleanup(ids);
+            TarReader cleaned = reader.cleanup(ids, cm);
             if (cleaned == reader) {
                 list.add(reader);
             } else {
@@ -475,13 +664,14 @@ public class FileStore implements SegmentStore {
                     list.add(cleaned);
                 }
                 File file = reader.close();
-                log.info("TarMK revision cleanup reclaiming {}", file.getName());
+                gcMonitor.info("TarMK revision cleanup reclaiming {}", file.getName());
                 toBeRemoved.addLast(file);
             }
         }
         readers = list;
         long finalSize = size();
-        log.info("TarMK revision cleanup completed in {}. Post cleanup size is {} " +
+        gcMonitor.cleaned(initialSize - finalSize, finalSize);
+        gcMonitor.info("TarMK revision cleanup completed in {}. Post cleanup size is {} " +
                 "and space reclaimed {}", watch,
                 humanReadableByteCount(finalSize),
                 humanReadableByteCount(initialSize - finalSize));
@@ -493,42 +683,39 @@ public class FileStore implements SegmentStore {
      * reference to them).
      */
     public void compact() {
-        long start = System.nanoTime();
-        log.info("TarMK compaction running");
+        checkArgument(!compactionStrategy.equals(NO_COMPACTION),
+                "You must set a compactionStrategy before calling compact");
+        gcMonitor.info("TarMK compaction running, strategy={}", compactionStrategy);
 
-        SegmentWriter writer = new SegmentWriter(this, tracker);
-        Compactor compactor = new Compactor(writer);
-
+        long start = System.currentTimeMillis();
+        SegmentWriter writer = new SegmentWriter(this, tracker, getVersion());
+        final Compactor compactor = new Compactor(writer, compactionStrategy.cloneBinaries());
         SegmentNodeState before = getHead();
         long existing = before.getChildNode(SegmentNodeStore.CHECKPOINTS)
                 .getChildNodeCount(Long.MAX_VALUE);
         if (existing > 1) {
-            log.warn(
+            gcMonitor.warn(
                     "TarMK compaction found {} checkpoints, you might need to run checkpoint cleanup",
                     existing);
         }
 
         SegmentNodeState after = compactor.compact(EMPTY_NODE, before);
-        writer.flush();
-        while (!setHead(before, after)) {
-            // Some other concurrent changes have been made.
-            // Rebase (and compact) those changes on top of the
-            // compacted state before retrying to set the head.
-            SegmentNodeState head = getHead();
-            after = compactor.compact(before, head);
-            before = head;
-            writer.flush();
+
+        Callable<Boolean> setHead = new SetHead(before, after, compactor);
+        try {
+            while(!compactionStrategy.compacted(setHead)) {
+                // Some other concurrent changes have been made.
+                // Rebase (and compact) those changes on top of the
+                // compacted state before retrying to set the head.
+                SegmentNodeState head = getHead();
+                after = compactor.compact(after, head);
+                setHead = new SetHead(head, after, compactor);
+            }
+            gcMonitor.info("TarMK compaction completed in {}ms",
+                    System.currentTimeMillis() - start);
+        } catch (Exception e) {
+            gcMonitor.error("Error while running TarMK compaction", e);
         }
-        tracker.setCompactionMap(compactor.getCompactionMap());
-
-        // Drop the SegmentWriter caches and flush any existing state
-        // in an attempt to prevent new references to old pre-compacted
-        // content. TODO: There should be a cleaner way to do this.
-        tracker.getWriter().dropCache();
-        tracker.getWriter().flush();
-
-        log.info("TarMK compaction completed in {}ms", MILLISECONDS
-                .convert(System.nanoTime() - start, NANOSECONDS));
     }
 
     public synchronized Iterable<SegmentId> getSegmentIds() {
@@ -577,6 +764,7 @@ public class FileStore implements SegmentStore {
                 flush();
 
                 writer.close();
+                tracker.getWriter().dropCache();
 
                 List<TarReader> list = readers;
                 readers = newArrayList();
@@ -584,7 +772,8 @@ public class FileStore implements SegmentStore {
                     reader.close();
                 }
 
-                journalLock.release();
+                lock.release();
+                lockFile.close();
                 journalFile.close();
             } catch (IOException e) {
                 throw new RuntimeException(
@@ -719,6 +908,9 @@ public class FileStore implements SegmentStore {
 
     @Override
     public void gc() {
+        if (compactionStrategy == NO_COMPACTION) {
+            log.warn("Call to gc while compaction strategy set to {}. ", NO_COMPACTION);
+        }
         compactionThread.trigger();
     }
 
@@ -744,8 +936,148 @@ public class FileStore implements SegmentStore {
         return emptyMap();
     }
 
-    public FileStore setPauseCompaction(boolean pauseCompaction) {
-        this.pauseCompaction = pauseCompaction;
+    public FileStore setCompactionStrategy(CompactionStrategy strategy) {
+        this.compactionStrategy = strategy;
         return this;
+    }
+
+    private synchronized void setRevision(String rootRevision) {
+        RecordId id = RecordId.fromString(tracker, rootRevision);
+        head.set(id);
+        persistedHead.set(id);
+    }
+
+    /**
+     * A read only {@link FileStore} implementation that supports
+     * going back to old revisions.
+     * <p>
+     * All write methods are no-ops.
+     */
+    public static class ReadOnlyStore extends FileStore {
+        public ReadOnlyStore(File directory) throws IOException {
+            super(directory, 266);
+            super.flushThread.close();
+            super.compactionThread.close();
+        }
+
+        /**
+         * Go to the specified {@code revision}
+         *
+         * @param revision
+         */
+        public synchronized void setRevision(String revision) {
+            super.setRevision(revision);
+        }
+
+        /**
+         * @return false
+         */
+        @Override
+        public boolean setHead(SegmentNodeState base, SegmentNodeState head) {
+            return false;
+        }
+
+        /**
+         * no-op
+         */
+        @Override
+        public synchronized void writeSegment(SegmentId id, byte[] data, int offset, int length) {
+            // nop
+        }
+
+        /**
+         * no-op
+         */
+        @Override
+        public void flush() { /* nop */ }
+
+        /**
+         * no-op
+         */
+        @Override
+        public synchronized void cleanup() { /* nop */ }
+
+        /**
+         * no-op
+         */
+        @Override
+        public void gc() { /* nop */ }
+
+    }
+
+    private class SetHead implements Callable<Boolean> {
+        private final SegmentNodeState before;
+        private final SegmentNodeState after;
+        private final Compactor compactor;
+
+        public SetHead(SegmentNodeState before, SegmentNodeState after, Compactor compactor) {
+            this.before = before;
+            this.after = after;
+            this.compactor = compactor;
+        }
+
+        @Override
+        public Boolean call() throws Exception {
+            // When used in conjunction with the SegmentNodeStore, this method
+            // needs to be called inside the commitSemaphore as doing otherwise
+            // might result in mixed segments. See OAK-2192.
+            if (setHead(before, after)) {
+                CompactionMap cm = compactor.getCompactionMap();
+                tracker.setCompactionMap(cm);
+                compactionStrategy.setCompactionMap(cm);
+
+                // Drop the SegmentWriter caches and flush any existing state
+                // in an attempt to prevent new references to old pre-compacted
+                // content. TODO: There should be a cleaner way to do this.
+                tracker.getWriter().dropCache();
+                tracker.getWriter().flush();
+                gcMonitor.compacted();
+                tracker.clearSegmentIdTables(compactionStrategy);
+                return true;
+            } else {
+                return false;
+            }
+        }
+    }
+
+    public SegmentVersion getVersion() {
+        return version;
+    }
+
+    private static class LoggingGCMonitor implements GCMonitor {
+        public GCMonitor delegatee = GCMonitor.EMPTY;
+
+        @Override
+        public void info(String message, Object... arguments) {
+            log.info(message, arguments);
+            delegatee.info(message, arguments);
+        }
+
+        @Override
+        public void warn(String message, Object... arguments) {
+            log.warn(message, arguments);
+            delegatee.warn(message, arguments);
+        }
+
+        @Override
+        public void error(String message, Exception exception) {
+            delegatee.error(message, exception);
+        }
+
+        @Override
+        public void skipped(String reason, Object... arguments) {
+            log.info(reason, arguments);
+            delegatee.skipped(reason, arguments);
+        }
+
+        @Override
+        public void compacted() {
+            delegatee.compacted();
+        }
+
+        @Override
+        public void cleaned(long reclaimedSize, long currentSize) {
+            delegatee.cleaned(reclaimedSize, currentSize);
+        }
     }
 }

@@ -26,6 +26,7 @@ import java.util.Set;
  */
 public final class FieldNames {
 
+
     /**
      * Private constructor.
      */
@@ -38,9 +39,30 @@ public final class FieldNames {
     public static final String PATH = ":path";
 
     /**
+     * Name of the field that contains all the path hierarchy e.g. for /a/b/c
+     * it would contain /a, /a/b, /a/b/c
+     */
+    public static final String ANCESTORS = ":ancestors";
+
+    /**
+     * Name of the field which refers to the depth of path
+     */
+    public static final String PATH_DEPTH = ":depth";
+
+    /**
      * Name of the field that contains the fulltext index.
      */
     public static final String FULLTEXT = ":fulltext";
+
+    /**
+     * Name of the field that contains the suggest index.
+     */
+    public static final String SUGGEST = ":suggest";
+
+    /**
+     * Name of the field that contains the spellcheck index.
+     */
+    public static final String SPELLCHECK = ":spellcheck";
 
     /**
      * Prefix for all field names that are fulltext indexed by property name.
@@ -51,6 +73,18 @@ public final class FieldNames {
      * Prefix used for storing fulltext of relative node
      */
     public static final String FULLTEXT_RELATIVE_NODE = "fullnode:";
+
+    /**
+     * Name of the field that contains those property names which are not found
+     * (or were null) for the given
+     */
+    public static final String NULL_PROPS = ":nullProps";
+
+    /**
+     * Name of the field that contains those property names which are exist i.e. not null
+     * for the given NodeState
+     */
+    public static final String NOT_NULL_PROPS = ":notNullProps";
 
     /**
      * Used to select only the PATH field from the lucene documents
