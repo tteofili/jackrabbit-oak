@@ -323,7 +323,7 @@ public class RDBDocumentStore implements DocumentStore {
                     } catch (SQLException ex) {
                         LOG.debug("attempting to drop: " + tname, ex);
                     } finally {
-                        close(stmt);
+                        this.ch.closeStatement(stmt);
                     }
                 } catch (SQLException ex) {
                     LOG.debug("attempting to drop: " + tname, ex);
@@ -685,7 +685,7 @@ public class RDBDocumentStore implements DocumentStore {
                 con.commit();
             }
             finally {
-                close(stmt);
+                this.ch.closeStatement(stmt);
             }
         }
 
@@ -763,9 +763,9 @@ public class RDBDocumentStore implements DocumentStore {
             }
         }
         finally {
-            close(checkResultSet);
-            close(checkStatement);
-            close(creatStatement);
+            this.ch.closeResultSet(checkResultSet);
+            this.ch.closeStatement(checkStatement);
+            this.ch.closeStatement(creatStatement);
         }
     }
 
@@ -1025,7 +1025,7 @@ public class RDBDocumentStore implements DocumentStore {
                 }
                 if (success) {
                     for (Entry<String, NodeDocument> entry : cachedDocs.entrySet()) {
-                        T oldDoc = (T) (entry.getValue());
+                        T oldDoc = castAsT(entry.getValue());
                         if (oldDoc == null) {
                             // make sure concurrently loaded document is
                             // invalidated
@@ -1113,7 +1113,7 @@ public class RDBDocumentStore implements DocumentStore {
                 if (lastmodcount == row.getModcount()) {
                     // we can re-use the cached document
                     cachedDoc.markUpToDate(System.currentTimeMillis());
-                    return (T) cachedDoc;
+                    return castAsT(cachedDoc);
                 } else {
                     return SR.fromRow(collection, row);
                 }
@@ -1687,30 +1687,6 @@ public class RDBDocumentStore implements DocumentStore {
         return n != null ? n.longValue() : -1;
     }
 
-    private static <T extends Statement> T close(@CheckForNull T stmt) {
-        if (stmt != null) {
-            try {
-                stmt.close();
-            } catch (SQLException ex) {
-                LOG.debug("Closing statement", ex);
-            }
-        }
-
-        return null;
-    }
-
-    private static ResultSet close(@CheckForNull ResultSet rs) {
-        if (rs != null) {
-            try {
-                rs.close();
-            } catch (SQLException ex) {
-                LOG.debug("Closing result set", ex);
-            }
-        }
-
-        return null;
-    }
-
     /**
      * Adds a document to the {@link #nodesCache} iff there is no document in
      * the cache with the document key. This method does not acquire a lock from
@@ -1814,7 +1790,7 @@ public class RDBDocumentStore implements DocumentStore {
             if (modCount.longValue() <= cachedModCount.longValue()) {
                 // we can use the cached document
                 inCache.markUpToDate(now);
-                return (T) inCache;
+                return castAsT(inCache);
             }
         }
 
@@ -1841,7 +1817,7 @@ public class RDBDocumentStore implements DocumentStore {
         } finally {
             lock.unlock();
         }
-        return (T) fresh;
+        return castAsT(fresh);
     }
 
     private boolean hasChangesToCollisions(UpdateOp update) {
