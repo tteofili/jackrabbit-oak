@@ -177,7 +177,7 @@ public class IndexDefinitionTest {
         assertTrue(rule1.isIndexed("prop1"));
         assertFalse(rule1.isIndexed("prop2"));
 
-        PropertyDefinition pd = rule1.getConfig("prop1");
+        LucenePropertyDefinition pd = rule1.getConfig("prop1");
         assertEquals(3.0f, pd.boost, 0);
         assertEquals(PropertyType.BOOLEAN, pd.getType());
     }
@@ -261,7 +261,7 @@ public class IndexDefinitionTest {
         assertFalse(rule1.isIndexed("prop2"));
         assertTrue(rule1.isIndexed("fooProp"));
 
-        PropertyDefinition pd = rule1.getConfig("fooProp2");
+        LucenePropertyDefinition pd = rule1.getConfig("fooProp2");
         assertEquals(4.0f, pd.boost, 0);
     }
 

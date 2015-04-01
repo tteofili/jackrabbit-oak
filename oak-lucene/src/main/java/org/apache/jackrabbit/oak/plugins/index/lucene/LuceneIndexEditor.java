@@ -48,7 +48,8 @@ import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.plugins.index.IndexEditor;
 import org.apache.jackrabbit.oak.plugins.index.IndexUpdateCallback;
-import org.apache.jackrabbit.oak.plugins.index.lucene.Aggregate.Matcher;
+import org.apache.jackrabbit.oak.plugins.index.PropertyDefinition;
+import org.apache.jackrabbit.oak.plugins.index.aggregate.Aggregate;
 import org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState;
 import org.apache.jackrabbit.oak.plugins.tree.TreeFactory;
 import org.apache.jackrabbit.oak.spi.commit.Editor;
@@ -108,7 +109,7 @@ public class LuceneIndexEditor implements IndexEditor, Aggregate.AggregateRoot {
 
     private IndexDefinition.IndexingRule indexingRule;
 
-    private List<Matcher> currentMatchers = Collections.emptyList();
+    private List<Aggregate.Matcher> currentMatchers = Collections.emptyList();
 
     private final MatcherState matcherState;
 
@@ -181,7 +182,7 @@ public class LuceneIndexEditor implements IndexEditor, Aggregate.AggregateRoot {
             }
         }
 
-        for (Matcher m : matcherState.affectedMatchers){
+        for (Aggregate.Matcher m : matcherState.affectedMatchers){
             m.markRootDirty();
         }
 
@@ -290,7 +291,7 @@ public class LuceneIndexEditor implements IndexEditor, Aggregate.AggregateRoot {
                 continue;
             }
 
-            PropertyDefinition pd = indexingRule.getConfig(pname);
+            LucenePropertyDefinition pd = indexingRule.getConfig(pname);
 
             if (pd == null || !pd.index){
                 continue;
@@ -359,7 +360,7 @@ public class LuceneIndexEditor implements IndexEditor, Aggregate.AggregateRoot {
                                   NodeState state,
                                   PropertyState property,
                                   String pname,
-                                  PropertyDefinition pd) throws CommitFailedException {
+                                  LucenePropertyDefinition pd) throws CommitFailedException {
         boolean includeTypeForFullText = indexingRule.includePropertyType(property.getType().tag());
         if (Type.BINARY.tag() == property.getType().tag()
                 && includeTypeForFullText) {
@@ -524,7 +525,7 @@ public class LuceneIndexEditor implements IndexEditor, Aggregate.AggregateRoot {
 
     private boolean indexNotNullCheckEnabledProps(String path, List<Field> fields, NodeState state) {
         boolean fieldAdded = false;
-        for (PropertyDefinition pd : indexingRule.getNotNullCheckEnabledProperties()) {
+        for (LucenePropertyDefinition pd : indexingRule.getNotNullCheckEnabledProperties()) {
             if (isPropertyNotNull(state, pd)) {
                 fields.add(new StringField(FieldNames.NOT_NULL_PROPS, pd.name, Field.Store.NO));
                 fieldAdded = true;
@@ -535,7 +536,7 @@ public class LuceneIndexEditor implements IndexEditor, Aggregate.AggregateRoot {
 
     private boolean indexNullCheckEnabledProps(String path, List<Field> fields, NodeState state) {
         boolean fieldAdded = false;
-        for (PropertyDefinition pd : indexingRule.getNullCheckEnabledProperties()) {
+        for (LucenePropertyDefinition pd : indexingRule.getNullCheckEnabledProperties()) {
             if (isPropertyNull(state, pd)) {
                 fields.add(new StringField(FieldNames.NULL_PROPS, pd.name, Field.Store.NO));
                 fieldAdded = true;
@@ -552,7 +553,7 @@ public class LuceneIndexEditor implements IndexEditor, Aggregate.AggregateRoot {
      *
      * @return true if the property does not exist
      */
-    private boolean isPropertyNull(NodeState state, PropertyDefinition pd){
+    private boolean isPropertyNull(NodeState state, LucenePropertyDefinition pd){
         NodeState propertyNode = getPropertyNode(state, pd);
         if (!propertyNode.exists()){
             return false;
@@ -568,7 +569,7 @@ public class LuceneIndexEditor implements IndexEditor, Aggregate.AggregateRoot {
      *
      * @return true if the property exists
      */
-    private boolean isPropertyNotNull(NodeState state, PropertyDefinition pd){
+    private boolean isPropertyNotNull(NodeState state, LucenePropertyDefinition pd){
         NodeState propertyNode = getPropertyNode(state, pd);
         if (!propertyNode.exists()){
             return false;
@@ -576,7 +577,7 @@ public class LuceneIndexEditor implements IndexEditor, Aggregate.AggregateRoot {
         return propertyNode.hasProperty(pd.nonRelativeName);
     }
 
-    private static NodeState getPropertyNode(NodeState nodeState, PropertyDefinition pd) {
+    private static NodeState getPropertyNode(NodeState nodeState, LucenePropertyDefinition pd) {
         if (!pd.relative){
             return nodeState;
         }
@@ -595,15 +596,15 @@ public class LuceneIndexEditor implements IndexEditor, Aggregate.AggregateRoot {
     }
 
     private MatcherState getMatcherState(String name, NodeState after) {
-        List<Matcher> matched = Lists.newArrayList();
-        List<Matcher> inherited = Lists.newArrayList();
-        for (Matcher m : Iterables.concat(matcherState.inherited, currentMatchers)) {
-            Matcher result = m.match(name, after);
-            if (result.getStatus() == Matcher.Status.MATCH_FOUND){
+        List<Aggregate.Matcher> matched = Lists.newArrayList();
+        List<Aggregate.Matcher> inherited = Lists.newArrayList();
+        for (Aggregate.Matcher m : Iterables.concat(matcherState.inherited, currentMatchers)) {
+            Aggregate.Matcher result = m.match(name, after);
+            if (result.getStatus() == Aggregate.Matcher.Status.MATCH_FOUND){
                 matched.add(result);
             }
 
-            if (result.getStatus() != Matcher.Status.FAIL){
+            if (result.getStatus() != Aggregate.Matcher.Status.FAIL){
                 inherited.addAll(result.nextSet());
             }
         }
@@ -629,12 +630,12 @@ public class LuceneIndexEditor implements IndexEditor, Aggregate.AggregateRoot {
             @Override
             public void onResult(Aggregate.PropertyIncludeResult result) throws CommitFailedException {
                 boolean dirty = false;
-                if (result.pd.ordered) {
+                if (result.pd.isOrdered()) {
                     dirty |= addTypedOrderedFields(fields, result.propertyState,
                             result.propertyPath, result.pd);
                 }
                 dirty |= indexProperty(path, fields, state, result.propertyState,
-                        result.propertyPath, result.pd);
+                        result.propertyPath, (LucenePropertyDefinition) result.pd);
 
                 if (dirty) {
                     dirtyFlag.set(true);
@@ -687,7 +688,7 @@ public class LuceneIndexEditor implements IndexEditor, Aggregate.AggregateRoot {
                 fields.addAll(newBinary(property, result.nodeState, nodePath, aggreagtedNodePath + "@" + pname));
                 dirty = true;
             } else {
-                PropertyDefinition pd = null;
+                LucenePropertyDefinition pd = null;
                 if (ruleAggNode != null){
                     pd = ruleAggNode.getConfig(pname);
                 }
@@ -716,7 +717,7 @@ public class LuceneIndexEditor implements IndexEditor, Aggregate.AggregateRoot {
      * @param name modified property name
      */
     private void checkAggregates(String name) {
-        for (Matcher m : matcherState.matched) {
+        for (Aggregate.Matcher m : matcherState.matched) {
             if (!matcherState.affectedMatchers.contains(m)
                     && m.aggregatesProperty(name)) {
                 matcherState.affectedMatchers.add(m);
@@ -725,15 +726,15 @@ public class LuceneIndexEditor implements IndexEditor, Aggregate.AggregateRoot {
     }
 
     private static class MatcherState {
-        final static MatcherState NONE = new MatcherState(Collections.<Matcher>emptyList(),
-                Collections.<Matcher>emptyList());
+        final static MatcherState NONE = new MatcherState(Collections.<Aggregate.Matcher>emptyList(),
+                Collections.<Aggregate.Matcher>emptyList());
 
-        final List<Matcher> matched;
-        final List<Matcher> inherited;
-        final Set<Matcher> affectedMatchers;
+        final List<Aggregate.Matcher> matched;
+        final List<Aggregate.Matcher> inherited;
+        final Set<Aggregate.Matcher> affectedMatchers;
 
-        public MatcherState(List<Matcher> matched,
-                            List<Matcher> inherited){
+        public MatcherState(List<Aggregate.Matcher> matched,
+                            List<Aggregate.Matcher> inherited){
             this.matched = matched;
             this.inherited = inherited;
 

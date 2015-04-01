@@ -711,7 +711,7 @@ public class LuceneIndex implements AdvanceFulltextQueryIndex {
             return true;
         }
 
-        PropertyDefinition pd = rule.getConfig(name);
+        LucenePropertyDefinition pd = rule.getConfig(name);
         // check name
         if(pd == null || !pd.index){
             return true;

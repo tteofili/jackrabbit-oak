@@ -25,6 +25,7 @@ import javax.jcr.PropertyType;
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.commons.PathUtils;
+import org.apache.jackrabbit.oak.plugins.index.PropertyDefinition;
 import org.apache.jackrabbit.oak.plugins.index.lucene.IndexDefinition.IndexingRule;
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.LuceneIndexHelper;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
@@ -39,8 +40,9 @@ import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstant
 import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.PROP_IS_REGEX;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.util.ConfigUtil.getOptionalValue;
 
-class PropertyDefinition {
-    private static final Logger log = LoggerFactory.getLogger(PropertyDefinition.class);
+class LucenePropertyDefinition implements PropertyDefinition {
+
+    private static final Logger log = LoggerFactory.getLogger(LucenePropertyDefinition.class);
     /**
      * The default boost: 1.0f.
      */
@@ -95,7 +97,7 @@ class PropertyDefinition {
     @CheckForNull
     final String nonRelativeName;
 
-    public PropertyDefinition(IndexingRule idxDefn, String nodeName, NodeState defn) {
+    public LucenePropertyDefinition(IndexingRule idxDefn, String nodeName, NodeState defn) {
         this.isRegexp = getOptionalValue(defn, PROP_IS_REGEX, false);
         this.name = getName(defn, nodeName);
         this.relative = isRelativeProperty(name);
@@ -155,12 +157,7 @@ class PropertyDefinition {
         return propertyType != PropertyType.UNDEFINED;
     }
 
-    /**
-     * Returns the property type. If no explicit type is defined the default is assumed
-     * to be {@link javax.jcr.PropertyType#STRING}
-     *
-     * @return propertyType as per javax.jcr.PropertyType
-     */
+    @Override
     public int getType(){
         //If no explicit type is defined we assume it to be string
         return isTypeDefined() ? propertyType : PropertyType.STRING;
@@ -235,5 +232,20 @@ class PropertyDefinition {
             }
         }
         return type;
+    }
+
+    @Override
+    public String getName() {
+        return name;
+    }
+
+    @Override
+    public boolean isRegexp() {
+        return isRegexp;
+    }
+
+    @Override
+    public boolean isOrdered() {
+        return ordered;
     }
 }

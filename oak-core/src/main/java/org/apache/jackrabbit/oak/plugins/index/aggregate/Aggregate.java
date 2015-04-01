@@ -17,25 +17,26 @@
  * under the License.
  */
 
-package org.apache.jackrabbit.oak.plugins.index.lucene;
+package org.apache.jackrabbit.oak.plugins.index.aggregate;
 
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.regex.Pattern;
-
 import javax.annotation.CheckForNull;
+
+import org.apache.jackrabbit.oak.api.CommitFailedException;
+import org.apache.jackrabbit.oak.api.PropertyState;
+import org.apache.jackrabbit.oak.commons.PathUtils;
+import org.apache.jackrabbit.oak.plugins.index.ConfigUtil;
+import org.apache.jackrabbit.oak.plugins.index.PropertyDefinition;
+import org.apache.jackrabbit.oak.spi.state.ChildNodeEntry;
+import org.apache.jackrabbit.oak.spi.state.NodeState;
 
 import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
-import org.apache.jackrabbit.oak.api.CommitFailedException;
-import org.apache.jackrabbit.oak.api.PropertyState;
-import org.apache.jackrabbit.oak.commons.PathUtils;
-import org.apache.jackrabbit.oak.plugins.index.lucene.util.ConfigUtil;
-import org.apache.jackrabbit.oak.spi.state.ChildNodeEntry;
-import org.apache.jackrabbit.oak.spi.state.NodeState;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.collect.Iterables.toArray;
@@ -44,7 +45,7 @@ import static com.google.common.collect.Lists.newArrayListWithCapacity;
 import static org.apache.jackrabbit.oak.commons.PathUtils.elements;
 import static org.apache.jackrabbit.oak.commons.PathUtils.getParentPath;
 
-class Aggregate {
+public class Aggregate {
     public static final String MATCH_ALL = "*";
 
     /**
@@ -53,7 +54,7 @@ class Aggregate {
     public static final int RECURSIVE_AGGREGATION_LIMIT_DEFAULT = 5;
     private final String nodeTypeName;
     private final List<? extends Include> includes;
-    final int reAggregationLimit;
+    public final int reAggregationLimit;
     private final List<NodeInclude> relativeNodeIncludes;
     private final boolean nodeAggregates;
 
@@ -61,12 +62,12 @@ class Aggregate {
        this(nodeTypeName, Collections.<Include>emptyList());
     }
 
-    Aggregate(String nodeTypeName, List<? extends Include> includes) {
+    public Aggregate(String nodeTypeName, List<? extends Include> includes) {
         this(nodeTypeName, includes, RECURSIVE_AGGREGATION_LIMIT_DEFAULT);
     }
 
-    Aggregate(String nodeTypeName, List<? extends Include> includes,
-              int recursionLimit) {
+    public Aggregate(String nodeTypeName, List<? extends Include> includes,
+                     int recursionLimit) {
         this.nodeTypeName = nodeTypeName;
         this.includes = ImmutableList.copyOf(includes);
         this.reAggregationLimit = recursionLimit;
@@ -209,8 +210,8 @@ class Aggregate {
     }
 
     public static class NodeInclude extends Include<NodeInclude> {
-        final String primaryType;
-        final boolean relativeNode;
+        public final String primaryType;
+        public final boolean relativeNode;
         private final String pattern;
         private final AggregateMapper aggMapper;
 
@@ -296,12 +297,12 @@ class Aggregate {
         private final String parentPath;
 
         public PropertyInclude(PropertyDefinition pd) {
-            super(getParentPath(pd.name));
+            super(getParentPath(pd.getName()));
             this.propertyDefinition = pd;
-            this.propertyName = PathUtils.getName(pd.name);
-            this.parentPath = getParentPath(pd.name);
+            this.propertyName = PathUtils.getName(pd.getName());
+            this.parentPath = getParentPath(pd.getName());
 
-            if (pd.isRegexp) {
+            if (pd.isRegexp()) {
                 pattern = Pattern.compile(propertyName);
             } else {
                 pattern = null;
@@ -346,9 +347,9 @@ class Aggregate {
     }
 
     public static class NodeIncludeResult {
-        final NodeState nodeState;
-        final String nodePath;
-        final String rootIncludePath;
+        public final NodeState nodeState;
+        public final String nodePath;
+        public final String rootIncludePath;
 
         public NodeIncludeResult(String nodePath, NodeState nodeState) {
             this(nodePath, null, nodeState);
@@ -374,10 +375,10 @@ class Aggregate {
     }
 
     public static class PropertyIncludeResult {
-        final PropertyState propertyState;
-        final PropertyDefinition pd;
-        final String propertyPath;
-        final String nodePath;
+        public final PropertyState propertyState;
+        public final PropertyDefinition pd;
+        public final String propertyPath;
+        public final String nodePath;
 
         public PropertyIncludeResult(PropertyState propertyState, PropertyDefinition pd,
                                      String parentPath) {

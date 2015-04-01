@@ -139,7 +139,7 @@ class IndexPlanner {
         //for property index
         if (indexingRule.propertyIndexEnabled) {
             for (PropertyRestriction pr : filter.getPropertyRestrictions()) {
-                PropertyDefinition pd = indexingRule.getConfig(pr.propertyName);
+                LucenePropertyDefinition pd = indexingRule.getConfig(pr.propertyName);
                 if (pd != null && pd.propertyIndexEnabled()) {
                     if (pr.isNullRestriction() && !pd.nullCheckEnabled){
                         continue;
@@ -348,7 +348,7 @@ class IndexPlanner {
 
         List<OrderEntry> orderEntries = newArrayListWithCapacity(sortOrder.size());
         for (OrderEntry o : sortOrder) {
-            PropertyDefinition pd = rule.getConfig(o.getPropertyName());
+            LucenePropertyDefinition pd = rule.getConfig(o.getPropertyName());
             if (pd != null
                     && pd.ordered
                     && o.getPropertyType() != null
@@ -413,8 +413,8 @@ class IndexPlanner {
         final String indexPath;
         final IndexDefinition indexDefinition;
         final IndexingRule indexingRule;
-        private List<PropertyDefinition> sortedProperties = newArrayList();
-        private Map<String, PropertyDefinition> propDefns = newHashMap();
+        private List<LucenePropertyDefinition> sortedProperties = newArrayList();
+        private Map<String, LucenePropertyDefinition> propDefns = newHashMap();
 
         private boolean nonFullTextConstraints;
         private int parentDepth;
@@ -428,11 +428,11 @@ class IndexPlanner {
             this.indexingRule = indexingRule;
         }
 
-        public PropertyDefinition getPropDefn(PropertyRestriction pr){
+        public LucenePropertyDefinition getPropDefn(PropertyRestriction pr){
             return propDefns.get(pr.propertyName);
         }
 
-        public PropertyDefinition getOrderedProperty(int index){
+        public LucenePropertyDefinition getOrderedProperty(int index){
             return sortedProperties.get(index);
         }
 

@@ -448,7 +448,7 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
         for (int i = 0; i < sortOrder.size(); i++) {
             OrderEntry oe = sortOrder.get(i);
             if (!isNativeSort(oe)) {
-                PropertyDefinition pd = planResult.getOrderedProperty(i);
+                LucenePropertyDefinition pd = planResult.getOrderedProperty(i);
                 boolean reverse = oe.getOrder() != OrderEntry.Order.ASCENDING;
                 String propName = oe.getPropertyName();
                 propName = FieldNames.createDocValFieldName(propName);
@@ -473,7 +473,7 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
         return oe.getPropertyName().equals(NATIVE_SORT_ORDER.getPropertyName());
     }
 
-    private static SortField.Type toLuceneSortType(OrderEntry oe, PropertyDefinition defn) {
+    private static SortField.Type toLuceneSortType(OrderEntry oe, LucenePropertyDefinition defn) {
         Type<?> t = oe.getPropertyType();
         checkState(t != null, "Type cannot be null");
         checkState(!t.isArray(), "Array types are not supported");
@@ -565,7 +565,7 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
             for (int i = 0; i < orders.size(); i++) {
                 OrderEntry oe = orders.get(i);
                 if (!isNativeSort(oe)) {
-                    PropertyDefinition pd = planResult.getOrderedProperty(i);
+                    LucenePropertyDefinition pd = planResult.getOrderedProperty(i);
                     PropertyRestriction orderRest = new PropertyRestriction();
                     orderRest.propertyName = oe.getPropertyName();
                     Query q = createQuery(orderRest, pd);
@@ -678,7 +678,7 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
                 }
             }
 
-            PropertyDefinition pd = planResult.getPropDefn(pr);
+            LucenePropertyDefinition pd = planResult.getPropDefn(pr);
             if (pd == null) {
                 continue;
             }
@@ -690,7 +690,7 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
         }
     }
 
-    private static int determinePropertyType(PropertyDefinition defn, PropertyRestriction pr) {
+    private static int determinePropertyType(LucenePropertyDefinition defn, PropertyRestriction pr) {
         int typeFromRestriction = pr.propertyType;
         if (typeFromRestriction == PropertyType.UNDEFINED) {
             //If no explicit type defined then determine the type from restriction
@@ -706,7 +706,7 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
         return getPropertyType(defn, pr.propertyName, typeFromRestriction);
     }
 
-    private static int getPropertyType(PropertyDefinition defn, String name, int defaultVal){
+    private static int getPropertyType(LucenePropertyDefinition defn, String name, int defaultVal){
         if (defn.isTypeDefined()) {
             return defn.getType();
         }
@@ -744,7 +744,7 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
 
     @CheckForNull
     private static Query createQuery(PropertyRestriction pr,
-                                     PropertyDefinition defn) {
+                                     LucenePropertyDefinition defn) {
         int propType = determinePropertyType(defn, pr);
 
         if (pr.isNullRestriction()){
@@ -901,7 +901,7 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
 
     private static void addNodeTypeConstraints(IndexingRule defn, List<Query> qs, Filter filter) {
         BooleanQuery bq = new BooleanQuery();
-        PropertyDefinition primaryType = defn.getConfig(JCR_PRIMARYTYPE);
+        LucenePropertyDefinition primaryType = defn.getConfig(JCR_PRIMARYTYPE);
         //TODO OAK-2198 Add proper nodeType query support
 
         if (primaryType != null && primaryType.propertyIndex) {
@@ -910,7 +910,7 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
             }
         }
 
-        PropertyDefinition mixinType = defn.getConfig(JCR_MIXINTYPES);
+        LucenePropertyDefinition mixinType = defn.getConfig(JCR_MIXINTYPES);
         if (mixinType != null && mixinType.propertyIndex) {
             for (String type : filter.getMixinTypes()) {
                 bq.add(new TermQuery(new Term(JCR_MIXINTYPES, type)), SHOULD);
