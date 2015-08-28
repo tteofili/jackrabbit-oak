@@ -47,7 +47,7 @@ import org.junit.rules.TestName;
 /**
  * General query extensive testcase for {@link SolrQueryIndex}
  */
-    public class SolrIndexQueryTestIT extends AbstractQueryTest {
+public class SolrIndexQueryTestIT extends AbstractQueryTest {
 
     @Rule
     public TestName name = new TestName();

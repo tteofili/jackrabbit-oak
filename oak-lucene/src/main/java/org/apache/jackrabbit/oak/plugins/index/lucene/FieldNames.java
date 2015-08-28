@@ -114,4 +114,16 @@ public final class FieldNames {
         }
         return FULLTEXT_RELATIVE_NODE + nodeRelativePath;
     }
+
+    /**
+     * Encodes the field name such that it can be used for faceting.
+     * This is done such a field if used for both faceting and querying uses
+     * a different name for facet field
+     *
+     * @param name name to encode
+     * @return encoded field name
+     */
+    public static String createFacetFieldName(String name) {
+        return ":facet" + name;
+    }
 }

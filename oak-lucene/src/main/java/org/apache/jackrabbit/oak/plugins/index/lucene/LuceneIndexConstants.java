@@ -270,4 +270,9 @@ public interface LuceneIndexConstants {
      * existing index files
      */
     String INDEX_PATH = "indexPath";
+
+    /**
+     * Optional property indicating facet can be retrieved together with plain queries.
+     */
+    String PROP_FACET = "facet";
 }

@@ -86,6 +86,8 @@ class PropertyDefinition {
 
     final boolean useInSpellcheck;
 
+    final boolean facet;
+
     final String[] ancestors;
 
     /**
@@ -118,6 +120,7 @@ class PropertyDefinition {
         this.propertyType = getPropertyType(idxDefn, nodeName, defn);
         this.useInSuggest = getOptionalValue(defn, LuceneIndexConstants.PROP_USE_IN_SUGGEST, false);
         this.useInSpellcheck = getOptionalValue(defn, LuceneIndexConstants.PROP_USE_IN_SPELLCHECK, false);
+        this.facet = getOptionalValue(defn, LuceneIndexConstants.PROP_FACET, false);
         this.nullCheckEnabled = getOptionalValue(defn, LuceneIndexConstants.PROP_NULL_CHECK_ENABLED, false);
         this.notNullCheckEnabled = getOptionalValue(defn, LuceneIndexConstants.PROP_NOT_NULL_CHECK_ENABLED, false);
         this.nonRelativeName = determineNonRelativeName();

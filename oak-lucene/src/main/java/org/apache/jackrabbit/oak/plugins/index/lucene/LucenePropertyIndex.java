@@ -69,6 +69,10 @@ import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.apache.jackrabbit.oak.util.PerfLogger;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.document.Document;
+import org.apache.lucene.facet.Facets;
+import org.apache.lucene.facet.FacetsCollector;
+import org.apache.lucene.facet.sortedset.DefaultSortedSetDocValuesReaderState;
+import org.apache.lucene.facet.sortedset.SortedSetDocValuesFacetCounts;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.IndexReader;
@@ -344,6 +348,12 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
 
                         checkForIndexVersionChange(searcher);
 
+                        boolean useFacetsCollector = false;
+                        if (plan.getFilter().getQueryStatement() != null && plan.getFilter().getQueryStatement().contains("facet(")) {
+                            useFacetsCollector = true;
+                        }
+
+
                         TopDocs docs;
                         long start = PERF_LOGGER.start();
                         while (true) {
@@ -365,6 +375,11 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
                             PERF_LOGGER.end(start, -1, "{} ...", docs.scoreDocs.length);
                             nextBatchSize = (int) Math.min(nextBatchSize * 2L, 100000);
 
+//                            if (useFacetsCollector) {
+//                                DefaultSortedSetDocValuesReaderState state = new DefaultSortedSetDocValuesReaderState(searcher.getIndexReader());
+//                                FacetsCollector.search(searcher, query, )
+//                                SortedSetDocValuesFacetCounts counts = new SortedSetDocValuesFacetCounts(state, )
+//                            }
                             for (ScoreDoc doc : docs.scoreDocs) {
                                 LuceneResultRow row = convertToRow(doc, searcher);
                                 if (row != null) {

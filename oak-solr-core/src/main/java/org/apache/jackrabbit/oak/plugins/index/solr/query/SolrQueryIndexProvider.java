@@ -73,31 +73,44 @@ public class SolrQueryIndexProvider implements QueryIndexProvider {
     @Nonnull
     @Override
     public List<? extends QueryIndex> getQueryIndexes(NodeState nodeState) {
-
         List<QueryIndex> tempIndexes = new ArrayList<QueryIndex>();
+        addIndexes(nodeState, tempIndexes);
+        return tempIndexes;
+    }
+
+    private void addIndexes(NodeState nodeState, List<QueryIndex> tempIndexes) {
         NodeState definitions = nodeState.getChildNode(INDEX_DEFINITIONS_NAME);
         for (ChildNodeEntry entry : definitions.getChildNodeEntries()) {
             NodeState definition = entry.getNodeState();
             String name = entry.getName();
             PropertyState type = definition.getProperty(TYPE_PROPERTY_NAME);
-            if (type != null && SolrQueryIndex.TYPE.equals(type.getValue(Type.STRING))) {
-                try {
-                    if (isPersistedConfiguration(definition)) {
-                        OakSolrConfiguration configuration = new OakSolrNodeStateConfiguration(definition);
-                        SolrServerConfigurationProvider solrServerConfigurationProvider = new NodeStateSolrServerConfigurationProvider(definition.getChildNode("server"));
-                        SolrServer solrServer = new OakSolrServer(solrServerConfigurationProvider);
-                        // if it does not already exist I need to register an observer that updates / closes this SolrServerProvider when the node is updated/removed
-                        addQueryIndex(tempIndexes, name, solrServer, configuration, definition);
-                    } else { // otherwise use the default configuration providers
-                        OakSolrConfiguration configuration = oakSolrConfigurationProvider.getConfiguration();
-                        addQueryIndex(tempIndexes, name, solrServerProvider.getSearchingSolrServer(), configuration, definition);
-                    }
-                } catch (Exception e) {
-                    log.warn("could not get Solr query index from node {}", name, e);
-                }
+
+            addIndex(tempIndexes, definition, name, type);
+        }
+        for (ChildNodeEntry entry : nodeState.getChildNodeEntries()) {
+            if (!INDEX_DEFINITIONS_NAME.equals(entry.getName())) {
+                addIndexes(entry.getNodeState(), tempIndexes);
             }
         }
-        return tempIndexes;
+    }
+
+    private void addIndex(List<QueryIndex> tempIndexes, NodeState definition, String name, PropertyState type) {
+        if (type != null && SolrQueryIndex.TYPE.equals(type.getValue(Type.STRING))) {
+            try {
+                if (isPersistedConfiguration(definition)) {
+                    OakSolrConfiguration configuration = new OakSolrNodeStateConfiguration(definition);
+                    SolrServerConfigurationProvider solrServerConfigurationProvider = new NodeStateSolrServerConfigurationProvider(definition.getChildNode("server"));
+                    SolrServer solrServer = new OakSolrServer(solrServerConfigurationProvider);
+                    // if it does not already exist I need to register an observer that updates / closes this SolrServerProvider when the node is updated/removed
+                    addQueryIndex(tempIndexes, name, solrServer, configuration, definition);
+                } else { // otherwise use the default configuration providers
+                    OakSolrConfiguration configuration = oakSolrConfigurationProvider.getConfiguration();
+                    addQueryIndex(tempIndexes, name, solrServerProvider.getSearchingSolrServer(), configuration, definition);
+                }
+            } catch (Exception e) {
+                log.warn("could not get Solr query index from node {}", name, e);
+            }
+        }
     }
 
     private boolean isPersistedConfiguration(NodeState definition) {

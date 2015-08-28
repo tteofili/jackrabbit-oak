@@ -17,7 +17,10 @@
 package org.apache.jackrabbit.oak.plugins.index.solr.query;
 
 import java.util.Collection;
+import java.util.LinkedList;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.apache.jackrabbit.oak.plugins.index.solr.configuration.OakSolrConfiguration;
 import org.apache.jackrabbit.oak.query.fulltext.FullTextAnd;
@@ -28,10 +31,12 @@ import org.apache.jackrabbit.oak.query.fulltext.FullTextTerm;
 import org.apache.jackrabbit.oak.query.fulltext.FullTextVisitor;
 import org.apache.jackrabbit.oak.spi.query.Filter;
 import org.apache.jackrabbit.oak.spi.query.QueryIndex;
+import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.apache.solr.client.solrj.SolrQuery;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import static com.google.common.base.Preconditions.checkNotNull;
 import static org.apache.jackrabbit.oak.commons.PathUtils.getName;
 import static org.apache.jackrabbit.oak.plugins.index.solr.util.SolrUtils.getSortingField;
 import static org.apache.jackrabbit.oak.plugins.index.solr.util.SolrUtils.partialEscape;
@@ -43,6 +48,7 @@ import static org.apache.jackrabbit.oak.plugins.index.solr.util.SolrUtils.partia
 class FilterQueryParser {
 
     private static final Logger log = LoggerFactory.getLogger(FilterQueryParser.class);
+    static final Pattern FACET_REGEX = Pattern.compile("facet\\((\\w+(\\:\\w+)?)\\)");
 
     static SolrQuery getQuery(Filter filter, List<QueryIndex.OrderEntry> sortOrder, OakSolrConfiguration configuration) {
 
@@ -59,6 +65,21 @@ class FilterQueryParser {
             Collection<String> fulltextConditions = filter.getFulltextConditions();
             for (String fulltextCondition : fulltextConditions) {
                 queryBuilder.append(fulltextCondition).append(" ");
+            }
+        }
+
+        // facet enable
+        String queryStatement = filter.getQueryStatement();
+        if (queryStatement != null) {
+            Matcher matcher = FACET_REGEX.matcher(queryStatement);
+            int start = 0;
+            while (matcher.find(start)) {
+                String facetField = matcher.group(1);
+                solrQuery.addFacetField(facetField);
+                start = matcher.end();
+            }
+            if (start > 0) {
+                solrQuery.setFacetMinCount(1);
             }
         }
 
@@ -351,6 +372,55 @@ class FilterQueryParser {
 
     private static String purgePath(Filter filter) {
         return partialEscape(filter.getPath()).toString();
+    }
+
+    private static void addACLPathsFilterQuery(SolrQuery query, NodeState root, OakSolrConfiguration configuration) {
+        StringBuilder stringBuilder = new StringBuilder();
+
+        // add path exact filters
+        Collection<String> nodes = getNodes(root, "", -1);
+        for (String p : nodes) {
+            if (stringBuilder.length() > 0) {
+                stringBuilder.append(" OR ");
+            }
+            stringBuilder.append(partialEscape(p));
+        }
+
+        query.addFilterQuery(configuration.getFieldForPathRestriction(
+                Filter.PathRestriction.EXACT) + ":(" + stringBuilder.toString() + ")");
+
+        // add all children filters
+//        stringBuilder = new StringBuilder();
+//        for (String p : collectReadableRoots(root)) {
+//            if (stringBuilder.length() > 0) {
+//                stringBuilder.append(" OR ");
+//            }
+//            stringBuilder.append(partialEscape(p));
+//        }
+//        query.addFilterQuery(configuration.getFieldForPathRestriction(Filter.PathRestriction.ALL_CHILDREN) +
+//                ":(" + stringBuilder.toString() + ")");
+    }
+
+    private static Collection<String> getNodes(NodeState nodeState, String path, int depth) {
+        Collection<String> paths = new LinkedList<String>();
+        if (depth != 0) {
+            for (String name : nodeState.getChildNodeNames()) {
+                NodeState child = nodeState.getChildNode(checkNotNull(name));
+                String childPath = path + "/" + name;
+                paths.add(childPath);
+                paths.addAll(getNodes(child, childPath, depth - 1));
+            }
+        }
+        return paths;
+    }
+
+    private static Collection<String> collectReadableRoots(NodeState root) {
+        // TODO : this should build a flat list of paths at a certain depth from the passed node state
+        Collection<String> paths = new LinkedList<String>();
+        for (String childName : root.getChildNodeNames()) {
+            paths.add("/" + childName);
+        }
+        return paths;
     }
 
 }
