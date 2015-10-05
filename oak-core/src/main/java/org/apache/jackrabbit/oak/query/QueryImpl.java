@@ -16,23 +16,28 @@ package org.apache.jackrabbit.oak.query;
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.Set;
 
 import com.google.common.collect.AbstractIterator;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-
 import com.google.common.collect.Ordering;
+import org.apache.commons.math3.linear.Array2DRowRealMatrix;
+import org.apache.commons.math3.linear.RealMatrix;
 import org.apache.jackrabbit.oak.api.PropertyValue;
+import org.apache.jackrabbit.oak.api.Result.SizePrecision;
 import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.api.Type;
-import org.apache.jackrabbit.oak.api.Result.SizePrecision;
 import org.apache.jackrabbit.oak.namepath.JcrPathParser;
 import org.apache.jackrabbit.oak.namepath.NamePathMapper;
 import org.apache.jackrabbit.oak.query.ast.AndImpl;
@@ -85,8 +90,21 @@ import org.apache.jackrabbit.oak.spi.query.QueryIndex.IndexPlan;
 import org.apache.jackrabbit.oak.spi.query.QueryIndex.OrderEntry;
 import org.apache.jackrabbit.oak.spi.query.QueryIndex.OrderEntry.Order;
 import org.apache.jackrabbit.oak.spi.query.QueryIndexProvider;
+import org.apache.jackrabbit.oak.spi.security.principal.SystemPrincipal;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.apache.jackrabbit.oak.spi.state.NodeStateUtils;
+import org.apache.yay.CreationException;
+import org.apache.yay.NeuralNetwork;
+import org.apache.yay.TrainingExample;
+import org.apache.yay.TrainingSet;
+import org.apache.yay.core.BackPropagationLearningStrategy;
+import org.apache.yay.core.FeedForwardStrategy;
+import org.apache.yay.core.LogisticRegressionCostFunction;
+import org.apache.yay.core.MaxSelectionFunction;
+import org.apache.yay.core.NeuralNetworkFactory;
+import org.apache.yay.core.SigmoidFunction;
+import org.apache.yay.core.TanhFunction;
+import org.apache.yay.core.utils.ExamplesFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -172,6 +190,74 @@ public class QueryImpl implements Query {
     private boolean warnedHidden;
 
     private boolean isInternal;
+
+    private static double[] weights = new double[50];
+
+    private static final List<String> queryTokens = new LinkedList<String>();
+
+    private static int updates = 0;
+
+
+    private static RealMatrix[] createRandomWeights() {
+        Random r = new Random();
+        int weightsCount = 3;
+
+        RealMatrix[] initialWeights = new RealMatrix[weightsCount];
+        for (int i = 0; i < weightsCount; i++) {
+            int rows = 51;
+            int cols;
+            if (i == 0) {
+                cols = 51;
+            } else {
+                cols = initialWeights[i - 1].getRowDimension();
+                if (i == weightsCount - 1) { // define the no. of output layer units
+                    rows = 30;
+                }
+            }
+            double[][] d = new double[rows][cols];
+            for (int c = 0; c < cols; c++) {
+                if (i == weightsCount - 1) {
+                    if (c == 0) {
+                        d[0][c] = 1d;
+                    } else {
+                        d[0][c] = r.nextInt(100) / 101d;
+                    }
+                } else {
+                    d[0][c] = 0;
+                }
+            }
+
+            for (int k = 1; k < rows; k++) {
+                for (int j = 0; j < cols; j++) {
+                    double val;
+                    if (j == 0) {
+                        val = 1d;
+                    } else {
+                        val = r.nextInt(100) / 101d;
+                    }
+                    d[k][j] = val;
+                }
+            }
+            initialWeights[i] = new Array2DRowRealMatrix(d);
+        }
+        return initialWeights;
+    }
+
+    private static Collection<TrainingExample<Double, Double>> examples = new LinkedList<TrainingExample<Double, Double>>();
+
+    private static NeuralNetwork nn;
+
+    static {
+        try {
+            RealMatrix[] randomWeights = createRandomWeights();
+            nn = NeuralNetworkFactory.create(randomWeights, new BackPropagationLearningStrategy(0.03d,
+                            -1, 1d, new FeedForwardStrategy(new SigmoidFunction()),
+                            new LogisticRegressionCostFunction()),
+                    new FeedForwardStrategy(new SigmoidFunction()));
+        } catch (CreationException e) {
+            // do nothing
+        }
+    }
 
     QueryImpl(String statement, SourceImpl source, ConstraintImpl constraint,
             ColumnImpl[] columns, NamePathMapper mapper, QueryEngineSettings settings) {
@@ -1021,6 +1107,58 @@ public class QueryImpl implements Query {
             }
         }
 
+        /* we can mine data about whether and index is selected given a certain plan (entry counts) and filter or,
+         * better, create a multi class classification training set where I = filter, plans(, index config), O = selected index (plan).
+         * At a certain point we can use that training set to predict which index will get selected, however
+         * a wrong decision will likely result in errors, so we may use it to filter out indexes with very low
+         * probability of getting selected, however even there that may potentially lead to errors (filtering out
+         * users index for rep:authorizableId type of queries).
+         * Or maybe we can do an inverse inference: cluster all the queries that get assigned to a certain index together
+         * in order to visualize and quantify the amount of work a certain index is required to do, together with measuring
+         * each index performance, and finding boundaries beyond which the index starts to perform poorly. */
+
+        try {
+//            Double[] output = getOutputVector(queryIndexes, bestIndex, bestCost, bestPlan);
+            Double[] output = hotEncode(queryIndexes, bestIndex);
+            Double[] input = getFilterVector(filter);
+            TrainingExample<Double, Double> example = ExamplesFactory.createDoubleArrayTrainingExample(output, input);
+            examples.add(example);
+            int counts = 1000;
+            if (updates > 0 && updates % counts == 0) {
+                System.err.println("learning...");
+                long start = System.currentTimeMillis();
+//                Double predict = nn.predict(example);
+//                System.err.println("p:" + predict);
+//                double estimatedOutputIndex = 10d * predict % queryIndexes.size();
+//                System.err.println("e: " + queryIndexes.get((int) estimatedOutputIndex).getIndexName() + ", a: " + bestIndex.getIndexName() + " (u:" + updates + ")");
+//            } else {
+//                System.err.println("u:"+updates);
+//            }
+//            double[] output = getOutputVector(queryIndexes, bestIndex, bestCost, bestPlan);
+
+                nn.learn(new TrainingSet<Double, Double>(examples));
+                long end = System.currentTimeMillis();
+                System.err.println("learning took " + (end - start)/1000 + "s");
+                examples.clear();
+            }
+            if (updates > counts) {
+                Double[] predict = nn.predict(example);
+                int estimatedOutputIndex = -1;
+                double max = -1d;
+                for (int k = 0; k < predict.length; k++) {
+                    double d = predict[k];
+                    if (d > max) {
+                        max = d;
+                        estimatedOutputIndex = k;
+                    }
+                }
+                System.err.println("e: " + queryIndexes.get(estimatedOutputIndex).getIndexName() + ", a: " + bestIndex.getIndexName() + " (u:" + updates + ")");
+            }
+            updates++;
+        } catch (Throwable t) {
+            // do nothing
+        }
+
         if (traversalEnabled) {
             QueryIndex traversal = new TraversingIndex();
             double cost = traversal.getCost(filter, rootState);
@@ -1035,7 +1173,168 @@ public class QueryImpl implements Query {
         }
         return new SelectorExecutionPlan(filter.getSelector(), bestIndex, bestPlan, bestCost);
     }
-    
+
+    private Double[] hotEncode(List<? extends QueryIndex> queryIndexes, QueryIndex bestIndex) {
+        Double[] vector = new Double[30];
+        int index = queryIndexes.indexOf(bestIndex);
+        Arrays.fill(vector, 0d);
+        vector[index] = 1d;
+        return vector;
+    }
+
+//    private void update(double[] input, double[] output) {
+//    private void update(double[] input, int output) {
+//        double[] updatedWeights = new double[weights.length];
+//        double estimate = estimate(input);
+////        double distance = distance(estimate, output);
+//        double delta = Math.pow(Math.abs(output - estimate), 2) / 2;
+//        System.err.println("d:"+delta);
+//        if (delta > 0) {
+//            for (int i = 0; i < updatedWeights.length; i++) {
+//                double errors = delta * input[i];
+//                updatedWeights[i] = weights[i] + 0.3d * errors;
+//            }
+//            // weights updated
+//            weights = Arrays.copyOf(updatedWeights, updatedWeights.length);
+//            updates++;
+//        }
+//    }
+
+    private double distance(double[] p1, double[] p2) {
+        double sum = 0;
+        for (int i = 0; i < p1.length; i++) {
+            final double dp = p1[i] - p2[i];
+            sum += dp * dp;
+        }
+        return Math.sqrt(sum);
+    }
+
+//    private double estimate(TrainingExample<Double, Double> input) {
+////        return ebeMultiply(input, weights);
+//        try {
+//            return nn.predict(input);
+//        } catch (PredictionException e) {
+//            // do nothing
+//        }
+//    }
+
+//    private double combine(double[] input, double[] weights) {
+//        double output = 0d;
+//        for (int i = 0; i < input.length; i++) {
+//            for (int j = 0; j < weights.length; j++) {
+//                output+=input[i]*weights[j];
+//            }
+//        }
+//        return output;
+//    }
+
+//    private double[] ebeMultiply(double[] a, double[] b) {
+//        final double[] result = a.clone();
+//        for (int i = 0; i < a.length; i++) {
+//            result[i] *= b[i];
+//        }
+//        return result;
+//    }
+
+    private Double[] getOutputVector(List<? extends QueryIndex> queryIndexes, QueryIndex bestIndex, double bestCost, IndexPlan bestPlan) {
+        Double[] vector = new Double[5];
+        for (int i = 0; i < 5; i++) {
+            if (i == 0) {
+                vector[i] = bestPlan == null ? 0 : bestPlan.getCostPerEntry();
+            } else if (i == 1) {
+                vector[i] = bestPlan == null ? 0 : bestPlan.getCostPerExecution();
+            } else if (i == 2) {
+                vector[i] = bestPlan == null ? 0d : (double) bestPlan.getEstimatedEntryCount();
+            } else if (i == 3) {
+                vector[i] = bestCost;
+            } else if (i == 4) {
+                vector[i] = (double) queryIndexes.indexOf(bestIndex);
+            }
+        }
+        return vector;
+    }
+
+    private Double[] getFilterVector(Filter filter) {
+//        double[] vector = new double[5];
+        String queryStatement = filter.getQueryStatement();
+        if (queryStatement != null) {
+            Collection<String> columns = new LinkedList<String>();
+            Collection<String> selectors = new LinkedList<String>();
+            Collection<String> filters = new LinkedList<String>();
+            boolean inColumns = false;
+            boolean inSelectors = false;
+            boolean inFilters = false;
+            String[] tokens = queryStatement.split(" ");
+            for (String token : tokens) {
+                if ("SELECT".equalsIgnoreCase(token)) {
+                    inColumns = true;
+                } else if ("FROM".equalsIgnoreCase(token)) {
+                    inSelectors = true;
+                    inColumns = false;
+                } else if ("WHERE".equalsIgnoreCase(token)) {
+                    inFilters = true;
+                    inSelectors = false;
+                    inColumns = false;
+                } else {
+                    if (inColumns) {
+                        columns.add(token);
+                    } else if (inSelectors) {
+                        selectors.add(token);
+                    } else if (inFilters) {
+                        filters.add(token);
+                    }
+                }
+            }
+            double[] columnsVector = encode(columns, 10);
+            double[] selectorsVector = encode(selectors, 10);
+            double[] filtersVector = encode(filters, 30);
+
+            Double[] inputVector = new Double[columnsVector.length + selectorsVector.length + filtersVector.length];
+            for (int j = 0; j < inputVector.length; j++) {
+                if (j < columnsVector.length) {
+                    inputVector[j] = columnsVector[j];
+                } else if (j - columnsVector.length < selectorsVector.length){
+                    inputVector[j] = columnsVector[j - columnsVector.length];
+                } else if (j - columnsVector.length - selectorsVector.length < filtersVector.length){
+                    inputVector[j] = filtersVector[j - columnsVector.length - selectorsVector.length];
+                }
+            }
+            return inputVector;
+
+        } else {
+            return null;
+        }
+//        else {
+//            for (int i = 0; i < 5; i++) {
+//                if (i == 0) {
+//                    vector[i] = filter.getPropertyRestrictions() != null ? filter.getPropertyRestrictions().size() : 0;
+//                } else if (i == 1) {
+//                    vector[i] = filter.containsNativeConstraint() ? 1 : 0;
+//                } else if (i == 2) {
+//                    vector[i] = filter.getPathRestriction() != null ? filter.getPathRestriction().ordinal() : 0;
+//                } else if (i == 3) {
+//                    vector[i] = filter.getPathRestriction() != null ? filter.getPathRestriction().toString().split("/").length : 0;
+//                } else if (i == 4) {
+//                    vector[i] = filter.getFullTextConstraint() != null ? filter.getFullTextConstraint().getPrecedence() : 0;
+//                }
+//            }
+//        }
+//        return vector;
+    }
+
+    private double[] encode(Collection<String> tokens, int dimension) {
+        double[] doubles = new double[dimension];
+        for (String token : tokens) {
+            if (!queryTokens.contains(token)) {
+                queryTokens.add(token);
+            }
+        }
+        for (String token : tokens) {
+            doubles[queryTokens.indexOf(token) % dimension] = 1d;
+        }
+        return doubles;
+    }
+
     private void logDebug(String msg) {
         if (isInternal) {
             LOG.trace(msg);

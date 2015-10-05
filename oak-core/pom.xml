@@ -350,5 +350,20 @@
       <version>7.0.64</version>
       <scope>test</scope>
     </dependency>
+    <dependency>
+      <groupId>org.apache.yay</groupId>
+      <artifactId>yay-api</artifactId>
+      <version>0.1-SNAPSHOT</version>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.yay</groupId>
+      <artifactId>yay-core</artifactId>
+      <version>0.1-SNAPSHOT</version>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.commons</groupId>
+      <artifactId>commons-math3</artifactId>
+      <version>3.1.1</version>
+    </dependency>
   </dependencies>
 </project>
