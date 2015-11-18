@@ -17,15 +17,18 @@
 package org.apache.jackrabbit.oak.plugins.index.solr.query;
 
 import javax.annotation.CheckForNull;
+import javax.jcr.Session;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
 
 import com.google.common.collect.AbstractIterator;
 import com.google.common.collect.Iterables;
@@ -33,6 +36,7 @@ import com.google.common.collect.Queues;
 import com.google.common.collect.Sets;
 import org.apache.jackrabbit.oak.api.PropertyValue;
 import org.apache.jackrabbit.oak.api.Result.SizePrecision;
+import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.plugins.index.aggregate.NodeAggregator;
 import org.apache.jackrabbit.oak.plugins.index.solr.configuration.OakSolrConfiguration;
 import org.apache.jackrabbit.oak.query.QueryEngineSettings;
@@ -48,11 +52,13 @@ import org.apache.jackrabbit.oak.spi.query.PropertyValues;
 import org.apache.jackrabbit.oak.spi.query.QueryConstants;
 import org.apache.jackrabbit.oak.spi.query.QueryIndex;
 import org.apache.jackrabbit.oak.spi.query.QueryIndex.FulltextQueryIndex;
+import org.apache.jackrabbit.oak.spi.security.authorization.permission.PermissionProvider;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.apache.solr.client.solrj.SolrQuery;
 import org.apache.solr.client.solrj.SolrServer;
 import org.apache.solr.client.solrj.SolrServerException;
 import org.apache.solr.client.solrj.embedded.EmbeddedSolrServer;
+import org.apache.solr.client.solrj.response.FacetField;
 import org.apache.solr.client.solrj.response.QueryResponse;
 import org.apache.solr.client.solrj.response.SpellCheckResponse;
 import org.apache.solr.common.SolrDocument;
@@ -226,7 +232,7 @@ public class SolrQueryIndex implements FulltextQueryIndex, QueryIndex.AdvanceFul
 
             final int parentDepth = getDepth(parent);
 
-            AbstractIterator<SolrResultRow> iterator = getIterator(filter, sortOrder, parent, parentDepth);
+            AbstractIterator<SolrResultRow> iterator = getIterator(filter, sortOrder, parent, parentDepth, root);
 
             cursor = new SolrRowCursor(iterator, plan, filter.getQueryEngineSettings());
         } catch (Exception e) {
@@ -235,8 +241,10 @@ public class SolrQueryIndex implements FulltextQueryIndex, QueryIndex.AdvanceFul
         return cursor;
     }
 
-    private AbstractIterator<SolrResultRow> getIterator(final Filter filter, final List<OrderEntry> sortOrder, final String parent, final int parentDepth) {
+    private AbstractIterator<SolrResultRow> getIterator(final Filter filter, final List<OrderEntry> sortOrder, final String parent,
+                                                        final int parentDepth, final NodeState root) {
         return new AbstractIterator<SolrResultRow>() {
+            public Collection<FacetField> facetFields = new LinkedList<FacetField>();
             private final Set<String> seenPaths = Sets.newHashSet();
             private final Deque<SolrResultRow> queue = Queues.newArrayDeque();
             private int offset = 0;
@@ -270,7 +278,7 @@ public class SolrQueryIndex implements FulltextQueryIndex, QueryIndex.AdvanceFul
                 if (scoreObj != null) {
                     score = (Float) scoreObj;
                 }
-                return new SolrResultRow(path, score, doc);
+                return new SolrResultRow(path, score, doc, facetFields);
 
             }
 
@@ -343,12 +351,39 @@ public class SolrQueryIndex implements FulltextQueryIndex, QueryIndex.AdvanceFul
                         }
                     }
 
+                    // get facets
+                    List<FacetField> returnedFieldFacet = queryResponse.getFacetFields();
+                    if (returnedFieldFacet != null) {
+                        facetFields.addAll(returnedFieldFacet);
+                    }
+
+                    // filter facets on doc paths
+                    if (!facetFields.isEmpty()) {
+                        for (SolrDocument doc : docs) {
+                            String path = String.valueOf(doc.getFieldValue(configuration.getPathField()));
+                            // if path doesn't exist in the node state, filter the facets
+                            PermissionProvider permissionProvider = filter.getSelector().getQuery().getExecutionContext().getPermissionProvider();
+                            for (FacetField ff : facetFields) {
+                                if (permissionProvider != null) {
+                                    if (!permissionProvider.isGranted(path+"/"+ff.getName(), Session.ACTION_READ)) {
+                                        filterFacet(doc, ff);
+                                    }
+                                } else { // fallback in case of missing PermissionProvider
+                                    if (!exists(path, root)) { // this will only work in case the NodeState is a SecureNodeState
+                                        filterFacet(doc, ff);
+                                    }
+                                }
+                            }
+
+                        }
+                    }
+
                     // handle spellcheck
                     SpellCheckResponse spellCheckResponse = queryResponse.getSpellCheckResponse();
                     if (spellCheckResponse != null && spellCheckResponse.getSuggestions() != null &&
                             spellCheckResponse.getSuggestions().size() > 0) {
                         SolrDocument fakeDoc = getSpellChecks(spellCheckResponse, filter);
-                        queue.add(new SolrResultRow("/", 1.0, fakeDoc));
+                        queue.add(new SolrResultRow("/", 1.0, fakeDoc, Collections.<FacetField>emptyList()));
                         noDocs = true;
                     }
 
@@ -359,7 +394,7 @@ public class SolrQueryIndex implements FulltextQueryIndex, QueryIndex.AdvanceFul
                         Set<Map.Entry<String, Object>> suggestEntries = suggest.entrySet();
                         if (!suggestEntries.isEmpty()) {
                             SolrDocument fakeDoc = getSuggestions(suggestEntries, filter);
-                            queue.add(new SolrResultRow("/", 1.0, fakeDoc));
+                            queue.add(new SolrResultRow("/", 1.0, fakeDoc, Collections.<FacetField>emptyList()));
                             noDocs = true;
                         }
                     }
@@ -375,6 +410,52 @@ public class SolrQueryIndex implements FulltextQueryIndex, QueryIndex.AdvanceFul
 
         };
     }
+
+    private void filterFacet(SolrDocument doc, FacetField facetField) {
+        // TODO : facet filtering by value requires that the facet values match the stored values
+        // TODO : a *_facet field must exist, storing docValues instead of values and that should be used for faceting and at filtering time
+        if (doc.getFieldNames().contains(facetField.getName())) {
+            // decrease facet value
+            Collection<Object> docFieldValues = doc.getFieldValues(facetField.getName());
+            if (docFieldValues != null) {
+                for (Object docFieldValue : docFieldValues) {
+                    String valueString = String.valueOf(docFieldValue);
+                    List<FacetField.Count> toRemove = new LinkedList<FacetField.Count>();
+                    for (FacetField.Count count : facetField.getValues()) {
+                        long existingCount = count.getCount();
+                        if (valueString.equals(count.getName())) {
+                            if (existingCount > 1) {
+                                // decrease the count
+                                count.setCount(existingCount - 1);
+                            } else {
+                                // remove the entire entry
+                                toRemove.add(count);
+                            }
+                        }
+                    }
+                    for (FacetField.Count f : toRemove) {
+                        assert facetField.getValues().remove(f);
+                    }
+                }
+            }
+        }
+    }
+
+    private boolean exists(String path, NodeState root) {
+        // need to enable the check at the property level too
+        boolean nodeExists = true;
+        NodeState nodeState = root;
+        for (String n : PathUtils.elements(path)) {
+            if (nodeState.hasChildNode(n)) {
+                nodeState = nodeState.getChildNode(n);
+            } else {
+                nodeExists = false;
+                break;
+            }
+        }
+        return nodeExists;
+    }
+
 
     private SolrDocument getSpellChecks(SpellCheckResponse spellCheckResponse, Filter filter) throws SolrServerException {
         SolrDocument fakeDoc = new SolrDocument();
@@ -500,11 +581,13 @@ public class SolrQueryIndex implements FulltextQueryIndex, QueryIndex.AdvanceFul
         final String path;
         final double score;
         final SolrDocument doc;
+        final Collection<FacetField> facetFields;
 
-        SolrResultRow(String path, double score, SolrDocument doc) {
+        SolrResultRow(String path, double score, SolrDocument doc, Collection<FacetField> facetFields) {
             this.path = path;
             this.score = score;
             this.doc = doc;
+            this.facetFields = facetFields;
         }
 
         @Override
@@ -580,6 +663,24 @@ public class SolrQueryIndex implements FulltextQueryIndex, QueryIndex.AdvanceFul
                     // overlay the score
                     if (QueryImpl.JCR_SCORE.equals(columnName)) {
                         return PropertyValues.newDouble(currentRow.score);
+                    }
+                    if (columnName.startsWith("facet(")) {
+                        Matcher m = FilterQueryParser.FACET_REGEX.matcher(columnName);
+                        if (m.matches()) { // facets
+                            String facetFieldName = m.group(1);
+                            FacetField facetField = null;
+                            for (FacetField ff : currentRow.facetFields) {
+                                if (ff.getName().equals(facetFieldName)) {
+                                    facetField = ff;
+                                    break;
+                                }
+                            }
+                            if (facetField != null) {
+                                return PropertyValues.newString(facetField.toString());
+                            } else {
+                                return null;
+                            }
+                        }
                     }
                     Collection<Object> fieldValues = currentRow.doc.getFieldValues(columnName);
                     String value;

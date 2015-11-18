@@ -31,6 +31,8 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import com.google.common.collect.AbstractIterator;
 import com.google.common.collect.Iterables;
@@ -71,6 +73,11 @@ import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.CachingTokenFilter;
 import org.apache.lucene.analysis.TokenStream;
 import org.apache.lucene.document.Document;
+import org.apache.lucene.facet.FacetResult;
+import org.apache.lucene.facet.Facets;
+import org.apache.lucene.facet.FacetsCollector;
+import org.apache.lucene.facet.sortedset.DefaultSortedSetDocValuesReaderState;
+import org.apache.lucene.facet.sortedset.SortedSetDocValuesFacetCounts;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.IndexReader;
@@ -187,6 +194,8 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
      */
     static final int LUCENE_QUERY_BATCH_SIZE = 50;
 
+    static final Pattern FACET_REGEX = Pattern.compile("facet\\((\\w+(\\:\\w+)?)\\)");
+
     protected final IndexTracker tracker;
 
     private final ScorerProviderFactory scorerProviderFactory;
@@ -301,7 +310,7 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
                 return endOfData();
             }
 
-            private LuceneResultRow convertToRow(ScoreDoc doc, IndexSearcher searcher, String excerpt) throws IOException {
+            private LuceneResultRow convertToRow(ScoreDoc doc, IndexSearcher searcher, String excerpt, Facets facets) throws IOException {
                 IndexReader reader = searcher.getIndexReader();
                 //TODO Look into usage of field cache for retrieving the path
                 //instead of reading via reader if no of docs in index are limited
@@ -330,7 +339,7 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
                     }
 
                     LOG.trace("Matched path {}", path);
-                    return new LuceneResultRow(path, doc.score, excerpt);
+                    return new LuceneResultRow(path, doc.score, excerpt, facets);
                 }
                 return null;
             }
@@ -363,6 +372,14 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
 
                         checkForIndexVersionChange(searcher);
 
+                        String facetField = null;
+                        if (plan.getFilter().getQueryStatement() != null && plan.getFilter().getQueryStatement().contains("facet(")) {
+                            Matcher matcher = FACET_REGEX.matcher(plan.getFilter().getQueryStatement());
+                            if (matcher.find()) {
+                                facetField = FieldNames.createFacetFieldName(matcher.group(1));
+                            }
+                        }
+
                         TopDocs docs;
                         long start = PERF_LOGGER.start();
                         while (true) {
@@ -384,6 +401,14 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
                             PERF_LOGGER.end(start, -1, "{} ...", docs.scoreDocs.length);
                             nextBatchSize = (int) Math.min(nextBatchSize * 2L, 100000);
 
+                            Facets facets = null;
+                            if (facetField != null) {
+                                DefaultSortedSetDocValuesReaderState state = new DefaultSortedSetDocValuesReaderState(searcher.getIndexReader(), facetField);
+                                FacetsCollector facetsCollector = new FacetsCollector();
+                                FacetsCollector.search(searcher, query, 10, facetsCollector);
+                                facets = new SortedSetDocValuesFacetCounts(state, facetsCollector);
+                            }
+
                             boolean addExcerpt = filter.getQueryStatement() != null && filter.getQueryStatement().contains(QueryImpl.REP_EXCERPT);
                             for (ScoreDoc doc : docs.scoreDocs) {
                                 String excerpt = null;
@@ -391,7 +416,7 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
                                     excerpt = getExcerpt(indexNode, searcher, query, doc);
                                 }
 
-                                LuceneResultRow row = convertToRow(doc, searcher, excerpt);
+                                LuceneResultRow row = convertToRow(doc, searcher, excerpt, facets);
                                 if (row != null) {
                                     queue.add(row);
                                 }
@@ -1326,9 +1351,11 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
         final Iterable<String> suggestWords;
         final boolean isVirutal;
         final String excerpt;
+        final Facets facets;
 
-        LuceneResultRow(String path, double score, String excerpt) {
+        LuceneResultRow(String path, double score, String excerpt, Facets facets) {
             this.excerpt = excerpt;
+            this.facets = facets;
             this.isVirutal = false;
             this.path = path;
             this.score = score;
@@ -1341,6 +1368,7 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
             this.score = 1.0d;
             this.suggestWords = suggestWords;
             this.excerpt = null;
+            this.facets = null;
         }
 
         @Override
@@ -1428,6 +1456,25 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
                     }
                     if (QueryImpl.REP_EXCERPT.equals(columnName)) {
                         return PropertyValues.newString(currentRow.excerpt);
+                    }
+                    if (columnName.startsWith("facet(")) {
+                        Matcher m = FACET_REGEX.matcher(columnName);
+                        if (m.matches()) {
+                            String facetFieldName = m.group(1);
+                            Facets facets = currentRow.facets;
+                            try {
+                                if (facets != null) {
+                                    FacetResult topChildren = facets.getTopChildren(10, facetFieldName);
+                                    if (topChildren != null) {
+                                        return PropertyValues.newString(topChildren.toString());
+                                    } else {
+                                        return null;
+                                    }
+                                }
+                            } catch (IOException e) {
+                                throw new RuntimeException(e);
+                            }
+                        }
                     }
                     return pathRow.getValue(columnName);
                 }

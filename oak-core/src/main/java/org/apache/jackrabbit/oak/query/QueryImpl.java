@@ -54,6 +54,7 @@ import org.apache.jackrabbit.oak.query.ast.DescendantNodeImpl;
 import org.apache.jackrabbit.oak.query.ast.DescendantNodeJoinConditionImpl;
 import org.apache.jackrabbit.oak.query.ast.DynamicOperandImpl;
 import org.apache.jackrabbit.oak.query.ast.EquiJoinConditionImpl;
+import org.apache.jackrabbit.oak.query.ast.FacetImpl;
 import org.apache.jackrabbit.oak.query.ast.FullTextSearchImpl;
 import org.apache.jackrabbit.oak.query.ast.FullTextSearchScoreImpl;
 import org.apache.jackrabbit.oak.query.ast.InImpl;
@@ -300,6 +301,13 @@ public class QueryImpl implements Query {
 
             @Override
             public boolean visit(SuggestImpl node) {
+                node.setQuery(query);
+                node.bindSelector(source);
+                return super.visit(node);
+            }
+
+            @Override
+            public boolean visit(FacetImpl node) {
                 node.setQuery(query);
                 node.bindSelector(source);
                 return super.visit(node);
@@ -1112,7 +1120,7 @@ public class QueryImpl implements Query {
         if (path == null) {
             return null;
         }
-        if (!JcrPathParser.validate(path)) {
+        if (!JcrPathParser.validate(path) && !path.startsWith("facet(")) { // TODO : fix validation to allow facet(...)
             throw new IllegalArgumentException("Invalid path: " + path);
         }
         String p = namePathMapper.getOakPath(path);

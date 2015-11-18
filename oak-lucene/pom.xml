@@ -218,6 +218,12 @@
       <artifactId>lucene-highlighter</artifactId>
       <version>${lucene.version}</version>
     </dependency>
+    <dependency>
+      <groupId>org.apache.lucene</groupId>
+      <artifactId>lucene-facet</artifactId>
+      <version>${lucene.version}</version>
+      <scope>provided</scope>
+    </dependency>
 
     <!-- Logging -->
     <dependency>

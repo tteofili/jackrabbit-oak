@@ -69,6 +69,7 @@ import org.apache.lucene.document.LongField;
 import org.apache.lucene.document.NumericDocValuesField;
 import org.apache.lucene.document.SortedDocValuesField;
 import org.apache.lucene.document.StringField;
+import org.apache.lucene.facet.sortedset.SortedSetDocValuesFacetField;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.search.PrefixQuery;
 import org.apache.lucene.util.BytesRef;
@@ -335,6 +336,10 @@ public class LuceneIndexEditor implements IndexEditor, Aggregate.AggregateRoot {
                 dirty |= addTypedOrderedFields(fields, property, pname, pd);
             }
 
+            if (pd.facet) {
+                dirty |= addFacetFields(fields, property, pname, pd);
+            }
+
             dirty |= indexProperty(path, fields, state, property, pname, pd);
         }
 
@@ -397,6 +402,59 @@ public class LuceneIndexEditor implements IndexEditor, Aggregate.AggregateRoot {
         //TODO Boost at document level
 
         return document;
+    }
+
+    private boolean addFacetFields(List<Field> fields, PropertyState property, String pname, PropertyDefinition pd) {
+        if (property.getType().isArray()) {
+            log.warn(
+                    "[{}] Ignoring ordered property {} of type {} for path {} as multivalued facets are not supported",
+                    getIndexName(), pname,
+                    Type.fromTag(property.getType().tag(), true), getPath());
+            return false;
+        }
+
+        int tag = property.getType().tag();
+        int idxDefinedTag = pd.getType();
+        // Try converting type to the defined type in the index definition
+        if (tag != idxDefinedTag) {
+            log.debug(
+                    "[{}] Facet property defined with type {} differs from property {} with type {} in "
+                            + "path {}",
+                    getIndexName(),
+                    Type.fromTag(idxDefinedTag, false), property.toString(),
+                    Type.fromTag(tag, false), getPath());
+            tag = idxDefinedTag;
+        }
+
+        String name = FieldNames.createFacetFieldName(pname);
+        boolean fieldAdded = false;
+        Field f = null;
+        try {
+            if (tag == Type.LONG.tag()) {
+                f = new SortedSetDocValuesFacetField(name, property.getValue(Type.LONG).toString());
+            } else if (tag == Type.DATE.tag()) {
+                String date = property.getValue(Type.DATE);
+                f = new SortedSetDocValuesFacetField(name, date);
+            } else if (tag == Type.DOUBLE.tag()) {
+                f = new DoubleDocValuesField(name, property.getValue(Type.DOUBLE));
+            } else if (tag == Type.BOOLEAN.tag()) {
+                f = new SortedSetDocValuesFacetField(name, property.getValue(Type.BOOLEAN).toString());
+            } else if (tag == Type.STRING.tag()) {
+                f = new SortedSetDocValuesFacetField(name, property.getValue(Type.STRING));
+            }
+
+            if (f != null) {
+                fields.add(f);
+                fieldAdded = true;
+            }
+        } catch (Exception e) {
+            log.warn(
+                    "[{}] Ignoring facet property. Could not convert property {} of type {} to type {} for path {}",
+                    getIndexName(), pname,
+                    Type.fromTag(property.getType().tag(), false),
+                    Type.fromTag(tag, false), getPath(), e);
+        }
+        return fieldAdded;
     }
 
     private boolean indexProperty(String path,

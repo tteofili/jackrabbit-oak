@@ -70,7 +70,7 @@ import com.google.common.collect.Iterables;
  */
 public class SelectorImpl extends SourceImpl {
     private static final Logger LOG = LoggerFactory.getLogger(SelectorImpl.class);
-    
+
     // TODO possibly support using multiple indexes (using index intersection / index merge)
     private SelectorExecutionPlan plan;
     
@@ -665,6 +665,8 @@ public class SelectorImpl extends SourceImpl {
             result = currentRow.getValue(QueryImpl.REP_SPELLCHECK);
         } else if (oakPropertyName.equals(QueryImpl.REP_SUGGEST)) {
             result = currentRow.getValue(QueryImpl.REP_SUGGEST);
+        } else if (oakPropertyName.startsWith("facet(")) {
+            result = currentRow.getValue(oakPropertyName);
         } else {
             result = PropertyValues.create(t.getProperty(oakPropertyName));
         }

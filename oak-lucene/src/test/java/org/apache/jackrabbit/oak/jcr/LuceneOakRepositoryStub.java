@@ -106,6 +106,7 @@ public class LuceneOakRepositoryStub extends OakTarMKRepositoryStub {
                     .setProperty(LuceneIndexConstants.PROP_PROPERTY_INDEX, true)
                     .setProperty(LuceneIndexConstants.PROP_USE_IN_SPELLCHECK, true)
                     .setProperty(LuceneIndexConstants.PROP_USE_IN_SUGGEST, true)
+                    .setProperty(LuceneIndexConstants.PROP_FACET, true)
                     .setProperty(LuceneIndexConstants.PROP_NAME, LuceneIndexConstants.REGEX_ALL_PROPS)
                     .setProperty(LuceneIndexConstants.PROP_IS_REGEX, true);
         }
