@@ -43,7 +43,10 @@ public class SimpleTest {
 
     @Rule
     public DocumentMKBuilderProvider builderProvider = new DocumentMKBuilderProvider();
-    
+
+    @Rule
+    public MongoConnectionFactory connectionFactory = new MongoConnectionFactory();
+
     private static final boolean MONGO_DB = false;
     // private static final boolean MONGO_DB = true;
 
@@ -159,7 +162,7 @@ public class SimpleTest {
         String diff23 = mk.diff(rev2, rev3, "/", 0).trim();
         assertEquals("+\"/t3\":{}", diff23);
         String diff13 = mk.diff(rev1, rev3, "/", 0).trim();
-        assertEquals("+\"/t2\":{}\n+\"/t3\":{}", diff13);
+        assertEquals("+\"/t2\":{}+\"/t3\":{}", diff13);
         String diff34 = mk.diff(rev3, rev4, "/", 0).trim();
         assertEquals("^\"/t3\":{}", diff34);
     }
@@ -434,7 +437,7 @@ public class SimpleTest {
         DocumentMK.Builder builder = builderProvider.newBuilder();
 
         if (MONGO_DB) {
-            DB db = MongoUtils.getConnection().getDB();
+            DB db = connectionFactory.getConnection().getDB();
             MongoUtils.dropCollections(db);
             builder.setMongoDB(db);
         }

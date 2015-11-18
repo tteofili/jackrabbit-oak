@@ -966,8 +966,7 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
 
             // check if there may be more recent values in a previous document
             if (!getPreviousRanges().isEmpty()) {
-                Revision newest = local.firstKey();
-                if (isRevisionNewer(nodeStore, newest, value.revision)) {
+                if (!isMostRecentCommitted(nodeStore, local, value.revision)) {
                     // not reading the most recent value, we may need to
                     // consider previous documents as well
                     Revision newestPrev = getPreviousRanges().firstKey();
@@ -1119,7 +1118,7 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
                 continue;
             }
             // was this property touched after baseRevision?
-            for (Revision rev : getValueMap(name).keySet()) {
+            for (Revision rev : getChanges(name, baseRevision, context)) {
                 if (rev.equals(commitRevision)) {
                     continue;
                 }
@@ -1537,6 +1536,59 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
     }
 
     /**
+     * Returns all changes for the given property back to {@code min} revision
+     * (exclusive). The revisions include committed as well as uncommitted
+     * changes.
+     *
+     * @param property the name of the property.
+     * @param min the lower bound revision (exclusive).
+     * @param context the revision context.
+     * @return changes back to {@code min} revision.
+     */
+    @Nonnull
+    Iterable<Revision> getChanges(@Nonnull final String property,
+                                  @Nonnull final Revision min,
+                                  @Nonnull final RevisionContext context) {
+        return new Iterable<Revision>() {
+            @Override
+            public Iterator<Revision> iterator() {
+                final Set<Revision> changes = getValueMap(property).keySet();
+                final Set<Integer> clusterIds = Sets.newHashSet();
+                for (Revision r : getLocalMap(property).keySet()) {
+                    clusterIds.add(r.getClusterId());
+                }
+                for (Range r : getPreviousRanges().values()) {
+                    if (isRevisionNewer(context, r.high, min)) {
+                        clusterIds.add(r.high.getClusterId());
+                    }
+                }
+                final Iterator<Revision> unfiltered = changes.iterator();
+                return new AbstractIterator<Revision>() {
+                    @Override
+                    protected Revision computeNext() {
+                        while (unfiltered.hasNext()) {
+                            Revision next = unfiltered.next();
+                            if (isRevisionNewer(context, next, min)) {
+                                return next;
+                            } else {
+                                // further revisions with this clusterId
+                                // are older than min revision
+                                clusterIds.remove(next.getClusterId());
+                                // no more revisions to check
+                                if (clusterIds.isEmpty()) {
+                                    return endOfData();
+                                }
+                            }
+                        }
+                        return endOfData();
+                    }
+                };
+            }
+        };
+
+    }
+
+    /**
      * Returns the local value map for the given key.
      *
      * @param key the key.
@@ -1707,6 +1759,39 @@ public final class NodeDocument extends Document implements CachedNodeDocument{
     }
 
     //----------------------------< internal >----------------------------------
+
+    /**
+     * Returns {@code true} if the given {@code revision} is more recent or
+     * equal to the committed revision in {@code valueMap}. This method assumes
+     * the given {@code revision} is committed.
+     *
+     * @param context the revision context.
+     * @param valueMap the value map sorted most recent first.
+     * @param revision a committed revision.
+     * @return if {@code revision} is the most recent committed revision in the
+     *          {@code valueMap}.
+     */
+    private boolean isMostRecentCommitted(RevisionContext context,
+                                          SortedMap<Revision, String> valueMap,
+                                          Revision revision) {
+        if (valueMap.isEmpty()) {
+            return true;
+        }
+        // shortcut when revision is the first key
+        Revision first = valueMap.firstKey();
+        if (!isRevisionNewer(context, first, revision)) {
+            return true;
+        }
+        // need to check commit status
+        for (Revision r : valueMap.keySet()) {
+            Revision c = getCommitRevision(r);
+            if (c != null) {
+                return !isRevisionNewer(context, c, revision);
+            }
+        }
+        // no committed revision found in valueMap
+        return true;
+    }
 
     /**
      * Returns {@code true} if the two revisions are ambiguous. That is, they

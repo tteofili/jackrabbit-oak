@@ -57,7 +57,9 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
 import com.google.common.hash.Hashing;
+
 import org.apache.commons.io.FileUtils;
+import org.apache.jackrabbit.oak.commons.IOUtils;
 import org.apache.jackrabbit.oak.commons.concurrent.NotifyingFutureTask;
 import org.apache.jackrabbit.oak.util.PerfLogger;
 import org.apache.lucene.store.Directory;
@@ -350,6 +352,16 @@ public class IndexCopier implements CopyOnReadStatsMBean, Closeable {
                             indexPath, name);
                     return remote.openInput(name, context);
                 }
+            }
+
+            //If file does not exist then just delegate to remote and not
+            //schedule a copy task
+            if (!remote.fileExists(name)){
+                if (log.isDebugEnabled()) {
+                    log.debug("[{}] Looking for non existent file {}. Current known files {}",
+                            indexPath, name, Arrays.toString(remote.listAll()));
+                }
+                return remote.openInput(name, context);
             }
 
             CORFileReference toPut = new CORFileReference(name);
@@ -817,7 +829,8 @@ public class IndexCopier implements CopyOnReadStatsMBean, Closeable {
                     local.copy(remote, name, name, IOContext.DEFAULT);
 
                     doneCopy(file, start);
-                    PERF_LOGGER.end(perfStart, 0, "[COW][{}] Copied to remote {} ",indexPathForLogging, name);
+                    PERF_LOGGER.end(perfStart, 0, "[COW][{}] Copied to remote {} -- size: {}",
+                        indexPathForLogging, name, IOUtils.humanReadableByteCount(fileSize));
                     return null;
                 }
 

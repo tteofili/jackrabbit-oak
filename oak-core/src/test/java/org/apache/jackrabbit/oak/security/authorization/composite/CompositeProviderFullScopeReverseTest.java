@@ -16,9 +16,14 @@
  */
 package org.apache.jackrabbit.oak.security.authorization.composite;
 
-import org.apache.jackrabbit.oak.AbstractSecurityTest;
+/**
+ * Same as {@link CompositeProviderFullScopeTest}
+ * with reverse order of the aggregated providers.
+ */
+public class CompositeProviderFullScopeReverseTest extends CompositeProviderFullScopeTest {
 
-public class CompositePermissionProviderTest extends AbstractSecurityTest {
-
-    // TODO
+    @Override
+    boolean reverseOrder() {
+        return true;
+    }
 }
