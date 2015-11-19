@@ -32,7 +32,7 @@ import javax.jcr.query.RowIterator;
 import org.apache.jackrabbit.core.query.AbstractQueryTest;
 
 /**
- * Test for faceting capabilities from the JCR spec point of view
+ * Test for faceting capabilities via JCR API
  */
 public class FacetTest extends AbstractQueryTest {
 
@@ -100,6 +100,16 @@ public class FacetTest extends AbstractQueryTest {
         QueryResult result = q.execute();
         String facetResult = "text:[hallo (2), hello (1), oh (1)]";
         assertEquals(facetResult + ", " + facetResult + ", " + facetResult, getResult(result, "facet(text)"));
+//        RowIterator rows = result.getRows();
+//        while (rows.hasNext()) {
+//            Row row = rows.nextRow();
+//            Value string = row.getValue("facet(text)");
+//            assertNotNull(string);
+//            Value value = row.getValue("facet:label(text)");
+//            assertNotNull(value);
+//            Value count = row.getValue("facet:count(text)");
+//            assertNotNull(count);
+//        }
     }
 
     public void testFacetRetrieval2() throws Exception {

@@ -376,7 +376,7 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
                         if (plan.getFilter().getQueryStatement() != null && plan.getFilter().getQueryStatement().contains("facet(")) {
                             Matcher matcher = FACET_REGEX.matcher(plan.getFilter().getQueryStatement());
                             if (matcher.find()) {
-                                facetField = FieldNames.createFacetFieldName(matcher.group(1));
+                                facetField = matcher.group(1);
                             }
                         }
 
@@ -403,7 +403,7 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
 
                             Facets facets = null;
                             if (facetField != null) {
-                                DefaultSortedSetDocValuesReaderState state = new DefaultSortedSetDocValuesReaderState(searcher.getIndexReader(), facetField);
+                                DefaultSortedSetDocValuesReaderState state = new DefaultSortedSetDocValuesReaderState(searcher.getIndexReader());
                                 FacetsCollector facetsCollector = new FacetsCollector();
                                 FacetsCollector.search(searcher, query, 10, facetsCollector);
                                 facets = new SortedSetDocValuesFacetCounts(state, facetsCollector);

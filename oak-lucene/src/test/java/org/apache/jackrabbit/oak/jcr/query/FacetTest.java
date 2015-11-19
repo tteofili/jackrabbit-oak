@@ -31,7 +31,7 @@ import javax.jcr.query.Row;
 import javax.jcr.query.RowIterator;
 
 /**
- * Test for faceting capabilities from the JCR spec point of view
+ * Test for faceting capabilities via JCR API
  */
 public class FacetTest extends AbstractQueryTest {
 

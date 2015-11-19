@@ -69,6 +69,7 @@ import org.apache.lucene.document.LongField;
 import org.apache.lucene.document.NumericDocValuesField;
 import org.apache.lucene.document.SortedDocValuesField;
 import org.apache.lucene.document.StringField;
+import org.apache.lucene.facet.FacetsConfig;
 import org.apache.lucene.facet.sortedset.SortedSetDocValuesFacetField;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.search.PrefixQuery;
@@ -124,6 +125,8 @@ public class LuceneIndexEditor implements IndexEditor, Aggregate.AggregateRoot {
     private final MatcherState matcherState;
 
     private final PathFilter.Result pathFilterResult;
+
+    private final FacetsConfig facetsConfig = new FacetsConfig();
 
     LuceneIndexEditor(NodeState root, NodeBuilder definition,
                         IndexUpdateCallback updateCallback,
@@ -312,10 +315,12 @@ public class LuceneIndexEditor implements IndexEditor, Aggregate.AggregateRoot {
         return false;
     }
 
-    private Document makeDocument(String path, NodeState state, boolean isUpdate) {
+    private Document makeDocument(String path, NodeState state, boolean isUpdate) throws IOException {
         if (!isIndexable()) {
             return null;
         }
+
+        boolean facet = false;
 
         List<Field> fields = new ArrayList<Field>();
         boolean dirty = false;
@@ -338,6 +343,7 @@ public class LuceneIndexEditor implements IndexEditor, Aggregate.AggregateRoot {
 
             if (pd.facet) {
                 dirty |= addFacetFields(fields, property, pname, pd);
+                facet = true;
             }
 
             dirty |= indexProperty(path, fields, state, property, pname, pd);
@@ -399,6 +405,10 @@ public class LuceneIndexEditor implements IndexEditor, Aggregate.AggregateRoot {
             document.add(suggestField);
         }
 
+        if (facet) {
+            document = facetsConfig.build(document);
+        }
+
         //TODO Boost at document level
 
         return document;
@@ -426,7 +436,7 @@ public class LuceneIndexEditor implements IndexEditor, Aggregate.AggregateRoot {
             tag = idxDefinedTag;
         }
 
-        String name = FieldNames.createFacetFieldName(pname);
+        String name = pname;
         boolean fieldAdded = false;
         Field f = null;
         try {
