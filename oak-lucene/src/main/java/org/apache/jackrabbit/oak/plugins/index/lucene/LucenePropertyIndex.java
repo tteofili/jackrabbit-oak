@@ -27,8 +27,10 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Deque;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
@@ -76,8 +78,10 @@ import org.apache.lucene.document.Document;
 import org.apache.lucene.facet.FacetResult;
 import org.apache.lucene.facet.Facets;
 import org.apache.lucene.facet.FacetsCollector;
+import org.apache.lucene.facet.LabelAndValue;
 import org.apache.lucene.facet.sortedset.DefaultSortedSetDocValuesReaderState;
 import org.apache.lucene.facet.sortedset.SortedSetDocValuesFacetCounts;
+import org.apache.lucene.facet.sortedset.SortedSetDocValuesReaderState;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.IndexReader;
@@ -85,6 +89,8 @@ import org.apache.lucene.index.IndexableField;
 import org.apache.lucene.index.MultiFields;
 import org.apache.lucene.index.StoredFieldVisitor;
 import org.apache.lucene.index.Term;
+import org.apache.lucene.index.Terms;
+import org.apache.lucene.index.TermsEnum;
 import org.apache.lucene.queries.CustomScoreQuery;
 import org.apache.lucene.queryparser.classic.ParseException;
 import org.apache.lucene.queryparser.classic.QueryParser;
@@ -114,6 +120,7 @@ import org.apache.lucene.search.highlight.SimpleHTMLFormatter;
 import org.apache.lucene.search.highlight.TextFragment;
 import org.apache.lucene.search.spell.SuggestWord;
 import org.apache.lucene.search.suggest.Lookup;
+import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.Version;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -403,10 +410,14 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
 
                             Facets facets = null;
                             if (facetField != null) {
-                                DefaultSortedSetDocValuesReaderState state = new DefaultSortedSetDocValuesReaderState(searcher.getIndexReader());
                                 FacetsCollector facetsCollector = new FacetsCollector();
-                                FacetsCollector.search(searcher, query, 10, facetsCollector);
-                                facets = new SortedSetDocValuesFacetCounts(state, facetsCollector);
+                                DefaultSortedSetDocValuesReaderState state = new DefaultSortedSetDocValuesReaderState(searcher.getIndexReader());
+                                if (lastDoc != null) {
+                                    facetsCollector.searchAfter(searcher, lastDoc, query, 10, facetsCollector);
+                                } else {
+                                    FacetsCollector.search(searcher, query, 10, facetsCollector);
+                                }
+                                facets = new FilteredSortedSetDocValuesFacetCounts(state, facetsCollector, filter, docs);
                             }
 
                             boolean addExcerpt = filter.getQueryStatement() != null && filter.getQueryStatement().contains(QueryImpl.REP_EXCERPT);
@@ -1519,4 +1530,110 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
         }
     }
 
+    private class FilterFacetsCollector extends FacetsCollector {
+
+        private final Filter filter;
+        private final IndexReader reader;
+
+        public FilterFacetsCollector(Filter filter, IndexReader reader) {
+            this.filter = filter;
+            this.reader = reader;
+        }
+
+        @Override
+        protected Docs createDocs(int maxDoc) {
+            Docs docs = super.createDocs(maxDoc);
+            try {
+                Document document = reader.document(maxDoc);
+                if (filter.isAccessible(document.getField(PATH).stringValue())) {
+                    return docs;
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+            return null;
+        }
+
+        @Override
+        public List<MatchingDocs> getMatchingDocs() {
+            List<MatchingDocs> matchingDocs = super.getMatchingDocs();
+            return matchingDocs;
+        }
+    }
+
+    private class FilteredSortedSetDocValuesFacetCounts extends SortedSetDocValuesFacetCounts {
+        private final TopDocs docs;
+        private final Filter filter;
+        private final IndexReader reader;
+        private final SortedSetDocValuesReaderState state;
+
+        public FilteredSortedSetDocValuesFacetCounts(DefaultSortedSetDocValuesReaderState state, FacetsCollector facetsCollector, Filter filter, TopDocs docs) throws IOException {
+            super(state, facetsCollector);
+            this.reader = state.origReader;
+            this.filter = filter;
+            this.docs = docs;
+            this.state = state;
+        }
+
+        @Override
+        public FacetResult getTopChildren(int topN, String dim, String... path) throws IOException {
+            FacetResult topChildren = super.getTopChildren(topN, dim, path);
+
+            LabelAndValue[] labelAndValues = topChildren.labelValues;
+
+            for (ScoreDoc scoreDoc : docs.scoreDocs) {
+                labelAndValues = filterFacet(scoreDoc.doc, dim, labelAndValues);
+            }
+
+            int childCount = labelAndValues.length;
+            Number value = 0;
+            for (LabelAndValue lv : labelAndValues) {
+                value = value.longValue() + lv.value.longValue();
+            }
+
+            return new FacetResult(dim, path, value, labelAndValues, childCount);
+        }
+
+        private LabelAndValue[] filterFacet(int docId, String dimension, LabelAndValue[] labelAndValues) throws IOException {
+            boolean filterd = false;
+            Map<String, Long> newValues = new HashMap<String, Long>();
+
+            Document document = reader.document(docId);
+            Terms terms = MultiFields.getTerms(reader, dimension);
+
+            // filter using indexed terms (avoiding requiring stored values)
+            if (terms != null && !filter.isAccessible(document.getField(PATH).stringValue() + "/" + dimension)) {
+                filterd = true;
+                TermsEnum iterator = terms.iterator(null);
+                BytesRef next;
+                while ((next = iterator.next()) != null) {
+                    for (LabelAndValue lv : labelAndValues) {
+                        long existingCount = lv.value.longValue();
+                        if (next.utf8ToString().equals(lv.label)) {
+                            if (existingCount > 1) {
+                                newValues.put(lv.label, existingCount - 1);
+                            } else {
+                                if (newValues.containsKey(lv.label)) {
+                                    newValues.remove(lv.label);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            LabelAndValue[] toReturn;
+            if (filterd) {
+                toReturn = new LabelAndValue[newValues.size()];
+                int i = 0;
+                for (Map.Entry<String, Long> entry : newValues.entrySet()) {
+                    toReturn[i] = new LabelAndValue(entry.getKey(), entry.getValue());
+                    i++;
+                }
+            } else {
+                toReturn = labelAndValues;
+            }
+
+            return toReturn;
+        }
+    }
 }

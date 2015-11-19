@@ -17,7 +17,6 @@
 package org.apache.jackrabbit.oak.plugins.index.solr.query;
 
 import javax.annotation.CheckForNull;
-import javax.jcr.Session;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -52,7 +51,6 @@ import org.apache.jackrabbit.oak.spi.query.PropertyValues;
 import org.apache.jackrabbit.oak.spi.query.QueryConstants;
 import org.apache.jackrabbit.oak.spi.query.QueryIndex;
 import org.apache.jackrabbit.oak.spi.query.QueryIndex.FulltextQueryIndex;
-import org.apache.jackrabbit.oak.spi.security.authorization.permission.PermissionProvider;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.apache.solr.client.solrj.SolrQuery;
 import org.apache.solr.client.solrj.SolrServer;
@@ -361,20 +359,12 @@ public class SolrQueryIndex implements FulltextQueryIndex, QueryIndex.AdvanceFul
                     if (!facetFields.isEmpty()) {
                         for (SolrDocument doc : docs) {
                             String path = String.valueOf(doc.getFieldValue(configuration.getPathField()));
-                            // if path doesn't exist in the node state, filter the facets
-                            PermissionProvider permissionProvider = filter.getSelector().getQuery().getExecutionContext().getPermissionProvider();
+                            // if facet path doesn't exist in the node state, filter the facets
                             for (FacetField ff : facetFields) {
-                                if (permissionProvider != null) {
-                                    if (!permissionProvider.isGranted(path+"/"+ff.getName(), Session.ACTION_READ)) {
-                                        filterFacet(doc, ff);
-                                    }
-                                } else { // fallback in case of missing PermissionProvider
-                                    if (!exists(path, root)) { // this will only work in case the NodeState is a SecureNodeState
-                                        filterFacet(doc, ff);
-                                    }
+                                if (!filter.isAccessible(path + "/" + ff.getName())) {
+                                    filterFacet(doc, ff);
                                 }
                             }
-
                         }
                     }
 
