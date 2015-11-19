@@ -356,7 +356,7 @@ public class SolrQueryIndex implements FulltextQueryIndex, QueryIndex.AdvanceFul
                     }
 
                     // filter facets on doc paths
-                    if (!facetFields.isEmpty()) {
+                    if (!facetFields.isEmpty() && docs != null) {
                         for (SolrDocument doc : docs) {
                             String path = String.valueOf(doc.getFieldValue(configuration.getPathField()));
                             // if facet path doesn't exist in the node state, filter the facets
@@ -402,8 +402,8 @@ public class SolrQueryIndex implements FulltextQueryIndex, QueryIndex.AdvanceFul
     }
 
     private void filterFacet(SolrDocument doc, FacetField facetField) {
-        // TODO : facet filtering by value requires that the facet values match the stored values
-        // TODO : a *_facet field must exist, storing docValues instead of values and that should be used for faceting and at filtering time
+        // facet filtering by value requires that the facet values match the stored values
+        // a *_facet field must exist, storing docValues to be used for faceting and at filtering time
         if (doc.getFieldNames().contains(facetField.getName())) {
             // decrease facet value
             Collection<Object> docFieldValues = doc.getFieldValues(facetField.getName());
@@ -660,13 +660,13 @@ public class SolrQueryIndex implements FulltextQueryIndex, QueryIndex.AdvanceFul
                             String facetFieldName = m.group(1);
                             FacetField facetField = null;
                             for (FacetField ff : currentRow.facetFields) {
-                                if (ff.getName().equals(facetFieldName)) {
+                                if (ff.getName().equals(facetFieldName + "_facet")) {
                                     facetField = ff;
                                     break;
                                 }
                             }
                             if (facetField != null) {
-                                return PropertyValues.newString(facetField.toString());
+                                return PropertyValues.newString(facetFieldName + ":" + facetField.getValues().toString());
                             } else {
                                 return null;
                             }

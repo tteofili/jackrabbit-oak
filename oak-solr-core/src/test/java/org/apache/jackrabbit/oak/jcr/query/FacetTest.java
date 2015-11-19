@@ -18,18 +18,18 @@
  */
 package org.apache.jackrabbit.oak.jcr.query;
 
+import org.apache.jackrabbit.core.query.AbstractQueryTest;
+import org.apache.jackrabbit.oak.api.Type;
+
 import javax.jcr.Node;
 import javax.jcr.RepositoryException;
 import javax.jcr.Session;
-import javax.jcr.SimpleCredentials;
 import javax.jcr.Value;
 import javax.jcr.query.Query;
 import javax.jcr.query.QueryManager;
 import javax.jcr.query.QueryResult;
 import javax.jcr.query.Row;
 import javax.jcr.query.RowIterator;
-
-import org.apache.jackrabbit.core.query.AbstractQueryTest;
 
 /**
  * Test for faceting capabilities via JCR API
@@ -51,11 +51,11 @@ public class FacetTest extends AbstractQueryTest {
                 "where contains([text], 'hello OR hallo') order by [jcr:path]";
         Query q = qm.createQuery(sql2, Query.JCR_SQL2);
         QueryResult result = q.execute();
-        String facetResult = "text:[hallo (2), hello (1), oh (1)]";
+        String facetResult = "text:[hallo (1), hello (1), oh hallo (1)]";
         assertEquals(facetResult + ", " + facetResult + ", " + facetResult, getResult(result, "facet(text)"));
     }
 
-    public void testFacetRetrieval4() throws Exception {
+    public void testFacetRetrievalMV() throws Exception {
         Session session = superuser;
         QueryManager qm = session.getWorkspace().getQueryManager();
         Node n1 = testRootNode.addNode("node1");
@@ -98,18 +98,8 @@ public class FacetTest extends AbstractQueryTest {
                 "where contains([text], 'hello OR hallo') order by [jcr:path]";
         Query q = qm.createQuery(sql2, Query.JCR_SQL2);
         QueryResult result = q.execute();
-        String facetResult = "text:[hallo (2), hello (1), oh (1)]";
+        String facetResult = "text:[hallo (1), hello (1), oh hallo (1)]";
         assertEquals(facetResult + ", " + facetResult + ", " + facetResult, getResult(result, "facet(text)"));
-//        RowIterator rows = result.getRows();
-//        while (rows.hasNext()) {
-//            Row row = rows.nextRow();
-//            Value string = row.getValue("facet(text)");
-//            assertNotNull(string);
-//            Value value = row.getValue("facet:label(text)");
-//            assertNotNull(value);
-//            Value count = row.getValue("facet:count(text)");
-//            assertNotNull(count);
-//        }
     }
 
     public void testFacetRetrieval2() throws Exception {
@@ -128,7 +118,7 @@ public class FacetTest extends AbstractQueryTest {
                 "where contains([" + pn + "], 'hallo') order by [jcr:path]";
         Query q = qm.createQuery(sql2, Query.JCR_SQL2);
         QueryResult result = q.execute();
-        String facetResult = pn + ":[hallo (2), oh (1)]";
+        String facetResult = pn + ":[hallo (1), oh hallo (1)]";
         assertEquals(facetResult + ", " + facetResult, getResult(result, "facet(" + pn + ")"));
     }
 
@@ -152,7 +142,7 @@ public class FacetTest extends AbstractQueryTest {
                 "where contains([" + pn + "], 'hallo') order by [jcr:path]";
         Query q = qm.createQuery(sql2, Query.JCR_SQL2);
         QueryResult result = q.execute();
-        String facetResult = pn + ":[hallo (2), oh (1)], " + pn2 + ":[a (1), b (1)], " + pn + ":[hallo (2), oh (1)], " + pn2 + ":[a (1), b (1)]";
+        String facetResult = pn + ":[hallo (1), oh hallo (1)], " + pn2 + ":[a (1), b (1)], " + pn + ":[hallo (1), oh hallo (1)], " + pn2 + ":[a (1), b (1)]";
         assertEquals(facetResult, getResult(result, "facet(" + pn + ")", "facet(" + pn2 + ")"));
     }
 

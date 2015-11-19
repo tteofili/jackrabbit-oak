@@ -415,14 +415,6 @@ public class LuceneIndexEditor implements IndexEditor, Aggregate.AggregateRoot {
     }
 
     private boolean addFacetFields(List<Field> fields, PropertyState property, String pname, PropertyDefinition pd) {
-        if (property.getType().isArray()) {
-            log.warn(
-                    "[{}] Ignoring ordered property {} of type {} for path {} as multivalued facets are not supported",
-                    getIndexName(), pname,
-                    Type.fromTag(property.getType().tag(), true), getPath());
-            return false;
-        }
-
         int tag = property.getType().tag();
         int idxDefinedTag = pd.getType();
         // Try converting type to the defined type in the index definition
@@ -436,27 +428,34 @@ public class LuceneIndexEditor implements IndexEditor, Aggregate.AggregateRoot {
             tag = idxDefinedTag;
         }
 
-        String name = pname;
         boolean fieldAdded = false;
-        Field f = null;
         try {
             if (tag == Type.LONG.tag()) {
-                f = new SortedSetDocValuesFacetField(name, property.getValue(Type.LONG).toString());
+                fields.add(new SortedSetDocValuesFacetField(pname, property.getValue(Type.LONG).toString()));
+                fieldAdded = true;
             } else if (tag == Type.DATE.tag()) {
                 String date = property.getValue(Type.DATE);
-                f = new SortedSetDocValuesFacetField(name, date);
+                fields.add(new SortedSetDocValuesFacetField(pname, date));
+                fieldAdded = true;
             } else if (tag == Type.DOUBLE.tag()) {
-                f = new DoubleDocValuesField(name, property.getValue(Type.DOUBLE));
+                fields.add(new DoubleDocValuesField(pname, property.getValue(Type.DOUBLE)));
+                fieldAdded = true;
             } else if (tag == Type.BOOLEAN.tag()) {
-                f = new SortedSetDocValuesFacetField(name, property.getValue(Type.BOOLEAN).toString());
+                fields.add(new SortedSetDocValuesFacetField(pname, property.getValue(Type.BOOLEAN).toString()));
+                fieldAdded = true;
+            } else if (tag == Type.STRINGS.tag()) {
+                facetsConfig.setMultiValued(pname, true);
+                Iterable<String> values = property.getValue(Type.STRINGS);
+                for (String value : values) {
+                    fields.add(new SortedSetDocValuesFacetField(pname, value));
+                }
+                fieldAdded = true;
             } else if (tag == Type.STRING.tag()) {
-                f = new SortedSetDocValuesFacetField(name, property.getValue(Type.STRING));
-            }
-
-            if (f != null) {
-                fields.add(f);
+                String value = property.getValue(Type.STRING);
+                fields.add(new SortedSetDocValuesFacetField(pname, value));
                 fieldAdded = true;
             }
+
         } catch (Exception e) {
             log.warn(
                     "[{}] Ignoring facet property. Could not convert property {} of type {} to type {} for path {}",

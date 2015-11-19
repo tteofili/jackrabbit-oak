@@ -24,6 +24,7 @@ import javax.annotation.Nullable;
 import javax.jcr.PropertyType;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Deque;
@@ -1477,7 +1478,7 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
                                 if (facets != null) {
                                     FacetResult topChildren = facets.getTopChildren(10, facetFieldName);
                                     if (topChildren != null) {
-                                        return PropertyValues.newString(topChildren.toString());
+                                        return PropertyValues.newString(facetFieldName + ":" + Arrays.toString(topChildren.labelValues));
                                     } else {
                                         return null;
                                     }
@@ -1527,37 +1528,6 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
 
         public String getPath() {
             return path;
-        }
-    }
-
-    private class FilterFacetsCollector extends FacetsCollector {
-
-        private final Filter filter;
-        private final IndexReader reader;
-
-        public FilterFacetsCollector(Filter filter, IndexReader reader) {
-            this.filter = filter;
-            this.reader = reader;
-        }
-
-        @Override
-        protected Docs createDocs(int maxDoc) {
-            Docs docs = super.createDocs(maxDoc);
-            try {
-                Document document = reader.document(maxDoc);
-                if (filter.isAccessible(document.getField(PATH).stringValue())) {
-                    return docs;
-                }
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-            return null;
-        }
-
-        @Override
-        public List<MatchingDocs> getMatchingDocs() {
-            List<MatchingDocs> matchingDocs = super.getMatchingDocs();
-            return matchingDocs;
         }
     }
 

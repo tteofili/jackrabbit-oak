@@ -76,11 +76,12 @@ class FilterQueryParser {
             int start = 0;
             while (matcher.find(start)) {
                 String facetField = matcher.group(1);
-                solrQuery.addFacetField(facetField);
+                solrQuery.addFacetField(facetField + "_facet");
                 start = matcher.end();
             }
             if (start > 0) {
                 solrQuery.setFacetMinCount(1);
+                solrQuery.setFacet(true);
             }
         }
 
