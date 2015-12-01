@@ -79,6 +79,7 @@ import org.apache.lucene.document.Document;
 import org.apache.lucene.facet.FacetResult;
 import org.apache.lucene.facet.Facets;
 import org.apache.lucene.facet.FacetsCollector;
+import org.apache.lucene.facet.FacetsConfig;
 import org.apache.lucene.facet.LabelAndValue;
 import org.apache.lucene.facet.sortedset.DefaultSortedSetDocValuesReaderState;
 import org.apache.lucene.facet.sortedset.SortedSetDocValuesFacetCounts;
@@ -88,10 +89,9 @@ import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.IndexableField;
 import org.apache.lucene.index.MultiFields;
+import org.apache.lucene.index.SortedSetDocValues;
 import org.apache.lucene.index.StoredFieldVisitor;
 import org.apache.lucene.index.Term;
-import org.apache.lucene.index.Terms;
-import org.apache.lucene.index.TermsEnum;
 import org.apache.lucene.queries.CustomScoreQuery;
 import org.apache.lucene.queryparser.classic.ParseException;
 import org.apache.lucene.queryparser.classic.QueryParser;
@@ -1569,25 +1569,26 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
             Map<String, Long> newValues = new HashMap<String, Long>();
 
             Document document = reader.document(docId);
-            Terms terms = MultiFields.getTerms(reader, dimension);
+            SortedSetDocValues docValues = state.getDocValues();
+            docValues.setDocument(docId);
 
-            // filter using indexed terms (avoiding requiring stored values)
-            if (terms != null && !filter.isAccessible(document.getField(PATH).stringValue() + "/" + dimension)) {
+            // filter using doc values (avoiding requiring stored values)
+            if (!filter.isAccessible(document.getField(PATH).stringValue() + "/" + dimension)) {
                 filterd = true;
-                TermsEnum iterator = terms.iterator(null);
-                BytesRef next;
-                while ((next = iterator.next()) != null) {
-                    for (LabelAndValue lv : labelAndValues) {
-                        long existingCount = lv.value.longValue();
-                        if (next.utf8ToString().equals(lv.label)) {
-                            if (existingCount > 1) {
-                                newValues.put(lv.label, existingCount - 1);
-                            } else {
-                                if (newValues.containsKey(lv.label)) {
-                                    newValues.remove(lv.label);
-                                }
+                for (LabelAndValue lv : labelAndValues) {
+                    long existingCount = lv.value.longValue();
+
+                    BytesRef key = new BytesRef(FacetsConfig.pathToString(dimension, new String[]{lv.label}));
+                    long l = docValues.lookupTerm(key);
+                    if (l >= 0) {
+                        if (existingCount > 0) {
+                            newValues.put(lv.label, existingCount - 1);
+                        } else {
+                            if (newValues.containsKey(lv.label)) {
+                                newValues.remove(lv.label);
                             }
                         }
+
                     }
                 }
             }
