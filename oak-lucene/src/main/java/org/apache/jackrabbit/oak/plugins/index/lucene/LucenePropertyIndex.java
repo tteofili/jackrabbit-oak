@@ -412,13 +412,20 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
                             Facets facets = null;
                             if (facetField != null) {
                                 FacetsCollector facetsCollector = new FacetsCollector();
-                                DefaultSortedSetDocValuesReaderState state = new DefaultSortedSetDocValuesReaderState(searcher.getIndexReader());
-                                if (lastDoc != null) {
-                                    facetsCollector.searchAfter(searcher, lastDoc, query, 10, facetsCollector);
-                                } else {
-                                    FacetsCollector.search(searcher, query, 10, facetsCollector);
+                                try {
+                                    long f = System.currentTimeMillis();
+                                    DefaultSortedSetDocValuesReaderState state = new DefaultSortedSetDocValuesReaderState(searcher.getIndexReader());
+                                    if (lastDoc != null) {
+                                        facetsCollector.searchAfter(searcher, lastDoc, query, 10, facetsCollector);
+                                    } else {
+                                        FacetsCollector.search(searcher, query, 10, facetsCollector);
+                                    }
+                                    facets = new FilteredSortedSetDocValuesFacetCounts(state, facetsCollector, filter, docs);
+//                                    facets = new SortedSetDocValuesFacetCounts(state, facetsCollector);
+                                    LOG.debug("facets retrieved in {}ms", (System.currentTimeMillis()-f));
+                                } catch (IllegalArgumentException iae) {
+                                    LOG.warn("facets not yet indexed");
                                 }
-                                facets = new FilteredSortedSetDocValuesFacetCounts(state, facetsCollector, filter, docs);
                             }
 
                             boolean addExcerpt = filter.getQueryStatement() != null && filter.getQueryStatement().contains(QueryImpl.REP_EXCERPT);
@@ -1588,23 +1595,22 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
                                 newValues.remove(lv.label);
                             }
                         }
-
                     }
                 }
             }
-            LabelAndValue[] toReturn;
+            LabelAndValue[] filteredLVs;
             if (filterd) {
-                toReturn = new LabelAndValue[newValues.size()];
+                filteredLVs = new LabelAndValue[newValues.size()];
                 int i = 0;
                 for (Map.Entry<String, Long> entry : newValues.entrySet()) {
-                    toReturn[i] = new LabelAndValue(entry.getKey(), entry.getValue());
+                    filteredLVs[i] = new LabelAndValue(entry.getKey(), entry.getValue());
                     i++;
                 }
             } else {
-                toReturn = labelAndValues;
+                filteredLVs = labelAndValues;
             }
 
-            return toReturn;
+            return filteredLVs;
         }
     }
 }
