@@ -17,10 +17,7 @@
 package org.apache.jackrabbit.oak.plugins.index.solr.query;
 
 import java.util.Collection;
-import java.util.LinkedList;
 import java.util.List;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import org.apache.jackrabbit.oak.plugins.index.solr.configuration.OakSolrConfiguration;
 import org.apache.jackrabbit.oak.query.QueryImpl;
@@ -32,12 +29,10 @@ import org.apache.jackrabbit.oak.query.fulltext.FullTextTerm;
 import org.apache.jackrabbit.oak.query.fulltext.FullTextVisitor;
 import org.apache.jackrabbit.oak.spi.query.Filter;
 import org.apache.jackrabbit.oak.spi.query.QueryIndex;
-import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.apache.solr.client.solrj.SolrQuery;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import static com.google.common.base.Preconditions.checkNotNull;
 import static org.apache.jackrabbit.oak.commons.PathUtils.getName;
 import static org.apache.jackrabbit.oak.plugins.index.solr.util.SolrUtils.getSortingField;
 import static org.apache.jackrabbit.oak.plugins.index.solr.util.SolrUtils.partialEscape;
@@ -49,7 +44,7 @@ import static org.apache.jackrabbit.oak.plugins.index.solr.util.SolrUtils.partia
 class FilterQueryParser {
 
     private static final Logger log = LoggerFactory.getLogger(FilterQueryParser.class);
-    static final Pattern FACET_REGEX = Pattern.compile("facet\\((\\w+(\\:\\w+)?)\\)");
+//    static final Pattern FACET_REGEX = Pattern.compile("facet\\((\\w+(\\:\\w+)?)\\)");
 
     static SolrQuery getQuery(Filter filter, List<QueryIndex.OrderEntry> sortOrder, OakSolrConfiguration configuration) {
 
@@ -72,12 +67,13 @@ class FilterQueryParser {
         // facet enable
         String queryStatement = filter.getQueryStatement();
         if (queryStatement != null) {
-            Matcher matcher = FACET_REGEX.matcher(queryStatement);
+//            Matcher matcher = FACET_REGEX.matcher(queryStatement);
             int start = 0;
-            while (matcher.find(start)) {
-                String facetField = matcher.group(1);
+            int idx;
+            while ((idx = queryStatement.indexOf("facet(", start)) >= 0) {
+                String facetField = queryStatement.substring(idx + "facet(".length(), queryStatement.indexOf(')', start));
                 solrQuery.addFacetField(facetField + "_facet");
-                start = matcher.end();
+                start = idx + "facet(".length() + facetField.length() + 1;
             }
             if (start > 0) {
                 solrQuery.setFacetMinCount(1);

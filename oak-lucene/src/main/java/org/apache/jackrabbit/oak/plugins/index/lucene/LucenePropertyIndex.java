@@ -26,7 +26,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -38,7 +37,6 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import com.google.common.collect.AbstractIterator;
-import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Queues;
 import com.google.common.collect.Sets;
@@ -451,54 +449,54 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
                             }
                         }
                     } else if (luceneRequestFacade.getLuceneRequest() instanceof SpellcheckHelper.SpellcheckQuery) {
+                        String aclCheckField = indexNode.getDefinition().isFullTextEnabled() ? FieldNames.FULLTEXT : FieldNames.SPELLCHECK;
                         SpellcheckHelper.SpellcheckQuery spellcheckQuery = (SpellcheckHelper.SpellcheckQuery) luceneRequestFacade.getLuceneRequest();
                         SuggestWord[] suggestWords = SpellcheckHelper.getSpellcheck(spellcheckQuery);
 
                         // ACL filter spellchecks
-                        Collection<String> suggestedWords = new ArrayList<String>(suggestWords.length);
-                        QueryParser qp = new QueryParser(Version.LUCENE_47, FieldNames.FULLTEXT, indexNode.getDefinition().getAnalyzer());
+                        QueryParser qp = new QueryParser(Version.LUCENE_47, aclCheckField, indexNode.getDefinition().getAnalyzer());
                         for (SuggestWord suggestion : suggestWords) {
-                            Query query = qp.createPhraseQuery(FieldNames.FULLTEXT, suggestion.string);
+                            Query query = qp.createPhraseQuery(aclCheckField, suggestion.string);
                             TopDocs topDocs = searcher.search(query, 100);
                             if (topDocs.totalHits > 0) {
                                 for (ScoreDoc doc : topDocs.scoreDocs) {
                                     Document retrievedDoc = searcher.doc(doc.doc);
                                     if (filter.isAccessible(retrievedDoc.get(FieldNames.PATH))) {
-                                        suggestedWords.add(suggestion.string);
+                                        queue.add(new LuceneResultRow(suggestion.string));
                                         break;
                                     }
                                 }
                             }
                         }
 
-                        queue.add(new LuceneResultRow(suggestedWords));
                         noDocs = true;
                     } else if (luceneRequestFacade.getLuceneRequest() instanceof SuggestHelper.SuggestQuery) {
                         SuggestHelper.SuggestQuery suggestQuery = (SuggestHelper.SuggestQuery) luceneRequestFacade.getLuceneRequest();
 
-                        List<Lookup.LookupResult> lookupResults = SuggestHelper.getSuggestions(suggestQuery);
+                        List<Lookup.LookupResult> lookupResults = SuggestHelper.getSuggestions(indexNode.getLookup(), suggestQuery);
+
+                        QueryParser qp =  new QueryParser(Version.LUCENE_47, FieldNames.SUGGEST,
+                                indexNode.getDefinition().isSuggestAnalyzed() ? indexNode.getDefinition().getAnalyzer() :
+                                SuggestHelper.getAnalyzer());
 
                         // ACL filter suggestions
-                        Collection<String> suggestedWords = new ArrayList<String>(lookupResults.size());
-                        QueryParser qp = new QueryParser(Version.LUCENE_47, FieldNames.SUGGEST, indexNode.getDefinition().getAnalyzer());
                         for (Lookup.LookupResult suggestion : lookupResults) {
-                            Query query = qp.createPhraseQuery(FieldNames.SUGGEST, suggestion.key.toString());
+                            Query query = qp.parse("\"" + suggestion.key.toString() + "\"");
                             TopDocs topDocs = searcher.search(query, 100);
                             if (topDocs.totalHits > 0) {
                                 for (ScoreDoc doc : topDocs.scoreDocs) {
                                     Document retrievedDoc = searcher.doc(doc.doc);
                                     if (filter.isAccessible(retrievedDoc.get(FieldNames.PATH))) {
-                                        suggestedWords.add("{term=" + suggestion.key + ",weight=" + suggestion.value + "}");
+                                        queue.add(new LuceneResultRow(suggestion.key.toString(), suggestion.value));
                                         break;
                                     }
                                 }
                             }
                         }
 
-                        queue.add(new LuceneResultRow(suggestedWords));
                         noDocs = true;
                     }
-                } catch (IOException e) {
+                } catch (Exception e) {
                     LOG.warn("query via {} failed.", LucenePropertyIndex.this, e);
                 } finally {
                     indexNode.release();
@@ -1367,7 +1365,7 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
     static class LuceneResultRow {
         final String path;
         final double score;
-        final Iterable<String> suggestWords;
+        final String suggestion;
         final boolean isVirutal;
         final String excerpt;
         final Facets facets;
@@ -1378,16 +1376,20 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
             this.isVirutal = false;
             this.path = path;
             this.score = score;
-            this.suggestWords = Collections.emptySet();
+            this.suggestion = null;
         }
 
-        LuceneResultRow(Iterable<String> suggestWords) {
+        LuceneResultRow(String suggestion, long weight) {
             this.isVirutal = true;
             this.path = "/";
-            this.score = 1.0d;
-            this.suggestWords = suggestWords;
+            this.score = weight;
+            this.suggestion = suggestion;
             this.excerpt = null;
             this.facets = null;
+        }
+
+        LuceneResultRow(String suggestion) {
+            this(suggestion, 1);
         }
 
         @Override
@@ -1471,7 +1473,7 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
                         return PropertyValues.newDouble(currentRow.score);
                     }
                     if (QueryImpl.REP_SPELLCHECK.equals(columnName) || QueryImpl.REP_SUGGEST.equals(columnName)) {
-                        return PropertyValues.newString(Iterables.toString(currentRow.suggestWords));
+                        return PropertyValues.newString(currentRow.suggestion);
                     }
                     if (QueryImpl.REP_EXCERPT.equals(columnName)) {
                         return PropertyValues.newString(currentRow.excerpt);

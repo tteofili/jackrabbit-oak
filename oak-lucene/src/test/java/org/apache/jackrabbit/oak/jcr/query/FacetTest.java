@@ -122,7 +122,7 @@ public class FacetTest extends AbstractQueryTest {
         assertEquals(facetResult + ", " + facetResult, getResult(result, "facet(" + pn + ")"));
     }
 
-    public void testFacetRetrieval3() throws Exception {
+    public void testMultipleFacetsRetrieval() throws Exception {
         Session session = superuser;
         QueryManager qm = session.getWorkspace().getQueryManager();
         Node n1 = testRootNode.addNode("node1");
