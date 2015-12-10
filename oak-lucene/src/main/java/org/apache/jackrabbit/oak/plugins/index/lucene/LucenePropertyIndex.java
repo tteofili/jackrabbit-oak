@@ -29,12 +29,11 @@ import java.util.Collection;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import com.google.common.collect.AbstractIterator;
 import com.google.common.collect.Lists;
@@ -79,6 +78,7 @@ import org.apache.lucene.facet.Facets;
 import org.apache.lucene.facet.FacetsCollector;
 import org.apache.lucene.facet.FacetsConfig;
 import org.apache.lucene.facet.LabelAndValue;
+import org.apache.lucene.facet.MultiFacets;
 import org.apache.lucene.facet.sortedset.DefaultSortedSetDocValuesReaderState;
 import org.apache.lucene.facet.sortedset.SortedSetDocValuesFacetCounts;
 import org.apache.lucene.facet.sortedset.SortedSetDocValuesReaderState;
@@ -200,8 +200,6 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
      */
     static final int LUCENE_QUERY_BATCH_SIZE = 50;
 
-    static final Pattern FACET_REGEX = Pattern.compile("facet\\((\\w+(\\:\\w+)?)\\)");
-
     protected final IndexTracker tracker;
 
     private final ScorerProviderFactory scorerProviderFactory;
@@ -316,7 +314,8 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
                 return endOfData();
             }
 
-            private LuceneResultRow convertToRow(ScoreDoc doc, IndexSearcher searcher, String excerpt, Facets facets) throws IOException {
+            private LuceneResultRow convertToRow(ScoreDoc doc, IndexSearcher searcher, String excerpt, Facets facets,
+                                                 String explanation) throws IOException {
                 IndexReader reader = searcher.getIndexReader();
                 //TODO Look into usage of field cache for retrieving the path
                 //instead of reading via reader if no of docs in index are limited
@@ -345,7 +344,7 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
                     }
 
                     LOG.trace("Matched path {}", path);
-                    return new LuceneResultRow(path, doc.score, excerpt, facets);
+                    return new LuceneResultRow(path, doc.score, excerpt, facets, explanation);
                 }
                 return null;
             }
@@ -378,11 +377,14 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
 
                         checkForIndexVersionChange(searcher);
 
-                        String facetField = null;
-                        if (plan.getFilter().getQueryStatement() != null && plan.getFilter().getQueryStatement().contains("facet(")) {
-                            Matcher matcher = FACET_REGEX.matcher(plan.getFilter().getQueryStatement());
-                            if (matcher.find()) {
-                                facetField = matcher.group(1);
+                        List<String> facetFields = new LinkedList<String>();
+                        List<PropertyRestriction> facetRestriction = filter.getPropertyRestrictions(QueryImpl.REP_FACET);
+                        if (facetRestriction != null && facetRestriction.size() > 0) {
+//                            facetField = facetRestriction.propertyName.substring(QueryImpl.REP_FACET.length() + 1,
+//                                    facetRestriction.propertyName.length() - 1);
+                            for (PropertyRestriction pr : facetRestriction) {
+                                String value = pr.first.getValue(Type.STRING);
+                                facetFields.add(value.substring(QueryImpl.REP_FACET.length() + 1, value.length() - 1));
                             }
                         }
 
@@ -408,32 +410,52 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
                             nextBatchSize = (int) Math.min(nextBatchSize * 2L, 100000);
 
                             Facets facets = null;
-                            if (facetField != null) {
-                                FacetsCollector facetsCollector = new FacetsCollector();
-                                try {
-                                    long f = System.currentTimeMillis();
-                                    DefaultSortedSetDocValuesReaderState state = new DefaultSortedSetDocValuesReaderState(searcher.getIndexReader());
-                                    if (lastDoc != null) {
-                                        facetsCollector.searchAfter(searcher, lastDoc, query, 10, facetsCollector);
-                                    } else {
-                                        FacetsCollector.search(searcher, query, 10, facetsCollector);
-                                    }
-                                    facets = new FilteredSortedSetDocValuesFacetCounts(state, facetsCollector, filter, docs);
+                            if (facetFields.size() > 0) {
+                                Map<String, Facets> facetsMap = new HashMap<String, Facets>();
+
+                                long f = System.currentTimeMillis();
+                                for (String facetField : facetFields) {
+                                    FacetsCollector facetsCollector = new FacetsCollector();
+                                    try {
+                                        DefaultSortedSetDocValuesReaderState state = new DefaultSortedSetDocValuesReaderState(searcher.getIndexReader(), facetField);
+                                        if (lastDoc != null) {
+                                            facetsCollector.searchAfter(searcher, lastDoc, query, 10, facetsCollector);
+                                        } else {
+                                            FacetsCollector.search(searcher, query, 10, facetsCollector);
+                                        }
+                                        facetsMap.put(facetField, new FilteredSortedSetDocValuesFacetCounts(state, facetsCollector, filter, docs));
 //                                    facets = new SortedSetDocValuesFacetCounts(state, facetsCollector);
-                                    LOG.debug("facets retrieved in {}ms", (System.currentTimeMillis()-f));
-                                } catch (IllegalArgumentException iae) {
-                                    LOG.warn("facets not yet indexed");
+
+                                    } catch (IllegalArgumentException iae) {
+                                        LOG.warn("facets for {} not yet indexed", facetField);
+                                    }
+
                                 }
+                                if (facetsMap.size() > 0) {
+                                    facets = new MultiFacets(facetsMap);
+                                    LOG.debug("facets retrieved in {}ms", (System.currentTimeMillis() - f));
+                                }
+
                             }
 
-                            boolean addExcerpt = filter.getQueryStatement() != null && filter.getQueryStatement().contains(QueryImpl.REP_EXCERPT);
+                            PropertyRestriction restriction = filter.getPropertyRestriction(QueryImpl.REP_EXCERPT);
+                            boolean addExcerpt = restriction != null && restriction.isNotNullRestriction();
+
+                            restriction = filter.getPropertyRestriction(QueryImpl.OAK_SCORE_EXPLANATION);
+                            boolean addExplain = restriction != null && restriction.isNotNullRestriction();
+
                             for (ScoreDoc doc : docs.scoreDocs) {
                                 String excerpt = null;
                                 if (addExcerpt) {
                                     excerpt = getExcerpt(indexNode, searcher, query, doc);
                                 }
 
-                                LuceneResultRow row = convertToRow(doc, searcher, excerpt, facets);
+                                String explanation = null;
+                                if (addExplain) {
+                                    explanation = searcher.explain(query, doc.doc).toString();
+                                }
+
+                                LuceneResultRow row = convertToRow(doc, searcher, excerpt, facets, explanation);
                                 if (row != null) {
                                     queue.add(row);
                                 }
@@ -475,9 +497,9 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
 
                         List<Lookup.LookupResult> lookupResults = SuggestHelper.getSuggestions(indexNode.getLookup(), suggestQuery);
 
-                        QueryParser qp =  new QueryParser(Version.LUCENE_47, FieldNames.SUGGEST,
+                        QueryParser qp = new QueryParser(Version.LUCENE_47, FieldNames.SUGGEST,
                                 indexNode.getDefinition().isSuggestAnalyzed() ? indexNode.getDefinition().getAnalyzer() :
-                                SuggestHelper.getAnalyzer());
+                                        SuggestHelper.getAnalyzer());
 
                         // ACL filter suggestions
                         for (Lookup.LookupResult suggestion : lookupResults) {
@@ -875,7 +897,8 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
         for (PropertyRestriction pr : filter.getPropertyRestrictions()) {
             String name = pr.propertyName;
 
-            if ("rep:excerpt".equals(name)) {
+            if (QueryImpl.REP_EXCERPT.equals(name) || QueryImpl.OAK_SCORE_EXPLANATION.equals(name)
+                    || QueryImpl.REP_FACET.equals(name)) {
                 continue;
             }
 
@@ -1369,8 +1392,10 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
         final boolean isVirutal;
         final String excerpt;
         final Facets facets;
+        final String explanation;
 
-        LuceneResultRow(String path, double score, String excerpt, Facets facets) {
+        LuceneResultRow(String path, double score, String excerpt, Facets facets, String explanation) {
+            this.explanation = explanation;
             this.excerpt = excerpt;
             this.facets = facets;
             this.isVirutal = false;
@@ -1386,6 +1411,7 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
             this.suggestion = suggestion;
             this.excerpt = null;
             this.facets = null;
+            this.explanation = null;
         }
 
         LuceneResultRow(String suggestion) {
@@ -1475,26 +1501,27 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
                     if (QueryImpl.REP_SPELLCHECK.equals(columnName) || QueryImpl.REP_SUGGEST.equals(columnName)) {
                         return PropertyValues.newString(currentRow.suggestion);
                     }
+                    if (QueryImpl.OAK_SCORE_EXPLANATION.equals(columnName)) {
+                        return PropertyValues.newString(currentRow.explanation);
+                    }
                     if (QueryImpl.REP_EXCERPT.equals(columnName)) {
                         return PropertyValues.newString(currentRow.excerpt);
                     }
-                    if (columnName.startsWith("facet(")) {
-                        Matcher m = FACET_REGEX.matcher(columnName);
-                        if (m.matches()) {
-                            String facetFieldName = m.group(1);
-                            Facets facets = currentRow.facets;
-                            try {
-                                if (facets != null) {
-                                    FacetResult topChildren = facets.getTopChildren(10, facetFieldName);
-                                    if (topChildren != null) {
-                                        return PropertyValues.newString(facetFieldName + ":" + Arrays.toString(topChildren.labelValues));
-                                    } else {
-                                        return null;
-                                    }
+                    if (columnName.startsWith(QueryImpl.REP_FACET)) {
+                        String facetFieldName = columnName.substring(QueryImpl.REP_FACET.length() + 1,
+                                columnName.length() - 1);
+                        Facets facets = currentRow.facets;
+                        try {
+                            if (facets != null) {
+                                FacetResult topChildren = facets.getTopChildren(10, facetFieldName);
+                                if (topChildren != null) {
+                                    return PropertyValues.newString(facetFieldName + ":" + Arrays.toString(topChildren.labelValues));
+                                } else {
+                                    return null;
                                 }
-                            } catch (IOException e) {
-                                throw new RuntimeException(e);
                             }
+                        } catch (Exception e) {
+                            throw new RuntimeException(e);
                         }
                     }
                     return pathRow.getValue(columnName);

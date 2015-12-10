@@ -87,5 +87,4 @@ public interface AstVisitor {
 
     boolean visit(SuggestImpl suggest);
 
-    boolean visit(FacetImpl facet);
 }

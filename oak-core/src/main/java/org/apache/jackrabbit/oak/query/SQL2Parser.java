@@ -16,18 +16,14 @@
  */
 package org.apache.jackrabbit.oak.query;
 
-import static com.google.common.base.Preconditions.checkNotNull;
-import static com.google.common.collect.Maps.newHashMap;
-
+import javax.jcr.PropertyType;
+import javax.jcr.RepositoryException;
 import java.math.BigDecimal;
 import java.text.ParseException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
-
-import javax.jcr.PropertyType;
-import javax.jcr.RepositoryException;
 
 import org.apache.jackrabbit.oak.api.PropertyValue;
 import org.apache.jackrabbit.oak.api.QueryEngine;
@@ -54,6 +50,9 @@ import org.apache.jackrabbit.oak.spi.query.PropertyValues;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import static com.google.common.base.Preconditions.checkNotNull;
+import static com.google.common.collect.Maps.newHashMap;
 
 /**
  * The SQL2 parser can convert a JCR-SQL2 query to a query. The 'old' SQL query
@@ -865,7 +864,7 @@ public class SQL2Parser {
                         read(")");
                     }
                     readOptionalAlias(column);
-                } else {                    
+                } else {
                     column.propertyName = readName();
                     if (column.propertyName.equals("rep:spellcheck")) {
                         if (readIf("(")) {
@@ -873,7 +872,13 @@ public class SQL2Parser {
                             column.propertyName = ":spellcheck";
                         }
                         readOptionalAlias(column);                        
-                    } else if (readIf(".")) {
+                    }
+//                    else if (column.propertyName.startsWith(QueryImpl.REP_FACET)) {
+//                        String value = column.propertyName;
+//                        column.propertyName = ":facet_" + value.substring(QueryImpl.REP_FACET.length() + 1, value.length() - 1);
+//                        readOptionalAlias(column);
+//                    }
+                    else if (readIf(".")) {
                         column.selectorName = column.propertyName;
                         if (readIf("*")) {
                             column.propertyName = null;

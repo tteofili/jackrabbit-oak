@@ -415,6 +415,7 @@ public class LuceneIndexEditor implements IndexEditor, Aggregate.AggregateRoot {
     }
 
     private boolean addFacetFields(List<Field> fields, PropertyState property, String pname, PropertyDefinition pd) {
+        facetsConfig.setIndexFieldName(pname, pname);
         int tag = property.getType().tag();
         int idxDefinedTag = pd.getType();
         // Try converting type to the defined type in the index definition
