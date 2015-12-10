@@ -47,12 +47,12 @@ public class FacetTest extends AbstractQueryTest {
         n3.setProperty("text", "oh hallo");
         session.save();
 
-        String sql2 = "select [jcr:path], [facet(text)] from [nt:base] " +
+        String sql2 = "select [jcr:path], [rep:facet(text)] from [nt:base] " +
                 "where contains([text], 'hello OR hallo') order by [jcr:path]";
         Query q = qm.createQuery(sql2, Query.JCR_SQL2);
         QueryResult result = q.execute();
         String facetResult = "text:[hallo (1), hello (1), oh hallo (1)]";
-        assertEquals(facetResult + ", " + facetResult + ", " + facetResult, getResult(result, "facet(text)"));
+        assertEquals(facetResult + ", " + facetResult + ", " + facetResult, getResult(result, "rep:facet(text)"));
     }
 
     public void testFacetRetrievalMV() throws Exception {
@@ -72,12 +72,12 @@ public class FacetTest extends AbstractQueryTest {
         n4.setProperty("tags", new String[]{"software", "repository", "aem"});
         session.save();
 
-        String sql2 = "select [jcr:path], [facet(tags)] from [nt:base] " +
+        String sql2 = "select [jcr:path], [rep:facet(tags)] from [nt:base] " +
                 "where contains([jcr:title], 'oak') order by [jcr:path]";
         Query q = qm.createQuery(sql2, Query.JCR_SQL2);
         QueryResult result = q.execute();
         String facetResult = "tags:[repository (2), software (2), aem (1), apache (1), cosmetics (1), furniture (1)], tags:[repository (2), software (2), aem (1), apache (1), cosmetics (1), furniture (1)], tags:[repository (2), software (2), aem (1), apache (1), cosmetics (1), furniture (1)], tags:[repository (2), software (2), aem (1), apache (1), cosmetics (1), furniture (1)]";
-        assertEquals(facetResult, getResult(result, "facet(tags)"));
+        assertEquals(facetResult, getResult(result, "rep:facet(tags)"));
     }
 
     public void testFacetRetrievalWithAnonymousUser() throws Exception {
@@ -94,12 +94,12 @@ public class FacetTest extends AbstractQueryTest {
         session = getHelper().getReadOnlySession();
         QueryManager qm = session.getWorkspace().getQueryManager();
 
-        String sql2 = "select [jcr:path], [facet(text)] from [nt:base] " +
+        String sql2 = "select [jcr:path], [rep:facet(text)] from [nt:base] " +
                 "where contains([text], 'hello OR hallo') order by [jcr:path]";
         Query q = qm.createQuery(sql2, Query.JCR_SQL2);
         QueryResult result = q.execute();
         String facetResult = "text:[hallo (1), hello (1), oh hallo (1)]";
-        assertEquals(facetResult + ", " + facetResult + ", " + facetResult, getResult(result, "facet(text)"));
+        assertEquals(facetResult + ", " + facetResult + ", " + facetResult, getResult(result, "rep:facet(text)"));
     }
 
     public void testFacetRetrieval2() throws Exception {
@@ -114,12 +114,12 @@ public class FacetTest extends AbstractQueryTest {
         n3.setProperty(pn, "oh hallo");
         session.save();
 
-        String sql2 = "select [jcr:path], [facet(" + pn + ")] from [nt:base] " +
+        String sql2 = "select [jcr:path], [rep:facet(" + pn + ")] from [nt:base] " +
                 "where contains([" + pn + "], 'hallo') order by [jcr:path]";
         Query q = qm.createQuery(sql2, Query.JCR_SQL2);
         QueryResult result = q.execute();
         String facetResult = pn + ":[hallo (1), oh hallo (1)]";
-        assertEquals(facetResult + ", " + facetResult, getResult(result, "facet(" + pn + ")"));
+        assertEquals(facetResult + ", " + facetResult, getResult(result, "rep:facet(" + pn + ")"));
     }
 
     public void testMultipleFacetsRetrieval() throws Exception {
@@ -138,12 +138,12 @@ public class FacetTest extends AbstractQueryTest {
         n3.setProperty(pn2, "a");
         session.save();
 
-        String sql2 = "select [jcr:path], [facet(" + pn + ")], [facet(" + pn2 + ")] from [nt:base] " +
+        String sql2 = "select [jcr:path], [rep:facet(" + pn + ")], [rep:facet(" + pn2 + ")] from [nt:base] " +
                 "where contains([" + pn + "], 'hallo') order by [jcr:path]";
         Query q = qm.createQuery(sql2, Query.JCR_SQL2);
         QueryResult result = q.execute();
         String facetResult = pn + ":[hallo (1), oh hallo (1)], " + pn2 + ":[a (1), b (1)], " + pn + ":[hallo (1), oh hallo (1)], " + pn2 + ":[a (1), b (1)]";
-        assertEquals(facetResult, getResult(result, "facet(" + pn + ")", "facet(" + pn2 + ")"));
+        assertEquals(facetResult, getResult(result, "rep:facet(" + pn + ")", "rep:facet(" + pn2 + ")"));
     }
 
     static String getResult(QueryResult result, String... propertyNames) throws RepositoryException {

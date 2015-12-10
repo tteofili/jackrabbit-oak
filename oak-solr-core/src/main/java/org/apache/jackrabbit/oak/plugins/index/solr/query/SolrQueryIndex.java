@@ -520,7 +520,9 @@ public class SolrQueryIndex implements FulltextQueryIndex, QueryIndex.AdvanceFul
                 (!configuration.useForPropertyRestrictions() // Solr index not used for properties
                         || (configuration.getUsedProperties().size() > 0 && !configuration.getUsedProperties().contains(propertyName)) // not explicitly contained in the used properties
                         || propertyName.contains("/") // no child-level property restrictions
-                        || "rep:excerpt".equals(propertyName) // rep:excerpt is not handled at the property level
+                        || QueryImpl.REP_EXCERPT.equals(propertyName) // rep:excerpt is not handled at the property level
+                        || QueryImpl.OAK_SCORE_EXPLANATION.equals(propertyName) // score explain is not handled at the property level
+                        || QueryImpl.REP_FACET.equals(propertyName) // rep:facet is not handled at the property level
                         || QueryConstants.RESTRICTION_LOCAL_NAME.equals(propertyName)
                         || configuration.getIgnoredProperties().contains(propertyName));
     }
@@ -669,8 +671,8 @@ public class SolrQueryIndex implements FulltextQueryIndex, QueryIndex.AdvanceFul
                     if (QueryImpl.JCR_SCORE.equals(columnName)) {
                         return PropertyValues.newDouble(currentRow.score);
                     }
-                    if (columnName.startsWith("facet(")) {
-                        String facetFieldName = columnName.substring("facet(".length(), columnName.length() - 1);
+                    if (columnName.startsWith(QueryImpl.REP_FACET)) {
+                        String facetFieldName = columnName.substring(QueryImpl.REP_FACET.length() + 1, columnName.length() - 1);
                         FacetField facetField = null;
                         for (FacetField ff : currentRow.facetFields) {
                             if (ff.getName().equals(facetFieldName + "_facet")) {

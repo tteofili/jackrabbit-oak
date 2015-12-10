@@ -380,8 +380,6 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
                         List<String> facetFields = new LinkedList<String>();
                         List<PropertyRestriction> facetRestriction = filter.getPropertyRestrictions(QueryImpl.REP_FACET);
                         if (facetRestriction != null && facetRestriction.size() > 0) {
-//                            facetField = facetRestriction.propertyName.substring(QueryImpl.REP_FACET.length() + 1,
-//                                    facetRestriction.propertyName.length() - 1);
                             for (PropertyRestriction pr : facetRestriction) {
                                 String value = pr.first.getValue(Type.STRING);
                                 facetFields.add(value.substring(QueryImpl.REP_FACET.length() + 1, value.length() - 1));
@@ -1508,8 +1506,7 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
                         return PropertyValues.newString(currentRow.excerpt);
                     }
                     if (columnName.startsWith(QueryImpl.REP_FACET)) {
-                        String facetFieldName = columnName.substring(QueryImpl.REP_FACET.length() + 1,
-                                columnName.length() - 1);
+                        String facetFieldName = columnName.substring(QueryImpl.REP_FACET.length() + 1, columnName.length() - 1);
                         Facets facets = currentRow.facets;
                         try {
                             if (facets != null) {

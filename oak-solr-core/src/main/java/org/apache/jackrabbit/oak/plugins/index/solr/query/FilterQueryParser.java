@@ -19,6 +19,7 @@ package org.apache.jackrabbit.oak.plugins.index.solr.query;
 import java.util.Collection;
 import java.util.List;
 
+import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.plugins.index.solr.configuration.OakSolrConfiguration;
 import org.apache.jackrabbit.oak.query.QueryImpl;
 import org.apache.jackrabbit.oak.query.fulltext.FullTextAnd;
@@ -65,19 +66,15 @@ class FilterQueryParser {
         }
 
         // facet enable
-        String queryStatement = filter.getQueryStatement();
-        if (queryStatement != null) {
-//            Matcher matcher = FACET_REGEX.matcher(queryStatement);
-            int start = 0;
-            int idx;
-            while ((idx = queryStatement.indexOf("facet(", start)) >= 0) {
-                String facetField = queryStatement.substring(idx + "facet(".length(), queryStatement.indexOf(')', start));
-                solrQuery.addFacetField(facetField + "_facet");
-                start = idx + "facet(".length() + facetField.length() + 1;
-            }
-            if (start > 0) {
+        List<Filter.PropertyRestriction> facetRestriction = filter.getPropertyRestrictions(QueryImpl.REP_FACET);
+        if (facetRestriction != null && facetRestriction.size() > 0) {
+            if (facetRestriction.size() > 0) {
                 solrQuery.setFacetMinCount(1);
                 solrQuery.setFacet(true);
+            }
+            for (Filter.PropertyRestriction pr : facetRestriction) {
+                String value = pr.first.getValue(Type.STRING);
+                solrQuery.addFacetField(value.substring(QueryImpl.REP_FACET.length() + 1, value.length() - 1)+"_facet");
             }
         }
 
