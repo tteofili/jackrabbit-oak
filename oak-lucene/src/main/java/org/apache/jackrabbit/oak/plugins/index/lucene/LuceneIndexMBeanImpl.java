@@ -21,6 +21,7 @@ package org.apache.jackrabbit.oak.plugins.index.lucene;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -145,9 +146,9 @@ public class LuceneIndexMBeanImpl extends AnnotatedStandardMBean implements Luce
                 log.info("Dumping Lucene directory content for [{}] to [{}]", sourcePath, destPath);
                 Directory source = getDirectory(indexNode.getSearcher().getIndexReader());
                 checkNotNull(source, "IndexSearcher not backed by DirectoryReader");
-                Directory dest = FSDirectory.open(new File(destPath));
+                Directory dest = FSDirectory.open(Paths.get(destPath));
                 for (String file : source.listAll()) {
-                    source.copy(dest, file, file, IOContext.DEFAULT);
+                    source.copyFrom(dest, file, file, IOContext.DEFAULT);
                 }
             }
         } finally {

@@ -29,8 +29,8 @@ import org.apache.lucene.util.Version;
  * This should be deprecated if / once LUCENE-5833 fix gets included in the Lucene version we ship.
  */
 public class CRTokenizer extends CharTokenizer {
-    public CRTokenizer(Version matchVersion, Reader input) {
-        super(matchVersion, input);
+    public CRTokenizer() {
+        super();
     }
 
     @Override

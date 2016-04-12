@@ -25,6 +25,7 @@ import java.io.InputStreamReader;
 import java.io.Reader;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
+import java.text.ParseException;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -156,7 +157,7 @@ final class NodeStateAnalyzerFactory{
                 && state.hasChildNode(LuceneIndexConstants.ANL_STOPWORDS)) {
             try {
                 stopwords = loadStopwordSet(state.getChildNode(LuceneIndexConstants.ANL_STOPWORDS),
-                        LuceneIndexConstants.ANL_STOPWORDS, matchVersion);
+                        LuceneIndexConstants.ANL_STOPWORDS);
             } catch (IOException e) {
                 throw new RuntimeException("Error occurred while loading stopwords", e);
             }
@@ -226,7 +227,12 @@ final class NodeStateAnalyzerFactory{
 
     @SuppressWarnings("deprecation")
     private static Version parseLuceneVersionString(final String matchVersion) {
-        final Version version = Version.parseLeniently(matchVersion);
+        final Version version;
+        try {
+            version = Version.parseLeniently(matchVersion);
+        } catch (ParseException e) {
+            throw new RuntimeException(e);
+        }
         if (version == Version.LUCENE_CURRENT && !versionWarningAlreadyLogged.getAndSet(true)) {
             log.warn(
                     "You should not use LATEST as luceneMatchVersion property: "+
@@ -238,12 +244,11 @@ final class NodeStateAnalyzerFactory{
         return version;
     }
 
-    private static CharArraySet loadStopwordSet(NodeState file, String name,
-                                                  Version matchVersion) throws IOException {
+    private static CharArraySet loadStopwordSet(NodeState file, String name) throws IOException {
         Blob blob = ConfigUtil.getBlob(file, name);
         Reader stopwords = new InputStreamReader(blob.getNewStream(), IOUtils.CHARSET_UTF_8);
         try {
-            return WordlistLoader.getWordSet(stopwords, matchVersion);
+            return WordlistLoader.getWordSet(stopwords);
         } finally {
             IOUtils.close(stopwords);
         }

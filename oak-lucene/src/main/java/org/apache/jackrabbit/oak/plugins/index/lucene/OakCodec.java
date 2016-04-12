@@ -27,32 +27,32 @@ import org.apache.lucene.codecs.PostingsFormat;
 import org.apache.lucene.codecs.SegmentInfoFormat;
 import org.apache.lucene.codecs.StoredFieldsFormat;
 import org.apache.lucene.codecs.TermVectorsFormat;
-import org.apache.lucene.codecs.lucene40.Lucene40LiveDocsFormat;
-import org.apache.lucene.codecs.lucene40.Lucene40StoredFieldsFormat;
-import org.apache.lucene.codecs.lucene42.Lucene42NormsFormat;
-import org.apache.lucene.codecs.lucene42.Lucene42TermVectorsFormat;
-import org.apache.lucene.codecs.lucene46.Lucene46Codec;
-import org.apache.lucene.codecs.lucene46.Lucene46FieldInfosFormat;
-import org.apache.lucene.codecs.lucene46.Lucene46SegmentInfoFormat;
+import org.apache.lucene.codecs.lucene50.Lucene50FieldInfosFormat;
+import org.apache.lucene.codecs.lucene50.Lucene50LiveDocsFormat;
+import org.apache.lucene.codecs.lucene50.Lucene50SegmentInfoFormat;
+import org.apache.lucene.codecs.lucene50.Lucene50StoredFieldsFormat;
+import org.apache.lucene.codecs.lucene50.Lucene50TermVectorsFormat;
+import org.apache.lucene.codecs.lucene53.Lucene53NormsFormat;
+import org.apache.lucene.codecs.lucene54.Lucene54Codec;
 
 /**
  * Oak specific {@link org.apache.lucene.codecs.Codec}.
  *
- * It simply mimics {@link org.apache.lucene.codecs.lucene46.Lucene46Codec} but with uncompressed {@link org.apache.lucene.codecs.StoredFieldsFormat}.
+ * It simply mimics {@link org.apache.lucene.codecs.lucene54.Lucene54Codec} but with uncompressed {@link org.apache.lucene.codecs.StoredFieldsFormat}.
  */
 public class OakCodec extends FilterCodec {
 
-    private final TermVectorsFormat vectorsFormat = new Lucene42TermVectorsFormat();
-    private final FieldInfosFormat fieldInfosFormat = new Lucene46FieldInfosFormat();
-    private final SegmentInfoFormat segmentInfosFormat = new Lucene46SegmentInfoFormat();
-    private final LiveDocsFormat liveDocsFormat = new Lucene40LiveDocsFormat();
+    private final TermVectorsFormat vectorsFormat = new Lucene50TermVectorsFormat();
+    private final FieldInfosFormat fieldInfosFormat = new Lucene50FieldInfosFormat();
+    private final SegmentInfoFormat segmentInfosFormat = new Lucene50SegmentInfoFormat();
+    private final LiveDocsFormat liveDocsFormat = new Lucene50LiveDocsFormat();
     private final PostingsFormat defaultFormat = PostingsFormat.forName("Lucene41");
     private final DocValuesFormat defaultDVFormat = DocValuesFormat.forName("Lucene45");
-    private final NormsFormat normsFormat = new Lucene42NormsFormat();
-    private final StoredFieldsFormat fieldsFormat = new Lucene40StoredFieldsFormat();
+    private final NormsFormat normsFormat = new Lucene53NormsFormat();
+    private final StoredFieldsFormat fieldsFormat = new Lucene50StoredFieldsFormat();
 
     public OakCodec() {
-        super("oakCodec", new Lucene46Codec());
+        super("oakCodec", new Lucene54Codec());
     }
 
     @Override

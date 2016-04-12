@@ -27,8 +27,6 @@ import org.apache.lucene.util.Version;
 
 public class OakAnalyzer extends Analyzer {
 
-    private final Version matchVersion;
-
     /**
      * Creates a new {@link OakAnalyzer}
      * 
@@ -37,14 +35,12 @@ public class OakAnalyzer extends Analyzer {
      *            {@link <a href="#version">above</a>}
      */
     public OakAnalyzer(Version matchVersion) {
-        this.matchVersion = matchVersion;
     }
 
     @Override
-    protected TokenStreamComponents createComponents(final String fieldName,
-            final Reader reader) {
-        StandardTokenizer src = new StandardTokenizer(matchVersion, reader);
-        TokenStream tok = new LowerCaseFilter(matchVersion, src);
+    protected TokenStreamComponents createComponents(final String fieldName) {
+        StandardTokenizer src = new StandardTokenizer();
+        TokenStream tok = new LowerCaseFilter(src);
         tok = new WordDelimiterFilter(tok,
                 WordDelimiterFilter.GENERATE_WORD_PARTS
                         | WordDelimiterFilter.STEM_ENGLISH_POSSESSIVE

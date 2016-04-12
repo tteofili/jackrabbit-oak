@@ -49,8 +49,8 @@ public class SuggestHelper {
 
     private static final Analyzer analyzer = new Analyzer() {
         @Override
-        protected Analyzer.TokenStreamComponents createComponents(String fieldName, Reader reader) {
-            return new Analyzer.TokenStreamComponents(new CRTokenizer(Version.LUCENE_47, reader));
+        protected Analyzer.TokenStreamComponents createComponents(String fieldName) {
+            return new Analyzer.TokenStreamComponents(new CRTokenizer());
         }
     };
 
@@ -63,20 +63,13 @@ public class SuggestHelper {
             //create a placeholder non-existing-sub-child which would mark the location when we want to return
             //our internal suggestion OakDirectory. After build is done, we'd delete the temp directory
             //thereby removing any temp stuff that suggester created in the interim.
-            tempDir = Files.createTempDir();
-            File tempSubChild = new File(tempDir, "non-existing-sub-child");
 
             if (reader.getDocCount(FieldNames.SUGGEST) > 0) {
                 Dictionary dictionary = new LuceneDictionary(reader, FieldNames.SUGGEST);
-                getLookup(directory, analyzer, tempSubChild).build(dictionary);
+                getLookup(directory, analyzer).build(dictionary);
             }
         } catch (RuntimeException e) {
             log.debug("could not update the suggester", e);
-        } finally {
-            //cleanup temp dir
-            if (tempDir != null && !FileUtils.deleteQuietly(tempDir)) {
-                log.error("Cleanup failed for temp dir {}", tempDir.getAbsolutePath());
-            }
         }
     }
 
@@ -122,20 +115,7 @@ public class SuggestHelper {
     }
 
     public static AnalyzingInfixSuggester getLookup(final Directory suggestDirectory, Analyzer analyzer) throws IOException {
-        return getLookup(suggestDirectory, analyzer, null);
-    }
-    public static AnalyzingInfixSuggester getLookup(final Directory suggestDirectory, Analyzer analyzer,
-                                                    final File tempDir) throws IOException {
-        return new AnalyzingInfixSuggester(Version.LUCENE_47, tempDir, analyzer, analyzer, 3) {
-            @Override
-            protected Directory getDirectory(File path) throws IOException {
-                if (tempDir == null || tempDir.getAbsolutePath().equals(path.getAbsolutePath())) {
-                    return suggestDirectory; // use oak directory for writing suggest index
-                } else {
-                    return FSDirectory.open(path); // use FS for temp index used at build time
-                }
-            }
-        };
+        return new AnalyzingInfixSuggester(suggestDirectory, analyzer);
     }
 
     public static Analyzer getAnalyzer() {

@@ -23,6 +23,7 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import javax.jcr.PropertyType;
 import java.io.IOException;
+import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -43,6 +44,7 @@ import com.google.common.primitives.Chars;
 import org.apache.jackrabbit.oak.api.PropertyValue;
 import org.apache.jackrabbit.oak.api.Result.SizePrecision;
 import org.apache.jackrabbit.oak.api.Type;
+import org.apache.jackrabbit.oak.commons.IOUtils;
 import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.commons.json.JsopBuilder;
 import org.apache.jackrabbit.oak.commons.json.JsopWriter;
@@ -454,7 +456,7 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
                         SuggestWord[] suggestWords = SpellcheckHelper.getSpellcheck(spellcheckQuery);
 
                         // ACL filter spellchecks
-                        QueryParser qp = new QueryParser(Version.LUCENE_47, aclCheckField, indexNode.getDefinition().getAnalyzer());
+                        QueryParser qp = new QueryParser(aclCheckField, indexNode.getDefinition().getAnalyzer());
                         for (SuggestWord suggestion : suggestWords) {
                             Query query = qp.createPhraseQuery(aclCheckField, QueryParserBase.escape(suggestion.string));
 
@@ -478,7 +480,7 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
 
                         List<Lookup.LookupResult> lookupResults = SuggestHelper.getSuggestions(indexNode.getLookup(), suggestQuery);
 
-                        QueryParser qp =  new QueryParser(Version.LUCENE_47, FieldNames.SUGGEST,
+                        QueryParser qp =  new QueryParser(FieldNames.SUGGEST,
                                 indexNode.getDefinition().isSuggestAnalyzed() ? indexNode.getDefinition().getAnalyzer() :
                                 SuggestHelper.getAnalyzer());
 
@@ -715,7 +717,7 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
 
         if (pr != null) {
             String query = String.valueOf(pr.first.getValue(pr.first.getType()));
-            QueryParser queryParser = new QueryParser(VERSION, "", analyzer);
+            QueryParser queryParser = new QueryParser("", analyzer);
             if (query.startsWith("mlt?")) {
                 String mltQueryString = query.replace("mlt?", "");
                 if (reader != null) {
@@ -1602,10 +1604,10 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
         }
 
         @Override
-        public void stringField(FieldInfo fieldInfo, String value)
+        public void stringField(FieldInfo fieldInfo, byte[] value)
                 throws IOException {
             if (PATH.equals(fieldInfo.name)) {
-                path = value;
+                path = org.apache.commons.io.IOUtils.toString(value, Charset.defaultCharset().name());
                 pathVisited = true;
             }
         }

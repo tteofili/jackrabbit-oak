@@ -22,6 +22,8 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Calendar;
 import java.util.HashMap;
 import java.util.Map;
@@ -50,6 +52,7 @@ import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.index.SerialMergeScheduler;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
+import org.apache.lucene.store.NoLockFactory;
 import org.apache.tika.config.TikaConfig;
 import org.apache.tika.mime.MediaType;
 import org.apache.tika.parser.AutoDetectParser;
@@ -61,8 +64,6 @@ import org.slf4j.LoggerFactory;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static org.apache.jackrabbit.oak.commons.IOUtils.humanReadableByteCount;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.PERSISTENCE_PATH;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.VERSION;
-import static org.apache.lucene.store.NoLockFactory.getNoLockFactory;
 
 public class LuceneIndexEditorContext {
 
@@ -87,7 +88,7 @@ public class LuceneIndexEditorContext {
                 analyzers.put(FieldNames.SUGGEST, SuggestHelper.getAnalyzer());
             }
             Analyzer analyzer = new PerFieldAnalyzerWrapper(definitionAnalyzer, analyzers);
-            IndexWriterConfig config = new IndexWriterConfig(VERSION, analyzer);
+            IndexWriterConfig config = new IndexWriterConfig(analyzer);
             if (remoteDir) {
                 config.setMergeScheduler(new SerialMergeScheduler());
             }
@@ -107,8 +108,9 @@ public class LuceneIndexEditorContext {
             return new OakDirectory(definition, indexDefinition, false);
         } else {
             // try {
-            File file = new File(path);
-            file.mkdirs();
+            Path path1 = Paths.get(path);
+            File file = path1.toFile();
+            assert file.mkdirs();
             // TODO: close() is never called
             // TODO: no locking used
             // --> using the FS backend for the index is in any case
@@ -116,7 +118,7 @@ public class LuceneIndexEditorContext {
             // etc. so instead of fixing these issues we'd better
             // work on making the in-content index work without
             // problems (or look at the Solr indexer as alternative)
-            return FSDirectory.open(file, getNoLockFactory());
+            return FSDirectory.open(path1, NoLockFactory.INSTANCE);
             // } catch (IOException e) {
             // throw new CommitFailedException("Lucene", 1,
             // "Failed to open the index in " + path, e);
@@ -219,7 +221,7 @@ public class LuceneIndexEditorContext {
         StringBuilder sb = new StringBuilder();
         for (String f : files) {
             sb.append(f).append(":");
-            if (directory.fileExists(f)) {
+            if (directory.fileLength(f) > 0) {
                 long size = directory.fileLength(f);
                 overallSize += size;
                 sb.append(size);

@@ -89,7 +89,7 @@ class OakDirectory extends Directory {
     }
 
     public OakDirectory(NodeBuilder builder, String dataNodeName, IndexDefinition definition, boolean readOnly) {
-        this.lockFactory = NoLockFactory.getNoLockFactory();
+        this.lockFactory = NoLockFactory.INSTANCE;
         this.builder = builder;
         this.directoryBuilder = readOnly ? builder.getChildNode(dataNodeName) : builder.child(dataNodeName);
         this.definition = definition;
@@ -182,16 +182,6 @@ class OakDirectory extends Directory {
     }
 
     @Override
-    public Lock makeLock(String name) {
-        return lockFactory.makeLock(name);
-    }
-
-    @Override
-    public void clearLock(String name) throws IOException {
-        lockFactory.clearLock(name);
-    }
-
-    @Override
     public void sync(Collection<String> names) throws IOException {
         // ?
     }
@@ -201,16 +191,6 @@ class OakDirectory extends Directory {
         if (!readOnly && definition.saveDirListing()) {
             directoryBuilder.setProperty(createProperty(PROP_DIR_LISTING, fileNames, STRINGS));
         }
-    }
-
-    @Override
-    public void setLockFactory(LockFactory lockFactory) throws IOException {
-        this.lockFactory = lockFactory;
-    }
-
-    @Override
-    public LockFactory getLockFactory() {
-        return lockFactory;
     }
 
     @Override
@@ -585,23 +565,14 @@ class OakDirectory extends Directory {
         private final OakIndexFile file;
 
         public OakIndexOutput(String name, NodeBuilder file, String dirDetails) throws IOException {
+            super(name);
             this.dirDetails = dirDetails;
             this.file = new OakIndexFile(name, file, dirDetails);
         }
 
         @Override
-        public long length() {
-            return file.length;
-        }
-
-        @Override
         public long getFilePointer() {
             return file.position;
-        }
-
-        @Override
-        public void seek(long pos) throws IOException {
-            file.seek(pos);
         }
 
         @Override
@@ -620,17 +591,8 @@ class OakDirectory extends Directory {
         }
 
         @Override
-        public void flush() throws IOException {
-            try {
-                file.flush();
-            } catch (IOException e) {
-                throw wrapWithDetails(e);
-            }
-        }
-
-        @Override
         public void close() throws IOException {
-            flush();
+            file.flush();
             file.blob = null;
             file.data = null;
         }
