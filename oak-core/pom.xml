@@ -347,5 +347,17 @@
       <version>1.1.1</version>
       <scope>test</scope>
     </dependency>
+    <dependency>
+      <groupId>org.apache.joshua</groupId>
+      <artifactId>joshua</artifactId>
+      <version>6.0.6-SNAPSHOT</version>
+    </dependency>
+    <dependency>
+      <groupId>berkeleylm</groupId>
+      <artifactId>berkeleylm</artifactId>
+      <version>1.0</version>
+      <scope>system</scope>
+      <systemPath>/Users/teofili/dev/joshua/ext/berkeleylm/jar/berkeleylm.jar</systemPath>
+    </dependency>
   </dependencies>
 </project>
