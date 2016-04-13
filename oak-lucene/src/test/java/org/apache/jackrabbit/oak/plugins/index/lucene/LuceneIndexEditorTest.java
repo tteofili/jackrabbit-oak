@@ -420,7 +420,7 @@ public class LuceneIndexEditorTest {
     }
 
     private String query(String query, IndexDefinition defn) throws IOException, ParseException {
-        QueryParser queryParser = new QueryParser(VERSION, "", defn.getAnalyzer());
+        QueryParser queryParser = new QueryParser("", defn.getAnalyzer());
         return getPath(queryParser.parse(query));
     }
 

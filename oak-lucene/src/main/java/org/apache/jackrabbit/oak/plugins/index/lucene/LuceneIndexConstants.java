@@ -30,7 +30,7 @@ public interface LuceneIndexConstants {
 
     String TRASH_CHILD_NAME = ":trash";
 
-    Version VERSION = Version.LUCENE_47;
+    Version VERSION = Version.LUCENE_5_5_0;
 
     Analyzer ANALYZER = new OakAnalyzer(VERSION);
 

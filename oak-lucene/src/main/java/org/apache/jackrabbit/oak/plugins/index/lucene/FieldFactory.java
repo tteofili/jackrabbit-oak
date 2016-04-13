@@ -27,8 +27,7 @@ import org.apache.lucene.document.FieldType;
 import org.apache.lucene.document.IntField;
 import org.apache.lucene.document.StringField;
 import org.apache.lucene.document.TextField;
-
-import static org.apache.lucene.index.FieldInfo.IndexOptions.DOCS_AND_FREQS_AND_POSITIONS;
+import org.apache.lucene.index.IndexOptions;
 
 import static org.apache.jackrabbit.oak.plugins.index.lucene.FieldNames.PATH;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.FieldNames.FULLTEXT;
@@ -56,17 +55,15 @@ public final class FieldFactory {
     };
 
     static {
-        OAK_TYPE.setIndexed(true);
         OAK_TYPE.setOmitNorms(true);
         OAK_TYPE.setStored(true);
-        OAK_TYPE.setIndexOptions(DOCS_AND_FREQS_AND_POSITIONS);
+        OAK_TYPE.setIndexOptions(IndexOptions.DOCS_AND_FREQS_AND_POSITIONS);
         OAK_TYPE.setTokenized(true);
         OAK_TYPE.freeze();
 
-        OAK_TYPE_NOT_STORED.setIndexed(true);
         OAK_TYPE_NOT_STORED.setOmitNorms(true);
         OAK_TYPE_NOT_STORED.setStored(false);
-        OAK_TYPE_NOT_STORED.setIndexOptions(DOCS_AND_FREQS_AND_POSITIONS);
+        OAK_TYPE_NOT_STORED.setIndexOptions(IndexOptions.DOCS_AND_FREQS_AND_POSITIONS);
         OAK_TYPE_NOT_STORED.setTokenized(true);
         OAK_TYPE_NOT_STORED.freeze();
 

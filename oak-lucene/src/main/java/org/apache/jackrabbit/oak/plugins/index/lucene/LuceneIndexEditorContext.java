@@ -24,7 +24,9 @@ import java.io.InputStream;
 import java.net.URL;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Arrays;
 import java.util.Calendar;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
@@ -217,15 +219,17 @@ public class LuceneIndexEditorContext {
         log.trace("Writer for direcory {} - docs: {}, ramDocs: {}", definition, docs, ram);
 
         String[] files = directory.listAll();
+        Arrays.sort(files);
         long overallSize = 0;
         StringBuilder sb = new StringBuilder();
         for (String f : files) {
             sb.append(f).append(":");
-            if (directory.fileLength(f) > 0) {
+            try {
+                assert directory.fileLength(f) > 0;
                 long size = directory.fileLength(f);
                 overallSize += size;
                 sb.append(size);
-            } else {
+            } catch (Exception e) {
                 sb.append("--");
             }
             sb.append(", ");

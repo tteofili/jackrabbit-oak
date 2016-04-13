@@ -29,11 +29,13 @@ import org.apache.lucene.codecs.StoredFieldsFormat;
 import org.apache.lucene.codecs.TermVectorsFormat;
 import org.apache.lucene.codecs.lucene50.Lucene50FieldInfosFormat;
 import org.apache.lucene.codecs.lucene50.Lucene50LiveDocsFormat;
+import org.apache.lucene.codecs.lucene50.Lucene50PostingsFormat;
 import org.apache.lucene.codecs.lucene50.Lucene50SegmentInfoFormat;
 import org.apache.lucene.codecs.lucene50.Lucene50StoredFieldsFormat;
 import org.apache.lucene.codecs.lucene50.Lucene50TermVectorsFormat;
 import org.apache.lucene.codecs.lucene53.Lucene53NormsFormat;
 import org.apache.lucene.codecs.lucene54.Lucene54Codec;
+import org.apache.lucene.codecs.lucene54.Lucene54DocValuesFormat;
 
 /**
  * Oak specific {@link org.apache.lucene.codecs.Codec}.
@@ -46,8 +48,8 @@ public class OakCodec extends FilterCodec {
     private final FieldInfosFormat fieldInfosFormat = new Lucene50FieldInfosFormat();
     private final SegmentInfoFormat segmentInfosFormat = new Lucene50SegmentInfoFormat();
     private final LiveDocsFormat liveDocsFormat = new Lucene50LiveDocsFormat();
-    private final PostingsFormat defaultFormat = PostingsFormat.forName("Lucene41");
-    private final DocValuesFormat defaultDVFormat = DocValuesFormat.forName("Lucene45");
+    private final PostingsFormat defaultFormat = new Lucene50PostingsFormat();
+    private final DocValuesFormat defaultDVFormat = new Lucene54DocValuesFormat();
     private final NormsFormat normsFormat = new Lucene53NormsFormat();
     private final StoredFieldsFormat fieldsFormat = new Lucene50StoredFieldsFormat();
 

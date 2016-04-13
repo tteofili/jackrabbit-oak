@@ -104,8 +104,8 @@ public class IndexCopierTest {
 
         assertEquals(2, wrapped.listAll().length);
 
-        assertTrue(wrapped.fileExists("t1"));
-        assertTrue(wrapped.fileExists("t2"));
+        assertTrue(wrapped.fileLength("t1") >= 0);
+        assertTrue(wrapped.fileLength("t2") >= 0);
 
         assertEquals(t1.length, wrapped.fileLength("t1"));
         assertEquals(t2.length, wrapped.fileLength("t2"));
@@ -113,7 +113,7 @@ public class IndexCopierTest {
         readAndAssert(wrapped, "t1", t1);
 
         //t1 should now be added to testDir
-        assertTrue(baseDir.fileExists("t1"));
+        assertTrue(baseDir.fileLength("t1") >= 0);
     }
 
     @Test
@@ -138,11 +138,11 @@ public class IndexCopierTest {
         assertEquals(2, wrapped.listAll().length);
         assertThat(syncedFiles, containsInAnyOrder("t1", "t2"));
 
-        assertTrue(wrapped.fileExists("t1"));
-        assertTrue(wrapped.fileExists("t2"));
+        assertTrue(wrapped.fileLength("t1") >= 0);
+        assertTrue(wrapped.fileLength("t2") >= 0);
 
-        assertTrue(baseDir.fileExists("t1"));
-        assertTrue(baseDir.fileExists("t2"));
+        assertTrue(baseDir.fileLength("t1") >= 0);
+        assertTrue(baseDir.fileLength("t2") >= 0);
 
         assertEquals(t1.length, wrapped.fileLength("t1"));
         assertEquals(t2.length, wrapped.fileLength("t2"));
@@ -184,8 +184,8 @@ public class IndexCopierTest {
 
         assertEquals(2, wrapped.listAll().length);
 
-        assertTrue(wrapped.fileExists("t1"));
-        assertTrue(wrapped.fileExists("t2"));
+        assertTrue(wrapped.fileLength("t1") >= 0);
+        assertTrue(wrapped.fileLength("t2") >= 0);
 
         assertEquals(t1.length, wrapped.fileLength("t1"));
         assertEquals(t2.length, wrapped.fileLength("t2"));
@@ -300,14 +300,14 @@ public class IndexCopierTest {
         final CountDownLatch copyRequestArrived = new CountDownLatch(1);
         TestRAMDirectory remote = new TestRAMDirectory(){
             @Override
-            public void copy(Directory to, String src, String dest, IOContext context) throws IOException {
+            public void copyFrom(Directory to, String src, String dest, IOContext context) throws IOException {
                 copyRequestArrived.countDown();
                 try {
                     copyProceed.await();
                 } catch (InterruptedException e) {
 
                 }
-                super.copy(to, src, dest, context);
+                super.copyFrom(to, src, dest, context);
             }
         };
         Directory wrapped = c1.wrapForRead("/foo", defn, remote);
@@ -407,7 +407,7 @@ public class IndexCopierTest {
 
         }
 
-        assertFalse(c1.baseDir.fileExists(fileName));
+        assertFalse(c1.baseDir.fileLength(fileName) >= 0);
     }
 
     @Test
@@ -432,8 +432,8 @@ public class IndexCopierTest {
         readAndAssert(w1, "t2", t2);
 
         // t1 and t2 should now be present in local (base dir which back local)
-        assertTrue(baseDir.fileExists("t1"));
-        assertTrue(baseDir.fileExists("t2"));
+        assertTrue(baseDir.fileLength("t1") >= 0);
+        assertTrue(baseDir.fileLength("t2") >= 0);
 
         Directory r2 = new RAMDirectory();
         copy(r1, r2);
@@ -444,8 +444,8 @@ public class IndexCopierTest {
         //Close would trigger removal of file which are not present in remote
         w2.close();
 
-        assertFalse("t1 should have been deleted", baseDir.fileExists("t1"));
-        assertTrue(baseDir.fileExists("t2"));
+        assertFalse("t1 should have been deleted", baseDir.fileLength("t1") >= 0);
+        assertTrue(baseDir.fileLength("t2") >= 0);
     }
 
 
@@ -475,8 +475,8 @@ public class IndexCopierTest {
         readAndAssert(w1, "t2", t2);
 
         // t1 and t2 should now be present in local (base dir which back local)
-        assertTrue(baseDir.fileExists("t1"));
-        assertTrue(baseDir.fileExists("t2"));
+        assertTrue(baseDir.fileLength("t1") >= 0);
+        assertTrue(baseDir.fileLength("t2") >= 0);
 
         Directory r2 = new CloseSafeDir();
         copy(r1, r2);
@@ -599,10 +599,10 @@ public class IndexCopierTest {
         assertEquals(newHashSet("t1", "t2"), newHashSet(local.listAll()));
         assertEquals(t2.length, local.fileLength("t2"));
 
-        assertTrue(local.fileExists("t1"));
-        assertTrue(local.fileExists("t2"));
+        assertTrue(local.fileLength("t1") >= 0);
+        assertTrue(local.fileLength("t2") >= 0);
 
-        assertTrue("t2 should be copied to remote", remote.fileExists("t2"));
+        assertTrue("t2 should be copied to remote", remote.fileLength("t2") >= 0);
 
         readAndAssert(local, "t1", t1);
         readAndAssert(local, "t2", t2);
@@ -629,7 +629,7 @@ public class IndexCopierTest {
         }
 
         local.close();
-        assertFalse(baseDir.fileExists("t2"));
+        assertFalse(baseDir.fileLength("t2") >= 0);
     }
 
     /**
@@ -658,21 +658,21 @@ public class IndexCopierTest {
 
         //File which was copied from remote should not be deleted from baseDir
         //upon delete from local
-        assertTrue(baseDir.fileExists("t1"));
+        assertTrue(baseDir.fileLength("t1") >= 0);
         local.deleteFile("t1");
-        assertFalse("t1 should be deleted from remote", remote.fileExists("t1"));
-        assertFalse("t1 should be deleted from 'local' view also", local.fileExists("t1"));
-        assertTrue("t1 should not be deleted from baseDir", baseDir.fileExists("t1"));
+        assertFalse("t1 should be deleted from remote", remote.fileLength("t1") >= 0);
+        assertFalse("t1 should be deleted from 'local' view also", local.fileLength("t1") >= 0);
+        assertTrue("t1 should not be deleted from baseDir", baseDir.fileLength("t1") >= 0);
 
         //File which was created only via local SHOULD get removed from
         //baseDir only upon close
-        assertTrue(baseDir.fileExists("t3"));
+        assertTrue(baseDir.fileLength("t3") >= 0);
         local.deleteFile("t3");
-        assertFalse("t1 should be deleted from remote", local.fileExists("t3"));
-        assertTrue("t1 should NOT be deleted from remote", baseDir.fileExists("t3"));
+        assertFalse("t1 should be deleted from remote", local.fileLength("t3") >= 0);
+        assertTrue("t1 should NOT be deleted from remote", baseDir.fileLength("t3") >= 0);
 
         local.close();
-        assertFalse("t3 should also be deleted from local", baseDir.fileExists("t3"));
+        assertFalse("t3 should also be deleted from local", baseDir.fileLength("t3") >= 0);
     }
 
     @Test
@@ -730,16 +730,16 @@ public class IndexCopierTest {
         final Directory local = copier.wrapForWrite(defn, remote, false);
         byte[] t1 = writeFile(local, "t1");
 
-        assertTrue(local.fileExists("t1"));
-        assertFalse("t1 should NOT be copied to remote", remote.fileExists("t1"));
+        assertTrue(local.fileLength("t1") >= 0);
+        assertFalse("t1 should NOT be copied to remote", remote.fileLength("t1") >= 0);
 
         //Execute all job
         executor.executeAll();
 
-        assertTrue("t1 should now be copied to remote", remote.fileExists("t1"));
+        assertTrue("t1 should now be copied to remote", remote.fileLength("t1") >= 0);
 
         byte[] t2 = writeFile(local, "t2");
-        assertFalse("t2 should NOT be copied to remote", remote.fileExists("t2"));
+        assertFalse("t2 should NOT be copied to remote", remote.fileLength("t2") >= 0);
 
         final ExecutorService executorService = Executors.newFixedThreadPool(4);
         final CountDownLatch copyLatch = new CountDownLatch(1);
@@ -768,14 +768,14 @@ public class IndexCopierTest {
         });
 
         closeLatch.countDown();
-        assertFalse("t2 should NOT be copied to remote", remote.fileExists("t2"));
+        assertFalse("t2 should NOT be copied to remote", remote.fileLength("t2") >= 0);
 
         //Let copy to proceed
         copyLatch.countDown();
 
         //Now wait for close to finish
         closeTasks.get();
-        assertTrue("t2 should now be copied to remote", remote.fileExists("t2"));
+        assertTrue("t2 should now be copied to remote", remote.fileLength("t2") >= 0);
 
         executorService.shutdown();
     }
@@ -792,16 +792,16 @@ public class IndexCopierTest {
         final Directory local = copier.wrapForWrite(defn, remote, false);
         byte[] t1 = writeFile(local, "t1");
 
-        assertTrue(local.fileExists("t1"));
-        assertFalse("t1 should NOT be copied to remote", remote.fileExists("t1"));
+        assertTrue(local.fileLength("t1") >= 0);
+        assertFalse("t1 should NOT be copied to remote", remote.fileLength("t1") >= 0);
 
         //Execute all job
         executor.executeAll();
 
-        assertTrue("t1 should now be copied to remote", remote.fileExists("t1"));
+        assertTrue("t1 should now be copied to remote", remote.fileLength("t1") >= 0);
 
         byte[] t2 = writeFile(local, "t2");
-        assertFalse("t2 should NOT be copied to remote", remote.fileExists("t2"));
+        assertFalse("t2 should NOT be copied to remote", remote.fileLength("t2") >= 0);
 
         ExecutorService executorService = Executors.newFixedThreadPool(2);
         final CountDownLatch copyLatch = new CountDownLatch(1);
@@ -826,14 +826,14 @@ public class IndexCopierTest {
         });
 
         closeLatch.countDown();
-        assertFalse("t2 should NOT be copied to remote", remote.fileExists("t2"));
+        assertFalse("t2 should NOT be copied to remote", remote.fileLength("t2") >= 0);
 
         //Let copy to proceed
         copyLatch.countDown();
 
         //Now wait for close to finish
         closeTasks.get();
-        assertTrue("t2 should now be copied to remote", remote.fileExists("t2"));
+        assertTrue("t2 should now be copied to remote", remote.fileLength("t2") >= 0);
 
         executorService.shutdown();
     }
@@ -975,13 +975,13 @@ public class IndexCopierTest {
         cor2.close();
         executor.enableDelayedExecution();
 
-        assertFalse(baseDir.fileExists("f1"));
-        assertFalse("f2 should not have been copied to remote so far", remote.fileExists("f2"));
-        assertTrue("f2 should exist", baseDir.fileExists("f2"));
+        assertFalse(baseDir.fileLength("f1") >= 0);
+        assertFalse("f2 should not have been copied to remote so far", remote.fileLength("f2") >= 0);
+        assertTrue("f2 should exist", baseDir.fileLength("f2") >= 0);
 
         pauseCopyLatch.countDown();
         cow1.close();
-        assertTrue("f2 should exist", remote.fileExists("f2"));
+        assertTrue("f2 should exist", remote.fileLength("f2") >= 0);
 
         executorService.shutdown();
     }
@@ -1013,7 +1013,7 @@ public class IndexCopierTest {
 
     private static void copy(Directory source, Directory dest) throws IOException {
         for (String file : source.listAll()) {
-            source.copy(dest, file, file, IOContext.DEFAULT);
+            source.copyFrom(dest, file, file, IOContext.DEFAULT);
         }
     }
 

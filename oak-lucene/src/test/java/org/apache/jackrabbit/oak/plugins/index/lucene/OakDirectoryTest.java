@@ -152,7 +152,7 @@ public class OakDirectoryTest {
         o.writeBytes(data, data.length);
         o.close();
 
-        assertTrue(dir.fileExists("test"));
+        assertTrue(dir.fileLength("test") >= 0);
         assertEquals(fileSize, dir.fileLength("test"));
 
         IndexInput i = dir.openInput("test", IOContext.DEFAULT);
@@ -403,7 +403,7 @@ public class OakDirectoryTest {
 
         blobStore.startFailing();
         try{
-            o3.flush();
+            o3.close();
             fail();
         } catch (IOException e){
             assertThat(e.getMessage(), containsString(indexPath));

@@ -24,6 +24,8 @@ import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstant
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
@@ -53,9 +55,9 @@ class IndexNode {
                 directory = cloner.wrapForRead(indexPath, definition, directory);
             }
         } else if (PERSISTENCE_FILE.equalsIgnoreCase(defnNodeState.getString(PERSISTENCE_NAME))) {
-            String path = defnNodeState.getString(PERSISTENCE_PATH);
-            if (path != null && new File(path).exists()) {
-                directory = FSDirectory.open(new File(path));
+            Path path = Paths.get(defnNodeState.getString(PERSISTENCE_PATH));
+            if (path != null && path.toFile().exists()) {
+                directory = FSDirectory.open(path);
             }
         }
 

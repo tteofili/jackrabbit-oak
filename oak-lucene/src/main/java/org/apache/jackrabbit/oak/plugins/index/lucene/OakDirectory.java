@@ -27,6 +27,8 @@ import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
+import java.util.zip.CRC32;
+import java.util.zip.Checksum;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
@@ -105,11 +107,6 @@ class OakDirectory extends Directory {
     }
 
     @Override
-    public boolean fileExists(String name) throws IOException {
-        return fileNames.contains(name);
-    }
-
-    @Override
     public void deleteFile(String name) throws IOException {
         checkArgument(!readOnly, "Read only directory");
         fileNames.remove(name);
@@ -182,8 +179,18 @@ class OakDirectory extends Directory {
     }
 
     @Override
+    public Lock obtainLock(String name) throws IOException {
+        return NoLockFactory.INSTANCE.obtainLock(this, name);
+    }
+
+    @Override
     public void sync(Collection<String> names) throws IOException {
         // ?
+    }
+
+    @Override
+    public void renameFile(String source, String dest) throws IOException {
+
     }
 
     @Override
@@ -507,6 +514,17 @@ class OakDirectory extends Directory {
         }
 
         @Override
+        public IndexInput slice(String sliceDescription, long offset, long length) throws IOException {
+            if (offset < 0 || length < 0 || offset + length > this.length()) {
+                throw new IllegalArgumentException("slice() " + sliceDescription + " out of bounds: "  + this);
+            }
+
+            OakIndexInput oakIndexInput = new OakIndexInput(getFullSliceDescription(sliceDescription), this.file.file, dirDetails);
+            oakIndexInput.seek(offset);
+            return oakIndexInput;
+        }
+
+        @Override
         public void readBytes(byte[] b, int o, int n) throws IOException {
             checkNotClosed();
             file.readBytes(b, o, n);
@@ -563,9 +581,11 @@ class OakDirectory extends Directory {
     private final class OakIndexOutput extends IndexOutput {
         private final String dirDetails;
         private final OakIndexFile file;
+        private final Checksum digest;
 
         public OakIndexOutput(String name, NodeBuilder file, String dirDetails) throws IOException {
             super(name);
+            digest = new CRC32();
             this.dirDetails = dirDetails;
             this.file = new OakIndexFile(name, file, dirDetails);
         }
@@ -576,9 +596,15 @@ class OakDirectory extends Directory {
         }
 
         @Override
+        public long getChecksum() throws IOException {
+            return digest.getValue();
+        }
+
+        @Override
         public void writeBytes(byte[] b, int offset, int length)
                 throws IOException {
             try {
+                digest.update(b, offset, length);
                 file.writeBytes(b, offset, length);
             } catch (IOException e) {
                 throw wrapWithDetails(e);
@@ -587,6 +613,7 @@ class OakDirectory extends Directory {
 
         @Override
         public void writeByte(byte b) throws IOException {
+            digest.update(b);
             writeBytes(new byte[] { b }, 0, 1);
         }
 

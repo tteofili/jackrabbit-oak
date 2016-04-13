@@ -180,7 +180,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
                     dir = unwrap(dir);
 
                     if (dir instanceof FSDirectory){
-                        return ((FSDirectory) dir).getDirectory().getAbsolutePath();
+                        return ((FSDirectory) dir).getDirectory().toFile().getAbsolutePath();
                     }
                     return null;
                 }

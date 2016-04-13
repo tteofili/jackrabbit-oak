@@ -23,6 +23,8 @@ import java.io.Closeable;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
@@ -161,24 +163,24 @@ public class IndexCopier implements CopyOnReadStatsMBean, Closeable {
 
     protected Directory createLocalDirForIndexWriter(IndexDefinition definition) throws IOException {
         String indexPath = definition.getIndexPathFromConfig();
-        File indexWriterDir;
+        Path indexWriterDir;
         if (indexPath == null){
             //If indexPath is not known create a unique directory for work
-            indexWriterDir = new File(indexWorkDir, String.valueOf(UNIQUE_COUNTER.incrementAndGet()));
+            indexWriterDir = Paths.get(indexWorkDir.getAbsolutePath(), String.valueOf(UNIQUE_COUNTER.incrementAndGet()));
         } else {
             File indexDir = getIndexDir(indexPath);
             String newVersion = String.valueOf(definition.getReindexCount());
-            indexWriterDir = getVersionedDir(indexPath, indexDir, newVersion);
+            indexWriterDir = Paths.get(getVersionedDir(indexPath, indexDir, newVersion).getAbsolutePath());
         }
 
         //By design indexing in Oak is single threaded so Lucene locking
         //can be disabled
-        Directory dir = FSDirectory.open(indexWriterDir, NoLockFactory.getNoLockFactory());
+        Directory dir = FSDirectory.open(indexWriterDir, NoLockFactory.INSTANCE);
 
         log.debug("IndexWriter would use {}", indexWriterDir);
 
         if (indexPath == null) {
-            dir = new DeleteOldDirOnClose(dir, indexWriterDir);
+            dir = new DeleteOldDirOnClose(dir, indexWriterDir.toFile());
             log.debug("IndexPath [{}] not configured in index definition {}. Writer would create index " +
                     "files in temporary dir {} which would be deleted upon close. For better performance do " +
                     "configure the 'indexPath' as part of your index definition", LuceneIndexConstants.INDEX_PATH,
@@ -191,7 +193,7 @@ public class IndexCopier implements CopyOnReadStatsMBean, Closeable {
         File indexDir = getIndexDir(indexPath);
         String newVersion = String.valueOf(definition.getReindexCount());
         File versionedIndexDir = getVersionedDir(indexPath, indexDir, newVersion);
-        Directory result = FSDirectory.open(versionedIndexDir);
+        Directory result = FSDirectory.open(Paths.get(versionedIndexDir.getAbsolutePath()));
 
         String oldVersion = indexPathVersionMapping.put(indexPath, newVersion);
         if (!newVersion.equals(oldVersion) && oldVersion != null) {
@@ -358,7 +360,7 @@ public class IndexCopier implements CopyOnReadStatsMBean, Closeable {
 
             //If file does not exist then just delegate to remote and not
             //schedule a copy task
-            if (!remote.fileExists(name)){
+            if (!fileExists(remote, name)){
                 if (log.isDebugEnabled()) {
                     log.debug("[{}] Looking for non existent file {}. Current known files {}",
                             indexPath, name, Arrays.toString(remote.listAll()));
@@ -428,7 +430,7 @@ public class IndexCopier implements CopyOnReadStatsMBean, Closeable {
             boolean copyAttempted = false;
             long fileSize = 0;
             try {
-                if (!local.fileExists(name)) {
+                if (!fileExists(local, name)) {
                     long perfStart = -1;
                     if (logDuration) {
                         perfStart = PERF_LOGGER.start();
@@ -439,7 +441,7 @@ public class IndexCopier implements CopyOnReadStatsMBean, Closeable {
                     long start = startCopy(file);
                     copyAttempted = true;
 
-                    remote.copy(local, name, name, IOContext.READ);
+                    remote.copyFrom(local, name, name, IOContext.READ);
                     reference.markValid();
 
                     if (sync) {
@@ -477,7 +479,7 @@ public class IndexCopier implements CopyOnReadStatsMBean, Closeable {
             } finally {
                 if (copyAttempted && !success){
                     try {
-                        if (local.fileExists(name)) {
+                        if (fileExists(local, name)) {
                             local.deleteFile(name);
                         }
                     } catch (IOException e) {
@@ -681,11 +683,6 @@ public class IndexCopier implements CopyOnReadStatsMBean, Closeable {
         }
 
         @Override
-        public boolean fileExists(String name) throws IOException {
-            return fileMap.containsKey(name);
-        }
-
-        @Override
         public void deleteFile(String name) throws IOException {
             log.trace("[COW][{}] Deleted file {}", indexPathForLogging, name);
             COWFileReference ref = fileMap.remove(name);
@@ -800,7 +797,7 @@ public class IndexCopier implements CopyOnReadStatsMBean, Closeable {
             long size = 0;
             for (String name : skippedFiles){
                 try{
-                    if (local.fileExists(name)){
+                    if (IndexCopier.fileExists(local, name)){
                         size += local.fileLength(name);
                     }
                 } catch (Exception ignore){
@@ -840,7 +837,7 @@ public class IndexCopier implements CopyOnReadStatsMBean, Closeable {
                     long perfStart = PERF_LOGGER.start();
                     long start = startCopy(file);
 
-                    local.copy(remote, name, name, IOContext.DEFAULT);
+                    local.copyFrom(remote, name, name, IOContext.DEFAULT);
 
                     doneCopy(file, start);
                     PERF_LOGGER.end(perfStart, 0, "[COW][{}] Copied to remote {} -- size: {}",
@@ -953,7 +950,7 @@ public class IndexCopier implements CopyOnReadStatsMBean, Closeable {
             }
 
             private void checkIfLocalValid() throws IOException {
-                validLocalCopyPresent = local.fileExists(name)
+                validLocalCopyPresent = fileExists(local, name)
                         && local.fileLength(name) == remote.fileLength(name);
             }
         }
@@ -999,12 +996,8 @@ public class IndexCopier implements CopyOnReadStatsMBean, Closeable {
                 private final IndexOutput delegate;
 
                 public CopyOnCloseIndexOutput(IndexOutput delegate) {
+                    super(delegate.toString());
                     this.delegate = delegate;
-                }
-
-                @Override
-                public void flush() throws IOException {
-                    delegate.flush();
                 }
 
                 @Override
@@ -1020,13 +1013,8 @@ public class IndexCopier implements CopyOnReadStatsMBean, Closeable {
                 }
 
                 @Override
-                public void seek(long pos) throws IOException {
-                    delegate.seek(pos);
-                }
-
-                @Override
-                public long length() throws IOException {
-                    return delegate.length();
+                public long getChecksum() throws IOException {
+                    return delegate.getChecksum();
                 }
 
                 @Override
@@ -1039,10 +1027,6 @@ public class IndexCopier implements CopyOnReadStatsMBean, Closeable {
                     delegate.writeBytes(b, offset, length);
                 }
 
-                @Override
-                public void setLength(long length) throws IOException {
-                    delegate.setLength(length);
-                }
             }
         }
     }
@@ -1052,7 +1036,7 @@ public class IndexCopier implements CopyOnReadStatsMBean, Closeable {
         boolean successFullyDeleted = false;
         try {
             boolean fileExisted = false;
-            if (dir.fileExists(fileName)) {
+            if (fileExists(dir, fileName)) {
                 fileExisted = true;
                 dir.deleteFile(fileName);
             }
@@ -1224,7 +1208,7 @@ public class IndexCopier implements CopyOnReadStatsMBean, Closeable {
         }
 
         if (dir instanceof FSDirectory){
-            return ((FSDirectory) dir).getDirectory();
+            return ((FSDirectory) dir).getDirectory().toFile();
         }
 
         return null;
@@ -1430,5 +1414,15 @@ public class IndexCopier implements CopyOnReadStatsMBean, Closeable {
                 throw new IllegalStateException(e);
             }
         }
+    }
+
+    private static boolean fileExists(Directory directory, String name) {
+        boolean exists = false;
+        try {
+            exists = directory.fileLength(name) >= 0;
+        } catch (Exception e) {
+            // do nothing
+        }
+        return exists;
     }
 }

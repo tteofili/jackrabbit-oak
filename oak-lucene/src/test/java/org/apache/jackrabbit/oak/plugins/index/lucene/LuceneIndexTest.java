@@ -110,11 +110,11 @@ import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.apache.jackrabbit.oak.spi.state.NodeStore;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.document.Document;
-import org.apache.lucene.index.AtomicReader;
-import org.apache.lucene.index.AtomicReaderContext;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.index.LeafReader;
+import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.queries.CustomScoreProvider;
 import org.apache.lucene.queries.CustomScoreQuery;
 import org.apache.lucene.search.Query;
@@ -644,10 +644,10 @@ public class LuceneIndexTest {
                 }
 
                 @Override
-                public CustomScoreProvider getCustomScoreProvider(AtomicReaderContext context) {
+                public CustomScoreProvider getCustomScoreProvider(LeafReaderContext context) {
                     return new CustomScoreProvider(context) {
                         public float customScore(int doc, float subQueryScore, float valSrcScore) {
-                            AtomicReader atomicReader = context.reader();
+                            LeafReader atomicReader = context.reader();
                             try {
                                 Document document = atomicReader.document(doc);
                                 // boosting docs created by foo

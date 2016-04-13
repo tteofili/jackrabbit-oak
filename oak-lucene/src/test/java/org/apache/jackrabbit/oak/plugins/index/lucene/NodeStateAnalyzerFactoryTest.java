@@ -75,9 +75,9 @@ public class NodeStateAnalyzerFactoryTest {
         assertNotNull(analyzer);
         assertEquals(LuceneIndexConstants.VERSION, analyzer.matchVersion);
 
-        nb.setProperty(LuceneIndexConstants.ANL_LUCENE_MATCH_VERSION, Version.LUCENE_31.toString());
+        nb.setProperty(LuceneIndexConstants.ANL_LUCENE_MATCH_VERSION, Version.LUCENE_4_0_0.toString());
         analyzer = (TestAnalyzer) factory.createInstance(nb.getNodeState());
-        assertEquals("Version field not picked from config",Version.LUCENE_31, analyzer.matchVersion);
+        assertEquals("Version field not picked from config",Version.LUCENE_4_0_0, analyzer.matchVersion);
 
         byte[] stopWords = newCharArraySet("foo", "bar");
         createFileNode(nb, LuceneIndexConstants.ANL_STOPWORDS, stopWords);
@@ -112,7 +112,7 @@ public class NodeStateAnalyzerFactoryTest {
         filters.child("LowerCase").setProperty(ANL_NAME, "LowerCase");
         filters.child("LowerCase").setProperty(JCR_PRIMARYTYPE, "nt:unstructured");
         //name is optional. Derived from nodeName
-        filters.child("stop").setProperty(ANL_LUCENE_MATCH_VERSION, Version.LUCENE_31.toString());
+        filters.child("stop").setProperty(ANL_LUCENE_MATCH_VERSION, Version.LUCENE_4_0_0.toString());
 
         TokenizerChain analyzer = (TokenizerChain) factory.createInstance(nb.getNodeState());
         assertEquals(2, analyzer.getFilters().length);
@@ -209,18 +209,18 @@ public class NodeStateAnalyzerFactoryTest {
         final Version matchVersion;
 
         public TestAnalyzer(Version matchVersion) {
-            super(matchVersion);
+            super();
             this.matchVersion = matchVersion;
         }
 
         public TestAnalyzer(Version version, CharArraySet stopwords) {
-            super(version, stopwords);
+            super(stopwords);
             this.matchVersion = version;
         }
 
         @Override
-        protected TokenStreamComponents createComponents(final String fieldName, final Reader reader) {
-            return new TokenStreamComponents(new LowerCaseTokenizer(matchVersion, reader));
+        protected TokenStreamComponents createComponents(final String fieldName) {
+            return new TokenStreamComponents(new LowerCaseTokenizer());
         }
     }
 
