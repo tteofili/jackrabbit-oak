@@ -21,6 +21,7 @@ import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.StringReader;
@@ -60,6 +61,7 @@ import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.JCR_N
 public abstract class QueryEngineImpl implements QueryEngine {
 
     public static final String CONTAINS = "contains(., '";
+    private static Decoder decoder;
 
     /**
      * Used to instruct the {@link QueryEngineImpl} on how to act with respect of the SQL2
@@ -216,21 +218,17 @@ public abstract class QueryEngineImpl implements QueryEngine {
         int i = statement1.indexOf(CONTAINS);
         if (i > 0) {
             int start = i + CONTAINS.length();
-            String text = statement1.substring(start, statement1.indexOf("')", start));
+            int end = statement1.indexOf("')", start);
+            String text = statement1.substring(start, end);
             // translate text
             try {
-                // TODO : correctly setup Joshua
-                String configFile = "/path/to/config";
-                JoshuaConfiguration joshuaConfiguration = new JoshuaConfiguration();
-                joshuaConfiguration.readConfigFile(configFile);
-                Decoder decoder = new Decoder(joshuaConfiguration, configFile);
+                Decoder decoder = getDecoder();
                 ByteArrayOutputStream os = new ByteArrayOutputStream();
-                decoder.decodeAll(new TranslationRequestStream(new BufferedReader(new StringReader(text)), joshuaConfiguration), os);
+                decoder.decodeAll(new TranslationRequestStream(new BufferedReader(new StringReader(text)), decoder.getJoshuaConfiguration()), os);
                 os.flush();
                 byte[] bytes = os.toByteArray();
                 String translationOutput = IOUtils.toString(bytes, Charset.defaultCharset().name());
-                System.err.println(translationOutput);
-                // TODO : add the translated query back into the statement
+                String translatedTerm = parseTranslation(translationOutput);
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
@@ -261,6 +259,37 @@ public abstract class QueryEngineImpl implements QueryEngine {
         }
 
         return queries;
+    }
+
+    public static String parseTranslation(String output) {
+        // format is lines of
+        // 0 ||| hello ? ||| WordPenalty=-1.737 lm_0=-9.614 tm_glue_0=1.000
+        // tm_pt_0=-4.154 tm_pt_1=-1.524 tm_pt_2=-1.000 tm_pt_4=-2.813
+        // tm_pt_5=-1.410 ||| 6.737
+
+        if(output == null || (output.equals(""))){
+            return null;
+        }
+
+        String lines[] = output.split("\\r?\\n");
+        String[] toks = lines[0].split("\\|\\|\\|");
+        return toks[1];
+    }
+
+
+
+    private static Decoder getDecoder() {
+        if (decoder == null) {
+            String configFile = "/path/to/config";
+            JoshuaConfiguration joshuaConfiguration = new JoshuaConfiguration();
+            try {
+                joshuaConfiguration.readConfigFile(configFile);
+                decoder = new Decoder(joshuaConfiguration, configFile);
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        }
+        return decoder;
     }
 
     @Override
