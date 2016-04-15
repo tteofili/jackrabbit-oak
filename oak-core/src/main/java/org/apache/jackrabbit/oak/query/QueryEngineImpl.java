@@ -19,11 +19,6 @@ package org.apache.jackrabbit.oak.query;
 import javax.annotation.Nonnull;
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
 import java.io.StringReader;
 import java.nio.charset.Charset;
 import java.text.ParseException;
@@ -60,7 +55,7 @@ import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.JCR_N
  */
 public abstract class QueryEngineImpl implements QueryEngine {
 
-    public static final String CONTAINS = "contains(., '";
+    public static final String CONTAINS = "contains(*, '";
     private static Decoder decoder;
 
     /**
@@ -211,8 +206,6 @@ public abstract class QueryEngineImpl implements QueryEngine {
             throw new ParseException("Unsupported language: " + language, 0);
         }
 
-        queries.add(q);
-
         // eventually translate the query
         String statement1 = q.getStatement();
         int i = statement1.indexOf(CONTAINS);
@@ -220,19 +213,23 @@ public abstract class QueryEngineImpl implements QueryEngine {
             int start = i + CONTAINS.length();
             int end = statement1.indexOf("')", start);
             String text = statement1.substring(start, end);
-            // translate text
             try {
                 Decoder decoder = getDecoder();
                 ByteArrayOutputStream os = new ByteArrayOutputStream();
+                // translate text
                 decoder.decodeAll(new TranslationRequestStream(new BufferedReader(new StringReader(text)), decoder.getJoshuaConfiguration()), os);
                 os.flush();
                 byte[] bytes = os.toByteArray();
                 String translationOutput = IOUtils.toString(bytes, Charset.defaultCharset().name());
                 String translatedTerm = parseTranslation(translationOutput);
+                String newStatement = generateNewStatement(statement1, start, end, text, translatedTerm);
+                q = parser.parse(newStatement, false);
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
         }
+
+        queries.add(q);
 
         if (settings.isSql2Optimisation()) {
             if (q.isInternal()) {
@@ -261,31 +258,40 @@ public abstract class QueryEngineImpl implements QueryEngine {
         return queries;
     }
 
+    private static String generateNewStatement(String statement1, int start, int end, String text, String translatedTerm) {
+        String second = " OR contains(*, '" + translatedTerm + "') ";
+        String first = statement1.substring(0, end + 2);
+        String third = statement1.substring(end + 2);
+        String s = first + second + third;
+        return s;
+    }
+
     public static String parseTranslation(String output) {
         // format is lines of
         // 0 ||| hello ? ||| WordPenalty=-1.737 lm_0=-9.614 tm_glue_0=1.000
         // tm_pt_0=-4.154 tm_pt_1=-1.524 tm_pt_2=-1.000 tm_pt_4=-2.813
         // tm_pt_5=-1.410 ||| 6.737
 
-        if(output == null || (output.equals(""))){
+        if (output == null || (output.equals(""))) {
             return null;
         }
 
         String lines[] = output.split("\\r?\\n");
         String[] toks = lines[0].split("\\|\\|\\|");
-        return toks[1];
+        return toks[0].trim();
     }
-
 
 
     private static Decoder getDecoder() {
         if (decoder == null) {
-            String configFile = "/path/to/config";
+            System.setProperty("JOSHUA", "/Users/teofili/dev/joshua");
+            String configFile = "/Users/teofili/data/joshua/es-en/language-pack-es-en-phrase-2015-03-06/joshua.config";
             JoshuaConfiguration joshuaConfiguration = new JoshuaConfiguration();
             try {
                 joshuaConfiguration.readConfigFile(configFile);
+                joshuaConfiguration.sanityCheck();
                 decoder = new Decoder(joshuaConfiguration, configFile);
-            } catch (IOException e) {
+            } catch (Exception e) {
                 throw new RuntimeException(e);
             }
         }
