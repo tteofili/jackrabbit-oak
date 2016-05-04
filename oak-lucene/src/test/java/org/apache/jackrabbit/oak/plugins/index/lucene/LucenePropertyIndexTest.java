@@ -2106,6 +2106,19 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
         assertPlanAndQuery(query, "lucene:test1(/oak:index/test1)", Collections.<String>emptyList());
     }
 
+    @Test
+    public void testFullTextTranslation() throws Exception {
+        Tree idx = createFulltextIndex(root.getTree("/"), "test");
+        TestUtil.useV2(idx);
+        root.commit();
+
+        Tree node = root.getTree("/").addChild("content");
+        node.setProperty("text", "hello");
+        root.commit();
+        assertQuery("//*[jcr:contains(., 'hola')]", "xpath",
+                ImmutableList.of("/content"));
+    }
+
     private void assertPlanAndQuery(String query, String planExpectation, List<String> paths){
         assertThat(explain(query), containsString(planExpectation));
         assertQuery(query, paths);

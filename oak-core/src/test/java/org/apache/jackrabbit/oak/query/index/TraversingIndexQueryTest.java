@@ -76,15 +76,6 @@ public class TraversingIndexQueryTest extends AbstractQueryTest {
     }
 
     @Test
-    public void testFullTextTranslation() throws Exception {
-        Tree node = root.getTree("/").addChild("content");
-        node.setProperty("text", "hello");
-        root.commit();
-        assertQuery("//*[jcr:contains(., 'hola')]", "xpath",
-                ImmutableList.of("/content"));
-    }
-
-    @Test
     @Ignore("OAK-2050")
     public void testFullTextTermName() throws Exception {
         Tree c = root.getTree("/").addChild("content");
