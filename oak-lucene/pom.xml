@@ -121,6 +121,8 @@
                 org.apache.lucene.sandbox.*;resolution:=optional,
                 !org.apache.lucene.*,
                 !org.apache.jackrabbit.oak.cache,
+                org.apache.jackrabbit.oak.api.jmx;version="[2.1.0,4)",
+                org.apache.jackrabbit.oak.spi.security.user;version="[2.1.0,3)",
                 *
             </Import-Package>
             <Embed-Dependency>
@@ -337,5 +339,15 @@
       <version>1.10.19</version>
       <scope>test</scope>
     </dependency>
+
+    <!-- Joshua -->
+    <dependency>
+      <groupId>org.apache.joshua</groupId>
+      <artifactId>joshua-core</artifactId>
+      <version>6.1-SNAPSHOT</version>
+      <scope>provided</scope>
+      <optional>true</optional>
+    </dependency>
+
   </dependencies>
 </project>
