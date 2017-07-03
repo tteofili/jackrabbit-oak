@@ -45,9 +45,9 @@
         <artifactId>maven-bundle-plugin</artifactId>
         <configuration>
           <instructions>
-            <!--<Export-Package>-->
-                <!--*-->
-            <!--</Export-Package>-->
+            <Export-Package>
+                *
+            </Export-Package>
             <!--<_exportcontents>-->
                 <!--org.apache.lucene.*;version=${lucene.version}-->
             <!--</_exportcontents>-->

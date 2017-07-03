@@ -14,18 +14,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.jackrabbit.oak.plugins.index.lucene;
+package org.apache.jackrabbit.oak.plugins.index;
 
+import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.Calendar;
 
-import javax.annotation.Nullable;
-
 import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.api.Type;
-import org.apache.jackrabbit.oak.plugins.index.IndexConstants;
-import org.apache.jackrabbit.oak.plugins.index.IndexUpdateCallback;
-import org.apache.jackrabbit.oak.plugins.index.IndexingContext;
+import org.apache.jackrabbit.oak.commons.benchmark.PerfLogger;
 import org.apache.jackrabbit.oak.plugins.index.lucene.binary.BinaryTextExtractor;
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.FacetHelper;
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.FacetsConfigProvider;
@@ -36,7 +33,6 @@ import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.apache.jackrabbit.oak.spi.state.NodeStateUtils;
 import org.apache.jackrabbit.oak.stats.Clock;
-import org.apache.jackrabbit.oak.commons.benchmark.PerfLogger;
 import org.apache.jackrabbit.util.ISO8601;
 import org.apache.lucene.facet.FacetsConfig;
 import org.slf4j.Logger;
