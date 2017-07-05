@@ -31,11 +31,15 @@ import java.util.concurrent.ScheduledExecutorService;
 
 import com.google.common.io.Files;
 import org.apache.commons.io.FileUtils;
+import org.apache.jackrabbit.core.data.FileDataStore;
 import org.apache.jackrabbit.oak.InitialContent;
 import org.apache.jackrabbit.oak.Oak;
 import org.apache.jackrabbit.oak.api.ContentRepository;
 import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.commons.concurrent.ExecutorCloser;
+import org.apache.jackrabbit.oak.plugins.blob.BlobStoreStats;
+import org.apache.jackrabbit.oak.plugins.blob.datastore.DataStoreBlobStore;
+import org.apache.jackrabbit.oak.plugins.blob.datastore.OakFileDataStore;
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.CopyOnReadDirectory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.IndexDefinitionBuilder;
 import org.apache.jackrabbit.oak.plugins.index.nodetype.NodeTypeIndexProvider;
@@ -46,11 +50,14 @@ import org.apache.jackrabbit.oak.segment.file.FileStore;
 import org.apache.jackrabbit.oak.segment.file.FileStoreBuilder;
 import org.apache.jackrabbit.oak.segment.file.FileStoreStats;
 import org.apache.jackrabbit.oak.segment.file.InvalidFileStoreVersionException;
+import org.apache.jackrabbit.oak.spi.blob.BlobStore;
+import org.apache.jackrabbit.oak.spi.blob.stats.BlobStatsCollector;
 import org.apache.jackrabbit.oak.spi.commit.Observer;
 import org.apache.jackrabbit.oak.spi.query.QueryIndexProvider;
 import org.apache.jackrabbit.oak.spi.security.OpenSecurityProvider;
 import org.apache.jackrabbit.oak.spi.state.NodeStore;
 import org.apache.jackrabbit.oak.stats.DefaultStatisticsProvider;
+import org.apache.jackrabbit.oak.stats.StatisticsProvider;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.store.FilterDirectory;
@@ -87,6 +94,9 @@ public class LuceneSegmentStatsTest extends AbstractQueryTest {
     private TestUtil.OptionalEditorProvider optionalEditorProvider = new TestUtil.OptionalEditorProvider();
 
     private FileStore fileStore;
+    private DataStoreBlobStore dataStoreBlobStore;
+    private DefaultStatisticsProvider statisticsProvider;
+    private String fdsDir;
 
     public LuceneSegmentStatsTest(boolean copyOnRW, String codec) {
         this.copyOnRW = copyOnRW;
@@ -146,7 +156,11 @@ public class LuceneSegmentStatsTest extends AbstractQueryTest {
 
         NodeStore nodeStore;
         try {
-            fileStore = FileStoreBuilder.fileStoreBuilder(DIRECTORY).withStatisticsProvider(new DefaultStatisticsProvider(scheduledExecutorService)).build();
+            statisticsProvider = new DefaultStatisticsProvider(scheduledExecutorService);
+            fileStore = FileStoreBuilder.fileStoreBuilder(DIRECTORY)
+                    .withStatisticsProvider(statisticsProvider)
+                    .withBlobStore(createBlobStore())
+                    .build();
             nodeStore = SegmentNodeStoreBuilders.builder(fileStore).build();
         } catch (IOException | InvalidFileStoreVersionException e) {
             throw new RuntimeException(e);
@@ -161,6 +175,19 @@ public class LuceneSegmentStatsTest extends AbstractQueryTest {
                 .with(new PropertyIndexEditorProvider())
                 .with(new NodeTypeIndexProvider())
                 .createContentRepository();
+    }
+
+    private BlobStore createBlobStore() {
+        FileDataStore fds = new OakFileDataStore();
+        fdsDir = "target/fds-" + codec + copyOnRW;
+        fds.setPath(fdsDir);
+        fds.setMinRecordLength(4000);
+        fds.init(null);
+        dataStoreBlobStore = new DataStoreBlobStore(fds);
+        StatisticsProvider sp = new DefaultStatisticsProvider(scheduledExecutorService);
+        BlobStatsCollector collector = new BlobStoreStats(sp);
+        dataStoreBlobStore.setBlobStatsCollector(collector);
+        return dataStoreBlobStore;
     }
 
     private IndexCopier createIndexCopier() {
@@ -223,49 +250,57 @@ public class LuceneSegmentStatsTest extends AbstractQueryTest {
         idxb.build(idx);
 
         Random r = new Random();
-        Tree rootTree = root.getTree("/").addChild("content");
-        byte[] bytes = new byte[10240];
-        Charset charset = Charset.defaultCharset();
-        for (int i = 0; i < 1000; i++) {
-            r.nextBytes(bytes);
-            String text = new String(bytes, charset);
-            Tree tree = rootTree.addChild(String.valueOf(i));
-            tree.setProperty("foo", text);
-            tree.setProperty("bin", bytes);
-        }
-        root.commit();
 
         System.out.println("***");
         System.out.println(codec + "," + copyOnRW);
 
-        printStats();
+        long start = System.currentTimeMillis();
+        int multiplier = 10;
+        for (int n = 0; n < multiplier; n++) {
 
-        System.out.println("reindex");
-
-        // do nothing, reindex and measure
-        idx = root.getTree("/oak:index/lucenePropertyIndex");
-        idx.setProperty("reindex", true);
-        root.commit();
-
-        printStats();
-
-        System.out.println("add and delete");
-
-        // add and delete some content and measure
-        for (int i = 0; i < 1000; i++) {
-            r.nextBytes(bytes);
-            String text = new String(bytes, charset);
-            Tree tree = rootTree.addChild(String.valueOf(100 + i));
-            tree.setProperty("foo", text);
-            tree.setProperty("bin", bytes);
-            if (i % 3 == 0) { // delete one of the already existing nodes every 3
-                assert rootTree.getChild(String.valueOf(i)).remove();
+            Tree rootTree = root.getTree("/").addChild("content");
+            byte[] bytes = new byte[10240];
+            Charset charset = Charset.defaultCharset();
+            for (int i = 0; i < 1000; i++) {
+                r.nextBytes(bytes);
+                String text = new String(bytes, charset);
+                Tree tree = rootTree.addChild(String.valueOf(n + i));
+                tree.setProperty("foo", text);
+                tree.setProperty("bin", bytes);
             }
+            root.commit();
+
+
+            printStats();
+
+            System.out.println("reindex");
+
+            // do nothing, reindex and measure
+            idx = root.getTree("/oak:index/lucenePropertyIndex");
+            idx.setProperty("reindex", true);
+            root.commit();
+
+            printStats();
+
+            System.out.println("add and delete");
+
+            // add and delete some content and measure
+            for (int i = 0; i < 1000; i++) {
+                r.nextBytes(bytes);
+                String text = new String(bytes, charset);
+                Tree tree = rootTree.addChild(String.valueOf(n + 100 + i));
+                tree.setProperty("foo", text);
+                tree.setProperty("bin", bytes);
+                if (n + i % 3 == 0) { // delete one of the already existing nodes every 3
+                    assert rootTree.getChild(String.valueOf(n + i)).remove();
+                }
+            }
+            root.commit();
+
+            printStats();
         }
-        root.commit();
-
-        printStats();
-
+        long time = System.currentTimeMillis() - start;
+        System.out.println("finished in " + (time / (60000)) + " minutes");
         System.out.println("***");
     }
 
@@ -276,6 +311,8 @@ public class LuceneSegmentStatsTest extends AbstractQueryTest {
         String fileStoreInfoAsString = stats.fileStoreInfoAsString();
 
         System.out.println(fileStoreInfoAsString);
+        long sizeOfDirectory = FileUtils.sizeOfDirectory(new File(fdsDir));
+        System.out.println("FDS size : " + FileUtils.byteCountToDisplaySize(sizeOfDirectory));
     }
 
     private long dumpFileStoreTo(File to) throws IOException {
