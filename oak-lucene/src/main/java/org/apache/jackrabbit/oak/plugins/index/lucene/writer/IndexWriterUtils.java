@@ -31,6 +31,7 @@ import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.miscellaneous.PerFieldAnalyzerWrapper;
 import org.apache.lucene.analysis.shingle.ShingleAnalyzerWrapper;
 import org.apache.lucene.index.IndexWriterConfig;
+import org.apache.lucene.index.NoMergePolicy;
 import org.apache.lucene.index.SerialMergeScheduler;
 
 import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.VERSION;
@@ -51,6 +52,7 @@ public class IndexWriterUtils {
             }
             Analyzer analyzer = new PerFieldAnalyzerWrapper(definitionAnalyzer, analyzers);
             IndexWriterConfig config = new IndexWriterConfig(VERSION, analyzer);
+            config.setMergePolicy(NoMergePolicy.NO_COMPOUND_FILES);
             if (remoteDir) {
                 config.setMergeScheduler(new SerialMergeScheduler());
             }

@@ -31,6 +31,7 @@ import java.util.concurrent.ScheduledExecutorService;
 
 import com.google.common.io.Files;
 import org.apache.commons.io.FileUtils;
+import org.apache.jackrabbit.core.data.DataStoreException;
 import org.apache.jackrabbit.core.data.FileDataStore;
 import org.apache.jackrabbit.oak.InitialContent;
 import org.apache.jackrabbit.oak.Oak;
@@ -80,6 +81,7 @@ public class LuceneSegmentStatsTest extends AbstractQueryTest {
 
     private final boolean copyOnRW;
     private final String codec;
+    private final boolean indexOnFS;
 
     private ExecutorService executorService = Executors.newFixedThreadPool(2);
 
@@ -97,21 +99,25 @@ public class LuceneSegmentStatsTest extends AbstractQueryTest {
     private DataStoreBlobStore dataStoreBlobStore;
     private DefaultStatisticsProvider statisticsProvider;
     private String fdsDir;
+    private String indexPath;
 
-    public LuceneSegmentStatsTest(boolean copyOnRW, String codec) {
+    public LuceneSegmentStatsTest(boolean copyOnRW, String codec, boolean indexOnFS) {
         this.copyOnRW = copyOnRW;
         this.codec = codec;
+        this.indexOnFS = indexOnFS;
     }
 
     @Parameterized.Parameters
     public static Collection<Object[]> data() {
         return Arrays.asList(new Object[][]{
-                {true, "oakCodec"},
-                {false, "oakCodec"},
-                {true, "Lucene46"},
-                {false, "Lucene46"},
-                {true, "customCodec"},
-                {false, "customCodec"},
+//                {true, "oakCodec", false},
+                {false, "oakCodec", false},
+//                {true, "Lucene46", false},
+                {false, "Lucene46", false},
+//                {false, "Lucene46", true},
+//                {true, "customCodec", false},
+                {false, "customCodec", false},
+//                {false, "customCodec", true},
         });
     }
 
@@ -247,12 +253,17 @@ public class LuceneSegmentStatsTest extends AbstractQueryTest {
         idxb.indexRule("nt:base").property("foo").analyzed().nodeScopeIndex().ordered().useInExcerpt().propertyIndex();
         idxb.indexRule("nt:base").property("bin").analyzed().nodeScopeIndex().ordered().useInExcerpt().propertyIndex();
         Tree idx = root.getTree("/").getChild("oak:index").addChild("lucenePropertyIndex");
-        idxb.build(idx);
+        Tree idxDef = idxb.build(idx);
+        if (!codec.equals("oakCodec") && indexOnFS) {
+            idxDef.setProperty("persistence", "file");
+            indexPath = "target/index-" + codec + copyOnRW;
+            idxDef.setProperty("path", indexPath);
+        }
 
         Random r = new Random();
 
         System.out.println("***");
-        System.out.println(codec + "," + copyOnRW);
+        System.out.println(codec + "," + copyOnRW + "," + indexOnFS);
 
         long start = System.currentTimeMillis();
         int multiplier = 10;
@@ -313,6 +324,11 @@ public class LuceneSegmentStatsTest extends AbstractQueryTest {
         System.out.println(fileStoreInfoAsString);
         long sizeOfDirectory = FileUtils.sizeOfDirectory(new File(fdsDir));
         System.out.println("FDS size : " + FileUtils.byteCountToDisplaySize(sizeOfDirectory));
+
+        if (indexOnFS) {
+            long sizeOfFSIndex = FileUtils.sizeOfDirectory(new File(indexPath));
+            System.out.println("Index on FS size : " + FileUtils.byteCountToDisplaySize(sizeOfFSIndex));
+        }
     }
 
     private long dumpFileStoreTo(File to) throws IOException {
