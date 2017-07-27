@@ -31,8 +31,11 @@ import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.miscellaneous.PerFieldAnalyzerWrapper;
 import org.apache.lucene.analysis.shingle.ShingleAnalyzerWrapper;
 import org.apache.lucene.index.IndexWriterConfig;
+import org.apache.lucene.index.LogByteSizeMergePolicy;
+import org.apache.lucene.index.MergePolicy;
 import org.apache.lucene.index.NoMergePolicy;
 import org.apache.lucene.index.SerialMergeScheduler;
+import org.apache.lucene.index.TieredMergePolicy;
 
 import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.VERSION;
 
@@ -52,7 +55,12 @@ public class IndexWriterUtils {
             }
             Analyzer analyzer = new PerFieldAnalyzerWrapper(definitionAnalyzer, analyzers);
             IndexWriterConfig config = new IndexWriterConfig(VERSION, analyzer);
-            config.setMergePolicy(NoMergePolicy.NO_COMPOUND_FILES);
+            OakTieredMergePolicy mergePolicy = new OakTieredMergePolicy();
+            mergePolicy.setNoCFSRatio(0.5d);
+//            mergePolicy.setFloorSegmentMB(10 * 1024 * 1024); // min segment size 10MB
+//            mergePolicy.setMaxMergedSegmentMB(1 * 1024 * 1024); // max segment size x MB
+//            mergePolicy.setSegmentsPerTier(25);
+            config.setMergePolicy(mergePolicy);
             if (remoteDir) {
                 config.setMergeScheduler(new SerialMergeScheduler());
             }

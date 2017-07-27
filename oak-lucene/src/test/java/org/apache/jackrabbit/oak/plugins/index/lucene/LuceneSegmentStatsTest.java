@@ -31,7 +31,6 @@ import java.util.concurrent.ScheduledExecutorService;
 
 import com.google.common.io.Files;
 import org.apache.commons.io.FileUtils;
-import org.apache.jackrabbit.core.data.DataStoreException;
 import org.apache.jackrabbit.core.data.FileDataStore;
 import org.apache.jackrabbit.oak.InitialContent;
 import org.apache.jackrabbit.oak.Oak;
@@ -82,6 +81,7 @@ public class LuceneSegmentStatsTest extends AbstractQueryTest {
     private final boolean copyOnRW;
     private final String codec;
     private final boolean indexOnFS;
+    private final int minRecordLength;
 
     private ExecutorService executorService = Executors.newFixedThreadPool(2);
 
@@ -101,23 +101,23 @@ public class LuceneSegmentStatsTest extends AbstractQueryTest {
     private String fdsDir;
     private String indexPath;
 
-    public LuceneSegmentStatsTest(boolean copyOnRW, String codec, boolean indexOnFS) {
+
+    public LuceneSegmentStatsTest(boolean copyOnRW, String codec, boolean indexOnFS, int minRecordLength) {
         this.copyOnRW = copyOnRW;
         this.codec = codec;
         this.indexOnFS = indexOnFS;
+        this.minRecordLength = minRecordLength;
     }
 
     @Parameterized.Parameters
     public static Collection<Object[]> data() {
         return Arrays.asList(new Object[][]{
-//                {true, "oakCodec", false},
-                {false, "oakCodec", false},
-//                {true, "Lucene46", false},
-                {false, "Lucene46", false},
-//                {false, "Lucene46", true},
-//                {true, "customCodec", false},
-                {false, "customCodec", false},
-//                {false, "customCodec", true},
+                {false, "oakCodec", false, 4000},
+                {false, "oakCodec", false, -1},
+                {false, "Lucene46", false, 4000},
+                {false, "Lucene46", false, -1},
+                {false, "customCodec", false, 4000},
+                {false, "customCodec", false, -1},
         });
     }
 
@@ -185,9 +185,11 @@ public class LuceneSegmentStatsTest extends AbstractQueryTest {
 
     private BlobStore createBlobStore() {
         FileDataStore fds = new OakFileDataStore();
-        fdsDir = "target/fds-" + codec + copyOnRW;
+        fdsDir = "target/fds-" + codec + copyOnRW + minRecordLength;
         fds.setPath(fdsDir);
-        fds.setMinRecordLength(4000);
+        if (minRecordLength > 0) {
+            fds.setMinRecordLength(minRecordLength);
+        }
         fds.init(null);
         dataStoreBlobStore = new DataStoreBlobStore(fds);
         StatisticsProvider sp = new DefaultStatisticsProvider(scheduledExecutorService);
@@ -263,10 +265,10 @@ public class LuceneSegmentStatsTest extends AbstractQueryTest {
         Random r = new Random();
 
         System.out.println("***");
-        System.out.println(codec + "," + copyOnRW + "," + indexOnFS);
+        System.out.println(codec + "," + copyOnRW + "," + indexOnFS + "," + minRecordLength);
 
         long start = System.currentTimeMillis();
-        int multiplier = 10;
+        int multiplier = 5;
         for (int n = 0; n < multiplier; n++) {
 
             Tree rootTree = root.getTree("/").addChild("content");
