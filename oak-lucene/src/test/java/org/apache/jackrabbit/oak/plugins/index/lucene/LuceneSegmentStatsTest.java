@@ -270,6 +270,7 @@ public class LuceneSegmentStatsTest extends AbstractQueryTest {
         long start = System.currentTimeMillis();
         int multiplier = 5;
         for (int n = 0; n < multiplier; n++) {
+            System.err.println("iteration " + (n + 1));
 
             Tree rootTree = root.getTree("/").addChild("content");
             byte[] bytes = new byte[10240];

@@ -225,7 +225,7 @@ public class NRTIndex implements Closeable {
         Directory fsdir = FSDirectory.open(indexDir);
         //TODO make these configurable
         directory = new NRTCachingDirectory(fsdir, 1, 1);
-        IndexWriterConfig config = IndexWriterUtils.getIndexWriterConfig(definition, false);
+        IndexWriterConfig config = IndexWriterUtils.getIndexWriterConfig(definition, false, directory);
 
         //TODO Explore following for optimizing indexing speed
         //config.setUseCompoundFile(false);

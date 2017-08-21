@@ -19,9 +19,10 @@
 
 package org.apache.jackrabbit.oak.plugins.index.lucene.writer;
 
+import java.io.IOException;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
-
 
 import org.apache.jackrabbit.oak.plugins.index.lucene.FieldNames;
 import org.apache.jackrabbit.oak.plugins.index.lucene.IndexDefinition;
@@ -30,18 +31,22 @@ import org.apache.jackrabbit.oak.plugins.index.lucene.util.SuggestHelper;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.miscellaneous.PerFieldAnalyzerWrapper;
 import org.apache.lucene.analysis.shingle.ShingleAnalyzerWrapper;
+import org.apache.lucene.index.DirectoryReader;
+import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.IndexWriterConfig;
-import org.apache.lucene.index.LogByteSizeMergePolicy;
 import org.apache.lucene.index.MergePolicy;
 import org.apache.lucene.index.NoMergePolicy;
 import org.apache.lucene.index.SerialMergeScheduler;
-import org.apache.lucene.index.TieredMergePolicy;
+import org.apache.lucene.store.Directory;
 
 import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.VERSION;
 
 public class IndexWriterUtils {
 
-    public static IndexWriterConfig getIndexWriterConfig(IndexDefinition definition, boolean remoteDir) {
+    private static final Map<String, State> states = new HashMap<>();
+
+    public static IndexWriterConfig getIndexWriterConfig(IndexDefinition definition, boolean remoteDir, Directory directory) {
+
         // FIXME: Hack needed to make Lucene work in an OSGi environment
         Thread thread = Thread.currentThread();
         ClassLoader loader = thread.getContextClassLoader();
@@ -55,12 +60,32 @@ public class IndexWriterUtils {
             }
             Analyzer analyzer = new PerFieldAnalyzerWrapper(definitionAnalyzer, analyzers);
             IndexWriterConfig config = new IndexWriterConfig(VERSION, analyzer);
-            OakTieredMergePolicy mergePolicy = new OakTieredMergePolicy();
-            mergePolicy.setNoCFSRatio(0.5d);
-//            mergePolicy.setFloorSegmentMB(10 * 1024 * 1024); // min segment size 10MB
-//            mergePolicy.setMaxMergedSegmentMB(1 * 1024 * 1024); // max segment size x MB
-//            mergePolicy.setSegmentsPerTier(25);
+            MergePolicy mergePolicy;
+            try {
+                IndexReader reader = DirectoryReader.open(directory);
+
+                State previousState = states.get(definition.getIndexName());
+                if (previousState == null) {
+                    previousState = new State();
+                }
+                State newState = new State(reader.maxDoc(), reader.numDocs(), reader.numDeletedDocs(), directory.listAll());
+
+                System.err.println("****");
+                System.err.println(previousState + "\n vs \n" + newState);
+                System.err.println("****");
+
+                if (maybeMerge(previousState, newState)) {
+                    mergePolicy = new OakTieredMergePolicy();
+
+                } else {
+                    mergePolicy = NoMergePolicy.COMPOUND_FILES;
+                }
+                states.put(definition.getIndexName(), newState);
+            } catch (IOException e) {
+                mergePolicy = new OakTieredMergePolicy();
+            }
             config.setMergePolicy(mergePolicy);
+//            config.setRAMBufferSizeMB(24);
             if (remoteDir) {
                 config.setMergeScheduler(new SerialMergeScheduler());
             }
@@ -70,6 +95,65 @@ public class IndexWriterUtils {
             return config;
         } finally {
             thread.setContextClassLoader(loader);
+        }
+    }
+
+    private static boolean maybeMerge(State previousState, State newState) {
+        return previousState.equals(newState) || Math.abs(newState.delDocs - previousState.delDocs) > 200 ||
+                Math.abs(newState.docNum - previousState.docNum) > 200;
+    }
+
+    private static class State {
+        private final int maxDoc;
+        private final int docNum;
+        private final int delDocs;
+        private final String[] files;
+
+        public State(int maxDoc, int docNum, int delDocs, String[] files) {
+            this.maxDoc = maxDoc;
+            this.docNum = docNum;
+            this.delDocs = delDocs;
+            this.files = files;
+        }
+
+        public State() {
+            this.maxDoc = 0;
+            this.docNum = 0;
+            this.delDocs = 0;
+            this.files = new String[0];
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+
+            State state = (State) o;
+
+            if (maxDoc != state.maxDoc) return false;
+            if (docNum != state.docNum) return false;
+            if (delDocs != state.delDocs) return false;
+            // Probably incorrect - comparing Object[] arrays with Arrays.equals
+            return Arrays.equals(files, state.files);
+        }
+
+        @Override
+        public int hashCode() {
+            int result = maxDoc;
+            result = 31 * result + docNum;
+            result = 31 * result + delDocs;
+            result = 31 * result + Arrays.hashCode(files);
+            return result;
+        }
+
+        @Override
+        public String toString() {
+            return "State{" +
+                    "maxDoc=" + maxDoc +
+                    ", docNum=" + docNum +
+                    ", delDocs=" + delDocs +
+                    ", files=" + Arrays.toString(files) +
+                    '}';
         }
     }
 }

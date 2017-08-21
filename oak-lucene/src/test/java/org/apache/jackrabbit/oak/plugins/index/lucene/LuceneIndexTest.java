@@ -373,7 +373,7 @@ public class LuceneIndexTest {
 
     private void purgeDeletedDocs(NodeBuilder idx, IndexDefinition definition) throws IOException {
         Directory dir = new DefaultDirectoryFactory(null, null).newInstance(definition, idx, LuceneIndexConstants.INDEX_DATA_CHILD_NAME, false);
-        IndexWriter writer = new IndexWriter(dir, getIndexWriterConfig(definition, true));
+        IndexWriter writer = new IndexWriter(dir, getIndexWriterConfig(definition, true, dir));
         writer.forceMergeDeletes();
         writer.close();
     }

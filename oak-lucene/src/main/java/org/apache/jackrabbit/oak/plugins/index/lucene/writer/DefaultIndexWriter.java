@@ -144,9 +144,9 @@ class DefaultIndexWriter implements LuceneIndexWriter {
             directory = directoryFactory.newInstance(definition, definitionBuilder, dirName, reindex);
             IndexWriterConfig config;
             if (directoryFactory.remoteDirectory()){
-                config = getIndexWriterConfig(definition, false);
+                config = getIndexWriterConfig(definition, false, directory);
             } else {
-                config = getIndexWriterConfig(definition, true);
+                config = getIndexWriterConfig(definition, true, directory);
             }
             writer = new IndexWriter(directory, config);
             genAtStart = getLatestGeneration(directory);

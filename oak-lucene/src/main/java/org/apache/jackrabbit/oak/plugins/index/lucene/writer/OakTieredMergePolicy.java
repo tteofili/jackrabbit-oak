@@ -434,7 +434,7 @@ public class OakTieredMergePolicy extends MergePolicy {
                     for (SegmentCommitInfo info : merge.segments) {
                         toBeMerged.add(info);
                     }
-
+                    System.err.println("merge!");
                     if (verbose()) {
                         message("  add merge=" + writer.get().segString(merge.segments) + " size=" + String.format(Locale.ROOT, "%.3f MB", bestMergeBytes / 1024. / 1024.) + " score=" + String.format(Locale.ROOT, "%.3f", bestScore.getScore()) + " " + bestScore.getExplanation() + (bestTooLarge ? " [max merge]" : ""));
                     }
