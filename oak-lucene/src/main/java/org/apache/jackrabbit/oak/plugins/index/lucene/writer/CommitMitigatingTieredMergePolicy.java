@@ -40,7 +40,6 @@ import org.apache.lucene.index.SegmentInfos;
  *  So the bottom line is that with this {@link MergePolicy} we should have less but bigger merges, only after commit rate
  *  is under a certain threshold (in terms of added docs per sec and MBs per sec).
  *
- *  @lucene.experimental
  */
 public class CommitMitigatingTieredMergePolicy extends MergePolicy {
     /** Default noCFSRatio.  If a merge's size is >= 10% of

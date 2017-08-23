@@ -115,7 +115,7 @@ public class LuceneSegmentStatsTest extends AbstractQueryTest {
     @Parameterized.Parameters
     public static Collection<Object[]> data() {
         return Arrays.asList(new Object[][]{
-//                {false, "oakCodec", false, 4000, "default"},
+                {false, "oakCodec", false, 4000, "default"},
                 {false, "oakCodec", false, 4000, "mitigated"},
                 {false, "oakCodec", false, 4000, "no"},
                 {false, "oakCodec", false, 4000, "logbyte"},
