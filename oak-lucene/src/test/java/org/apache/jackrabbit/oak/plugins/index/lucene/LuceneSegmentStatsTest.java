@@ -36,6 +36,7 @@ import org.apache.jackrabbit.oak.InitialContent;
 import org.apache.jackrabbit.oak.Oak;
 import org.apache.jackrabbit.oak.api.ContentRepository;
 import org.apache.jackrabbit.oak.api.Tree;
+import org.apache.jackrabbit.oak.commons.IOUtils;
 import org.apache.jackrabbit.oak.commons.concurrent.ExecutorCloser;
 import org.apache.jackrabbit.oak.plugins.blob.BlobStoreStats;
 import org.apache.jackrabbit.oak.plugins.blob.datastore.DataStoreBlobStore;
@@ -114,7 +115,7 @@ public class LuceneSegmentStatsTest extends AbstractQueryTest {
     @Parameterized.Parameters
     public static Collection<Object[]> data() {
         return Arrays.asList(new Object[][]{
-                {false, "oakCodec", false, 4000, "default"},
+//                {false, "oakCodec", false, 4000, "default"},
                 {false, "oakCodec", false, 4000, "mitigated"},
                 {false, "oakCodec", false, 4000, "no"},
                 {false, "oakCodec", false, 4000, "logbyte"},
@@ -279,7 +280,7 @@ public class LuceneSegmentStatsTest extends AbstractQueryTest {
         System.out.println(codec + "," + copyOnRW + "," + indexOnFS + "," + minRecordLength + "," + mergePolicy);
 
         long start = System.currentTimeMillis();
-        int multiplier = 5;
+        int multiplier = 3;
         for (int n = 0; n < multiplier; n++) {
             System.err.println("iteration " + (n + 1));
 
@@ -294,7 +295,6 @@ public class LuceneSegmentStatsTest extends AbstractQueryTest {
                 tree.setProperty("bin", bytes);
             }
             root.commit();
-
 
             printStats();
 
@@ -333,14 +333,12 @@ public class LuceneSegmentStatsTest extends AbstractQueryTest {
         fileStore.flush();
 
         FileStoreStats stats = fileStore.getStats();
-        String fileStoreInfoAsString = stats.fileStoreInfoAsString();
 
-        System.out.println(fileStoreInfoAsString);
         long sizeOfDirectory = FileUtils.sizeOfDirectory(new File(fdsDir));
         String fdsSize = (sizeOfDirectory / (1024 * 1000)) + " MB";
 
-        System.err.println("||codec||min record length||copy on rw||merge policy||segement size||FDS size||");
-        System.err.println("|"+codec+"|"+minRecordLength+"|"+copyOnRW+"|"+mergePolicy+"|"+stats.getApproximateSize()+"|"+fdsSize+"|");
+        System.err.println("||codec||min record length||merge policy||segment size||FDS size||");
+        System.err.println("|"+codec+"|"+minRecordLength+"|"+mergePolicy+"|"+ IOUtils.humanReadableByteCount(stats.getApproximateSize())+"|"+fdsSize+"|");
 
         if (indexOnFS) {
             long sizeOfFSIndex = FileUtils.sizeOfDirectory(new File(indexPath));

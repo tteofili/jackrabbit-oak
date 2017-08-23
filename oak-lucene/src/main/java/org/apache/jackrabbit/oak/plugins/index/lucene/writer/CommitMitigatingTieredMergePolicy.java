@@ -1,5 +1,3 @@
-package org.apache.jackrabbit.oak.plugins.index.lucene.writer;
-
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -16,6 +14,7 @@ package org.apache.jackrabbit.oak.plugins.index.lucene.writer;
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+package org.apache.jackrabbit.oak.plugins.index.lucene.writer;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -50,7 +49,7 @@ public class CommitMitigatingTieredMergePolicy extends MergePolicy {
     public static final double DEFAULT_NO_CFS_RATIO = 0.1;
 
     public static final double DEFAULT_MAX_COMMIT_RATE_DOCS = 1000;
-    private static final double DEFAULT_MAX_COMMIT_RATE_MB = 10;
+    private static final double DEFAULT_MAX_COMMIT_RATE_MB = 5;
 
     private int maxMergeAtOnce = 10;
     private long maxMergedSegmentBytes = 5 * 1024 * 1024 * 1024L;
