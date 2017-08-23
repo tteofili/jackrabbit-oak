@@ -82,6 +82,7 @@ public class LuceneSegmentStatsTest extends AbstractQueryTest {
     private final String codec;
     private final boolean indexOnFS;
     private final int minRecordLength;
+    private final String mergePolicy;
 
     private ExecutorService executorService = Executors.newFixedThreadPool(2);
 
@@ -102,22 +103,32 @@ public class LuceneSegmentStatsTest extends AbstractQueryTest {
     private String indexPath;
 
 
-    public LuceneSegmentStatsTest(boolean copyOnRW, String codec, boolean indexOnFS, int minRecordLength) {
+    public LuceneSegmentStatsTest(boolean copyOnRW, String codec, boolean indexOnFS, int minRecordLength, String mergePolicy) {
         this.copyOnRW = copyOnRW;
         this.codec = codec;
         this.indexOnFS = indexOnFS;
         this.minRecordLength = minRecordLength;
+        this.mergePolicy = mergePolicy;
     }
 
     @Parameterized.Parameters
     public static Collection<Object[]> data() {
         return Arrays.asList(new Object[][]{
-                {false, "oakCodec", false, 4000},
-                {false, "oakCodec", false, -1},
-                {false, "Lucene46", false, 4000},
-                {false, "Lucene46", false, -1},
-                {false, "customCodec", false, 4000},
-                {false, "customCodec", false, -1},
+                {false, "oakCodec", false, 4000, "default"},
+                {false, "oakCodec", false, 4000, "mitigated"},
+                {false, "oakCodec", false, 4000, "no"},
+                {false, "oakCodec", false, 4000, "logbyte"},
+                {false, "oakCodec", false, 4000, "logdoc"},
+                {false, "Lucene46", false, 4000, "default"},
+                {false, "Lucene46", false, 4000, "mitigated"},
+                {false, "Lucene46", false, 4000, "no"},
+                {false, "Lucene46", false, 4000, "logbyte"},
+                {false, "Lucene46", false, 4000, "logdoc"},
+                {false, "customCodec", false, 4000, "default"},
+                {false, "customCodec", false, 4000, "mitigated"},
+                {false, "customCodec", false, 4000, "no"},
+                {false, "customCodec", false, 4000, "logbyte"},
+                {false, "customCodec", false, 4000, "logdoc"},
         });
     }
 
@@ -185,7 +196,7 @@ public class LuceneSegmentStatsTest extends AbstractQueryTest {
 
     private BlobStore createBlobStore() {
         FileDataStore fds = new OakFileDataStore();
-        fdsDir = "target/fds-" + codec + copyOnRW + minRecordLength;
+        fdsDir = "target/fds-" + codec + copyOnRW + minRecordLength + mergePolicy;
         fds.setPath(fdsDir);
         if (minRecordLength > 0) {
             fds.setMinRecordLength(minRecordLength);
@@ -251,7 +262,7 @@ public class LuceneSegmentStatsTest extends AbstractQueryTest {
 
     @Test
     public void testLuceneIndexSegmentStats() throws Exception {
-        IndexDefinitionBuilder idxb = new IndexDefinitionBuilder().noAsync().codec(codec);
+        IndexDefinitionBuilder idxb = new IndexDefinitionBuilder().noAsync().codec(codec).mergePolicy(mergePolicy);
         idxb.indexRule("nt:base").property("foo").analyzed().nodeScopeIndex().ordered().useInExcerpt().propertyIndex();
         idxb.indexRule("nt:base").property("bin").analyzed().nodeScopeIndex().ordered().useInExcerpt().propertyIndex();
         Tree idx = root.getTree("/").getChild("oak:index").addChild("lucenePropertyIndex");
@@ -265,7 +276,7 @@ public class LuceneSegmentStatsTest extends AbstractQueryTest {
         Random r = new Random();
 
         System.out.println("***");
-        System.out.println(codec + "," + copyOnRW + "," + indexOnFS + "," + minRecordLength);
+        System.out.println(codec + "," + copyOnRW + "," + indexOnFS + "," + minRecordLength + "," + mergePolicy);
 
         long start = System.currentTimeMillis();
         int multiplier = 5;
@@ -326,7 +337,10 @@ public class LuceneSegmentStatsTest extends AbstractQueryTest {
 
         System.out.println(fileStoreInfoAsString);
         long sizeOfDirectory = FileUtils.sizeOfDirectory(new File(fdsDir));
-        System.out.println("FDS size : " + FileUtils.byteCountToDisplaySize(sizeOfDirectory));
+        String fdsSize = (sizeOfDirectory / (1024 * 1000)) + " MB";
+
+        System.err.println("||codec||min record length||copy on rw||merge policy||segement size||FDS size||");
+        System.err.println("|"+codec+"|"+minRecordLength+"|"+copyOnRW+"|"+mergePolicy+"|"+stats.getApproximateSize()+"|"+fdsSize+"|");
 
         if (indexOnFS) {
             long sizeOfFSIndex = FileUtils.sizeOfDirectory(new File(indexPath));

@@ -16,6 +16,7 @@
  */
 package org.apache.jackrabbit.oak.plugins.index.lucene;
 
+import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.util.AbstractAnalysisFactory;
 import org.apache.lucene.util.Version;
@@ -112,6 +113,11 @@ public interface LuceneIndexConstants {
      * Name of the codec to be used for indexing
      */
     String CODEC_NAME = "codec";
+
+    /**
+     * Name of the merge policy to be used while indexing
+     */
+    String MERGE_POLICY_NAME = "mergePolicy";
 
     /**
      * Child node name under which property details are provided

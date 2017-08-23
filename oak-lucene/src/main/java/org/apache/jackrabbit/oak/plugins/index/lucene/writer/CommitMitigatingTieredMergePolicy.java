@@ -27,64 +27,30 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-import org.apache.commons.io.FileUtils;
 import org.apache.lucene.index.IndexWriter;
-import org.apache.lucene.index.LogByteSizeMergePolicy;
-import org.apache.lucene.index.LogMergePolicy;
 import org.apache.lucene.index.MergePolicy;
 import org.apache.lucene.index.SegmentCommitInfo;
 import org.apache.lucene.index.SegmentInfos;
 
 /**
- *  Merges segments of approximately equal size, subject to
- *  an allowed number of segments per tier.  This is similar
- *  to {@link LogByteSizeMergePolicy}, except this merge
- *  policy is able to merge non-adjacent segment, and
- *  separates how many segments are merged at once ({@link
- *  #setMaxMergeAtOnce}) from how many segments are allowed
- *  per tier ({@link #setSegmentsPerTier}).  This merge
- *  policy also does not over-merge (i.e. cascade merges). 
- *
- *  <p>For normal merging, this policy first computes a
- *  "budget" of how many segments are allowed to be in the
- *  index.  If the index is over-budget, then the policy
- *  sorts segments by decreasing size (pro-rating by percent
- *  deletes), and then finds the least-cost merge.  Merge
- *  cost is measured by a combination of the "skew" of the
- *  merge (size of largest segment divided by smallest segment),
- *  total merge size and percent deletes reclaimed,
- *  so that merges with lower skew, smaller size
- *  and those reclaiming more deletes, are
- *  favored.
- *
- *  <p>If a merge will produce a segment that's larger than
- *  {@link #setMaxMergedSegmentMB}, then the policy will
- *  merge fewer segments (down to 1 at once, if that one has
- *  deletions) to keep the segment size under budget.
- *
- *  <p><b>NOTE</b>: this policy freely merges non-adjacent
- *  segments; if this is a problem, use {@link
- *  LogMergePolicy}.
- *
- *  <p><b>NOTE</b>: This policy always merges by byte size
- *  of the segments, always pro-rates by percent deletes,
- *  and does not apply any maximum segment size during
- *  forceMerge (unlike {@link LogByteSizeMergePolicy}).
+ *  This {@link MergePolicy} extends Lucene's {@link org.apache.lucene.index.TieredMergePolicy} by providing mitigation
+ *  to the aggressiveness of merges in case the index is under high commit load.
+ *  That's because in the case of Oak we currently have that we store Lucene indexes in storage systems which require
+ *  themselves some garbage collection task to be executed to get rid of deleted / unused files, similarly to what Lucene's
+ *  merge does.
+ *  So the bottom line is that with this {@link MergePolicy} we should have less but bigger merges, only after commit rate
+ *  is under a certain threshold (in terms of added docs per sec and MBs per sec).
  *
  *  @lucene.experimental
  */
-
-// TODO
-//   - we could try to take into account whether a large
-//     merge is already running (under CMS) and then bias
-//     ourselves towards picking smaller merges if so (or,
-//     maybe CMS should do so)
-
-public class OakTieredMergePolicy extends MergePolicy {
+public class CommitMitigatingTieredMergePolicy extends MergePolicy {
     /** Default noCFSRatio.  If a merge's size is >= 10% of
      *  the index, then we disable compound file for it.
      *  @see MergePolicy#setNoCFSRatio */
     public static final double DEFAULT_NO_CFS_RATIO = 0.1;
+
+    public static final double DEFAULT_MAX_COMMIT_RATE_DOCS = 1000;
+    private static final double DEFAULT_MAX_COMMIT_RATE_MB = 10;
 
     private int maxMergeAtOnce = 10;
     private long maxMergedSegmentBytes = 5 * 1024 * 1024 * 1024L;
@@ -93,11 +59,17 @@ public class OakTieredMergePolicy extends MergePolicy {
     private long floorSegmentBytes = 2 * 1024 * 1024L;
     private double segsPerTier = 10.0;
     private double forceMergeDeletesPctAllowed = 10.0;
-    private double reclaimDeletesWeight = 2.0;
+    private double reclaimDeletesWeight = 1.5;
+
+    private double maxCommitRateDocs = DEFAULT_MAX_COMMIT_RATE_DOCS;
+    private double maxCommitRateMB = DEFAULT_MAX_COMMIT_RATE_MB;
+    private double docCount = 0d;
+    private double mb = 0d;
+    private double time = System.currentTimeMillis();
 
     /** Sole constructor, setting all settings to their
      *  defaults. */
-    public OakTieredMergePolicy() {
+    public CommitMitigatingTieredMergePolicy() {
         super(DEFAULT_NO_CFS_RATIO, MergePolicy.DEFAULT_MAX_CFS_SEGMENT_SIZE);
     }
 
@@ -105,11 +77,16 @@ public class OakTieredMergePolicy extends MergePolicy {
      *  during "normal" merging.  For explicit merging (eg,
      *  forceMerge or forceMergeDeletes was called), see {@link
      *  #setMaxMergeAtOnceExplicit}.  Default is 10. */
-    public OakTieredMergePolicy setMaxMergeAtOnce(int v) {
+    public CommitMitigatingTieredMergePolicy setMaxMergeAtOnce(int v) {
         if (v < 2) {
             throw new IllegalArgumentException("maxMergeAtOnce must be > 1 (got " + v + ")");
         }
         maxMergeAtOnce = v;
+        return this;
+    }
+
+    public CommitMitigatingTieredMergePolicy setMaxCommitRateDocs(double maxCommitRate) {
+        this.maxCommitRateDocs = maxCommitRate;
         return this;
     }
 
@@ -125,7 +102,7 @@ public class OakTieredMergePolicy extends MergePolicy {
 
     /** Maximum number of segments to be merged at a time,
      *  during forceMerge or forceMergeDeletes. Default is 30. */
-    public OakTieredMergePolicy setMaxMergeAtOnceExplicit(int v) {
+    public CommitMitigatingTieredMergePolicy setMaxMergeAtOnceExplicit(int v) {
         if (v < 2) {
             throw new IllegalArgumentException("maxMergeAtOnceExplicit must be > 1 (got " + v + ")");
         }
@@ -145,7 +122,7 @@ public class OakTieredMergePolicy extends MergePolicy {
      *  estimate of the merged segment size is made by summing
      *  sizes of to-be-merged segments (compensating for
      *  percent deleted docs).  Default is 5 GB. */
-    public OakTieredMergePolicy setMaxMergedSegmentMB(double v) {
+    public CommitMitigatingTieredMergePolicy setMaxMergedSegmentMB(double v) {
         if (v < 0.0) {
             throw new IllegalArgumentException("maxMergedSegmentMB must be >=0 (got " + v + ")");
         }
@@ -168,7 +145,7 @@ public class OakTieredMergePolicy extends MergePolicy {
      *  takes place; a value of 3.0 is probably nearly too
      *  high.  A value of 0.0 means deletions don't impact
      *  merge selection. */
-    public OakTieredMergePolicy setReclaimDeletesWeight(double v) {
+    public CommitMitigatingTieredMergePolicy setReclaimDeletesWeight(double v) {
         if (v < 0.0) {
             throw new IllegalArgumentException("reclaimDeletesWeight must be >= 0.0 (got " + v + ")");
         }
@@ -186,7 +163,7 @@ public class OakTieredMergePolicy extends MergePolicy {
      *  selection.  This is to prevent frequent flushing of
      *  tiny segments from allowing a long tail in the index.
      *  Default is 2 MB. */
-    public OakTieredMergePolicy setFloorSegmentMB(double v) {
+    public CommitMitigatingTieredMergePolicy setFloorSegmentMB(double v) {
         if (v <= 0.0) {
             throw new IllegalArgumentException("floorSegmentMB must be >= 0.0 (got " + v + ")");
         }
@@ -205,7 +182,7 @@ public class OakTieredMergePolicy extends MergePolicy {
     /** When forceMergeDeletes is called, we only merge away a
      *  segment if its delete percentage is over this
      *  threshold.  Default is 10%. */
-    public OakTieredMergePolicy setForceMergeDeletesPctAllowed(double v) {
+    public CommitMitigatingTieredMergePolicy setForceMergeDeletesPctAllowed(double v) {
         if (v < 0.0 || v > 100.0) {
             throw new IllegalArgumentException("forceMergeDeletesPctAllowed must be between 0.0 and 100.0 inclusive (got " + v + ")");
         }
@@ -228,7 +205,7 @@ public class OakTieredMergePolicy extends MergePolicy {
      *  merging to occur.</p>
      *
      *  <p>Default is 10.0.</p> */
-    public OakTieredMergePolicy setSegmentsPerTier(double v) {
+    public CommitMitigatingTieredMergePolicy setSegmentsPerTier(double v) {
         if (v < 2.0) {
             throw new IllegalArgumentException("segmentsPerTier must be >= 2.0 (got " + v + ")");
         }
@@ -241,6 +218,11 @@ public class OakTieredMergePolicy extends MergePolicy {
      * @see #setSegmentsPerTier */
     public double getSegmentsPerTier() {
         return segsPerTier;
+    }
+
+    public CommitMitigatingTieredMergePolicy setMaxCommitRateMB(int maxCommitRateMB) {
+        this.maxCommitRateMB = maxCommitRateMB;
+        return this;
     }
 
     private class SegmentByteSizeDescending implements Comparator<SegmentCommitInfo> {
@@ -287,6 +269,23 @@ public class OakTieredMergePolicy extends MergePolicy {
         if (infos.size() == 0) {
             return null;
         }
+
+        long now = System.currentTimeMillis();
+        double timeDelta = (now / 1000d) - (time / 1000d);
+        double commitRate = Math.abs(docCount - infos.totalDocCount()) / timeDelta;
+
+        docCount = infos.totalDocCount();
+        time = now;
+
+        System.err.println(commitRate + "doc/s (max: " + maxCommitRateDocs + "doc/s)");
+        if (verbose()) {
+            message(commitRate + "doc/s (max: " + maxCommitRateDocs + "doc/s)");
+        }
+
+        if (commitRate > maxCommitRateDocs) {
+            return null;
+        }
+
         final Collection<SegmentCommitInfo> merging = writer.get().getMergingSegments();
         final Collection<SegmentCommitInfo> toBeMerged = new HashSet<SegmentCommitInfo>();
 
@@ -296,7 +295,6 @@ public class OakTieredMergePolicy extends MergePolicy {
         // Compute total index bytes & print details about the index
         long totIndexBytes = 0;
         long minSegmentBytes = Long.MAX_VALUE;
-//        System.err.println("segs:"+infosSorted);
         for (SegmentCommitInfo info : infosSorted) {
             final long segBytes = size(info);
             if (verbose()) {
@@ -313,7 +311,6 @@ public class OakTieredMergePolicy extends MergePolicy {
             // Accum total byte size
             totIndexBytes += segBytes;
         }
-//        System.err.println("index size:"+ FileUtils.byteCountToDisplaySize(totIndexBytes));
 
         // If we have too-large segments, grace them out
         // of the maxSegmentCount:
@@ -324,8 +321,6 @@ public class OakTieredMergePolicy extends MergePolicy {
         }
 
         minSegmentBytes = floorSize(minSegmentBytes);
-
-//        System.err.println("min segment size:"+ FileUtils.byteCountToDisplaySize(minSegmentBytes));
 
         // Compute max allowed segs in the index
         long levelSize = minSegmentBytes;
@@ -342,7 +337,6 @@ public class OakTieredMergePolicy extends MergePolicy {
             levelSize *= maxMergeAtOnce;
         }
         int allowedSegCountInt = (int) allowedSegCount;
-//        System.err.println("no. of segs:"+allowedSegCount);
 
         MergeSpecification spec = null;
 
@@ -350,6 +344,7 @@ public class OakTieredMergePolicy extends MergePolicy {
         while (true) {
 
             long mergingBytes = 0;
+            double idxBytes = 0;
 
             // Gather eligible segments for merging, ie segments
             // not already being merged and not already picked (by
@@ -362,8 +357,9 @@ public class OakTieredMergePolicy extends MergePolicy {
                 } else if (!toBeMerged.contains(info)) {
                     eligible.add(info);
                 }
+                idxBytes += info.sizeInBytes();
             }
-//            System.err.println("eligible:"+eligible);
+            idxBytes /= 1024 * 1000;
 
             final boolean maxMergeIsRunning = mergingBytes >= maxMergedSegmentBytes;
 
@@ -375,8 +371,20 @@ public class OakTieredMergePolicy extends MergePolicy {
                 return spec;
             }
 
+            double bytes = idxBytes - this.mb;
+            double mbRate = bytes / timeDelta;
+
+            System.err.println(mbRate + "mb/s (max: " + maxCommitRateMB + "mb/s)");
+            if (verbose()) {
+                message(mbRate + "mb/s (max: " + maxCommitRateMB + "mb/s)");
+            }
+
+            this.mb = idxBytes;
+            if (mbRate > maxCommitRateMB) {
+                return null;
+            }
+
             if (eligible.size() >= allowedSegCountInt) {
-//                System.err.println("merge!");
 
                 // OK we are over budget -- find best merge!
                 MergeScore bestScore = null;

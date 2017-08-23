@@ -19,7 +19,6 @@
 
 package org.apache.jackrabbit.oak.plugins.index.lucene.writer;
 
-import java.io.IOException;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
@@ -31,19 +30,17 @@ import org.apache.jackrabbit.oak.plugins.index.lucene.util.SuggestHelper;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.miscellaneous.PerFieldAnalyzerWrapper;
 import org.apache.lucene.analysis.shingle.ShingleAnalyzerWrapper;
-import org.apache.lucene.index.DirectoryReader;
-import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.index.MergePolicy;
-import org.apache.lucene.index.NoMergePolicy;
 import org.apache.lucene.index.SerialMergeScheduler;
+import org.apache.lucene.index.TieredMergePolicy;
 import org.apache.lucene.store.Directory;
 
 import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.VERSION;
 
 public class IndexWriterUtils {
 
-    private static final Map<String, State> states = new HashMap<>();
+//    private static final Map<String, State> states = new HashMap<>();
 
     public static IndexWriterConfig getIndexWriterConfig(IndexDefinition definition, boolean remoteDir, Directory directory) {
 
@@ -60,32 +57,31 @@ public class IndexWriterUtils {
             }
             Analyzer analyzer = new PerFieldAnalyzerWrapper(definitionAnalyzer, analyzers);
             IndexWriterConfig config = new IndexWriterConfig(VERSION, analyzer);
-            MergePolicy mergePolicy;
-            try {
-                IndexReader reader = DirectoryReader.open(directory);
+//            MergePolicy mergePolicy;
+//            try {
+//                IndexReader reader = DirectoryReader.open(directory);
 
-                State previousState = states.get(definition.getIndexName());
-                if (previousState == null) {
-                    previousState = new State();
-                }
-                State newState = new State(reader.maxDoc(), reader.numDocs(), reader.numDeletedDocs(), directory.listAll());
+//                State previousState = states.get(definition.getIndexName());
+//                if (previousState == null) {
+//                    previousState = new State();
+//                }
+//                State newState = new State(reader.maxDoc(), reader.numDocs(), reader.numDeletedDocs(), directory.listAll());
+//
+//                System.err.println("****");
+//                System.err.println(previousState + "\n vs \n" + newState);
+//                System.err.println("****");
 
-                System.err.println("****");
-                System.err.println(previousState + "\n vs \n" + newState);
-                System.err.println("****");
+//                if (maybeMerge(previousState, newState)) {
+//                    mergePolicy = new OakTieredMergePolicy(directory);
+//                } else {
+//                    mergePolicy = NoMergePolicy.COMPOUND_FILES;
+//                }
+//                states.put(definition.getIndexName(), newState);
+//            } catch (IOException e) {
+//                mergePolicy = new OakTieredMergePolicy(directory);
+//            }
 
-                if (maybeMerge(previousState, newState)) {
-                    mergePolicy = new OakTieredMergePolicy();
-
-                } else {
-                    mergePolicy = NoMergePolicy.COMPOUND_FILES;
-                }
-                states.put(definition.getIndexName(), newState);
-            } catch (IOException e) {
-                mergePolicy = new OakTieredMergePolicy();
-            }
-            config.setMergePolicy(mergePolicy);
-//            config.setRAMBufferSizeMB(24);
+            config.setMergePolicy(definition.getMergePolicy());
             if (remoteDir) {
                 config.setMergeScheduler(new SerialMergeScheduler());
             }
