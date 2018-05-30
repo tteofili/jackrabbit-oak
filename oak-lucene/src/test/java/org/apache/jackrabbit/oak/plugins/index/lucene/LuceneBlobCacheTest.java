@@ -19,20 +19,13 @@
 
 package org.apache.jackrabbit.oak.plugins.index.lucene;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
-
-import java.io.File;
-import java.io.IOException;
-import java.util.Arrays;
-import java.util.Random;
-
 import org.apache.jackrabbit.core.data.DataIdentifier;
 import org.apache.jackrabbit.core.data.DataRecord;
 import org.apache.jackrabbit.core.data.DataStoreException;
 import org.apache.jackrabbit.oak.plugins.blob.datastore.DataStoreBlobStore;
 import org.apache.jackrabbit.oak.plugins.blob.datastore.OakFileDataStore;
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.OakDirectory;
+import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
 import org.apache.jackrabbit.oak.segment.SegmentNodeStoreBuilders;
 import org.apache.jackrabbit.oak.segment.file.FileStore;
 import org.apache.jackrabbit.oak.segment.file.FileStoreBuilder;
@@ -48,6 +41,14 @@ import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
+
+import java.io.File;
+import java.io.IOException;
+import java.util.Arrays;
+import java.util.Random;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 public class LuceneBlobCacheTest {
     private Random rnd = new Random();
@@ -113,7 +114,7 @@ public class LuceneBlobCacheTest {
 
     private Directory createDir(NodeBuilder builder, boolean readOnly){
         return new OakDirectory(builder,
-                new IndexDefinition(root, builder.getNodeState(), "/foo"), readOnly);
+                new LuceneIndexDefinition(root, builder.getNodeState(), "/foo"), readOnly);
     }
 
     byte[] randomBytes(int size) {

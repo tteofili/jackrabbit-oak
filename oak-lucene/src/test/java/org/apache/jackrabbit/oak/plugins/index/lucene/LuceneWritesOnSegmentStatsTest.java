@@ -19,17 +19,6 @@
 
 package org.apache.jackrabbit.oak.plugins.index.lucene;
 
-import java.io.File;
-import java.io.IOException;
-import java.nio.charset.Charset;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.List;
-import java.util.Random;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-
 import com.google.common.io.Files;
 import org.apache.commons.io.FileUtils;
 import org.apache.jackrabbit.core.data.FileDataStore;
@@ -46,6 +35,8 @@ import org.apache.jackrabbit.oak.plugins.index.lucene.directory.CopyOnReadDirect
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.IndexDefinitionBuilder;
 import org.apache.jackrabbit.oak.plugins.index.nodetype.NodeTypeIndexProvider;
 import org.apache.jackrabbit.oak.plugins.index.property.PropertyIndexEditorProvider;
+import org.apache.jackrabbit.oak.plugins.index.search.ExtractedTextCache;
+import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
 import org.apache.jackrabbit.oak.query.AbstractQueryTest;
 import org.apache.jackrabbit.oak.segment.SegmentNodeStoreBuilders;
 import org.apache.jackrabbit.oak.segment.file.FileStore;
@@ -71,6 +62,17 @@ import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
+
+import java.io.File;
+import java.io.IOException;
+import java.nio.charset.Charset;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.List;
+import java.util.Random;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
@@ -218,7 +220,7 @@ public class LuceneWritesOnSegmentStatsTest extends AbstractQueryTest {
         try {
             return new IndexCopier(executorService, temporaryFolder.getRoot()) {
                 @Override
-                public Directory wrapForRead(String indexPath, IndexDefinition definition,
+                public Directory wrapForRead(String indexPath, LuceneIndexDefinition definition,
                                              Directory remote, String dirName) throws IOException {
                     Directory ret = super.wrapForRead(indexPath, definition, remote, dirName);
                     corDir = getFSDirPath(ret);
@@ -226,7 +228,7 @@ public class LuceneWritesOnSegmentStatsTest extends AbstractQueryTest {
                 }
 
                 @Override
-                public Directory wrapForWrite(IndexDefinition definition,
+                public Directory wrapForWrite(LuceneIndexDefinition definition,
                                               Directory remote, boolean reindexMode, String dirName) throws IOException {
                     Directory ret = super.wrapForWrite(definition, remote, reindexMode, dirName);
                     cowDir = getFSDirPath(ret);

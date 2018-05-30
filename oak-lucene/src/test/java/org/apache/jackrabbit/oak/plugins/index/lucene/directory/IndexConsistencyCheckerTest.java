@@ -19,20 +19,12 @@
 
 package org.apache.jackrabbit.oak.plugins.index.lucene.directory;
 
-import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
-import java.util.List;
-
-import javax.annotation.Nonnull;
-
 import com.google.common.collect.Lists;
 import org.apache.commons.io.IOUtils;
 import org.apache.jackrabbit.oak.InitialContent;
 import org.apache.jackrabbit.oak.api.Blob;
 import org.apache.jackrabbit.oak.api.Type;
-import org.apache.jackrabbit.oak.plugins.index.lucene.IndexDefinition;
+import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.lucene.OakAnalyzer;
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.IndexConsistencyChecker.Level;
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.IndexConsistencyChecker.Result;
@@ -49,6 +41,13 @@ import org.apache.lucene.util.Version;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
+
+import javax.annotation.Nonnull;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.List;
 
 import static org.apache.jackrabbit.oak.plugins.index.lucene.FieldFactory.newPathField;
 import static org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState.EMPTY_NODE;
@@ -119,7 +118,7 @@ public class IndexConsistencyCheckerTest {
 
     @Test
     public void validIndexTest() throws Exception{
-        IndexDefinition defn = IndexDefinition.newBuilder(rootState, idx.getNodeState(), "/fooIndex").build();
+        LuceneIndexDefinition defn = LuceneIndexDefinition.newBuilder(rootState, idx.getNodeState(), "/fooIndex").build();
         Directory dir = new OakDirectory(idx, ":data", defn, false);
         createIndex(dir, 10);
 
@@ -144,7 +143,7 @@ public class IndexConsistencyCheckerTest {
 
     @Test
     public void missingFile() throws Exception{
-        IndexDefinition defn = IndexDefinition.newBuilder(rootState, idx.getNodeState(), "/fooIndex").build();
+        LuceneIndexDefinition defn = LuceneIndexDefinition.newBuilder(rootState, idx.getNodeState(), "/fooIndex").build();
         Directory dir = new OakDirectory(idx, ":data", defn, false);
         createIndex(dir, 10);
 
@@ -166,7 +165,7 @@ public class IndexConsistencyCheckerTest {
 
     @Test
     public void badFile() throws Exception{
-        IndexDefinition defn = IndexDefinition.newBuilder(rootState, idx.getNodeState(), "/fooIndex").build();
+        LuceneIndexDefinition defn = LuceneIndexDefinition.newBuilder(rootState, idx.getNodeState(), "/fooIndex").build();
         Directory dir = new OakDirectory(idx, ":data", defn, false);
         createIndex(dir, 10);
 

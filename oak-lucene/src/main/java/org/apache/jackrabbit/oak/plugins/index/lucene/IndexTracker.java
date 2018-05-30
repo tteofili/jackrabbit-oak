@@ -25,9 +25,8 @@ import static com.google.common.collect.Maps.filterKeys;
 import static com.google.common.collect.Maps.filterValues;
 import static com.google.common.collect.Maps.newHashMap;
 import static java.util.Collections.emptyMap;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.IndexDefinition.INDEX_DEFINITION_NODE;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.IndexDefinition.STATUS_NODE;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.PROP_REFRESH_DEFN;
+import static org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition.INDEX_DEFINITION_NODE;
+import static org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition.STATUS_NODE;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.TYPE_LUCENE;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.util.LuceneIndexHelper.isLuceneIndexNode;
 import static org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState.EMPTY_NODE;
@@ -47,6 +46,7 @@ import org.apache.jackrabbit.oak.plugins.index.AsyncIndexInfoService;
 import org.apache.jackrabbit.oak.plugins.index.lucene.hybrid.NRTIndexFactory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.reader.DefaultIndexReaderFactory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.reader.LuceneIndexReaderFactory;
+import org.apache.jackrabbit.oak.plugins.index.search.BadIndexTracker;
 import org.apache.jackrabbit.oak.spi.commit.CompositeEditor;
 import org.apache.jackrabbit.oak.spi.commit.DefaultEditor;
 import org.apache.jackrabbit.oak.spi.commit.Editor;
@@ -152,7 +152,7 @@ public class IndexTracker {
                         if (isStatusChanged(before, after) || isIndexDefinitionChanged(before, after)) {
                             long start = PERF_LOGGER.start();
                             IndexNodeManager index = IndexNodeManager.open(path, root, after, readerFactory, nrtFactory);
-                            PERF_LOGGER.end(start, -1, "[{}] Index found to be updated. Reopening the IndexNode", path);
+                            PERF_LOGGER.end(start, -1, "[{}] Index found to be updated. Reopening the LuceneIndexNode", path);
                             updates.put(path, index); // index can be null
                         }
                     } catch (IOException e) {
@@ -195,9 +195,9 @@ public class IndexTracker {
         refresh = true;
     }
 
-    public IndexNode acquireIndexNode(String path) {
+    public LuceneIndexNode acquireIndexNode(String path) {
         IndexNodeManager index = indices.get(path);
-        IndexNode indexNode = index != null ? index.acquire() : null;
+        LuceneIndexNode indexNode = index != null ? index.acquire() : null;
         if (indexNode != null) {
             return indexNode;
         } else {
@@ -206,7 +206,7 @@ public class IndexTracker {
     }
 
     @CheckForNull
-    public IndexDefinition getIndexDefinition(String indexPath){
+    public LuceneIndexDefinition getIndexDefinition(String indexPath){
         IndexNodeManager node = indices.get(indexPath);
         if (node != null){
             //Accessing the definition should not require
@@ -220,7 +220,7 @@ public class IndexTracker {
         return indices.keySet();
     }
 
-    BadIndexTracker getBadIndexTracker() {
+    public BadIndexTracker getBadIndexTracker() {
         return badIndexTracker;
     }
 
@@ -228,13 +228,13 @@ public class IndexTracker {
         return root;
     }
 
-    private synchronized IndexNode findIndexNode(String path) {
+    private synchronized LuceneIndexNode findIndexNode(String path) {
         // Retry the lookup from acquireIndexNode now that we're
         // synchronized. The acquire() call is guaranteed to succeed
         // since the close() method is also synchronized.
         IndexNodeManager index = indices.get(path);
         if (index != null) {
-            IndexNode indexNode = index.acquire();
+            LuceneIndexNode indexNode = index.acquire();
             return checkNotNull(indexNode);
         }
 
@@ -251,7 +251,7 @@ public class IndexTracker {
             if (isLuceneIndexNode(node)) {
                 index = IndexNodeManager.open(path, root, node, readerFactory, nrtFactory);
                 if (index != null) {
-                    IndexNode indexNode = index.acquire();
+                    LuceneIndexNode indexNode = index.acquire();
                     checkNotNull(indexNode);
                     indices = ImmutableMap.<String, IndexNodeManager>builder()
                             .putAll(indices)

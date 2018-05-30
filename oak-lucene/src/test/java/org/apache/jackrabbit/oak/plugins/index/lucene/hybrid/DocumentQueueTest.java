@@ -35,7 +35,7 @@ import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.plugins.index.IndexEditorProvider;
 import org.apache.jackrabbit.oak.plugins.index.IndexUpdateProvider;
 import org.apache.jackrabbit.oak.plugins.index.lucene.IndexCopier;
-import org.apache.jackrabbit.oak.plugins.index.lucene.IndexNode;
+import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexNode;
 import org.apache.jackrabbit.oak.plugins.index.lucene.IndexTracker;
 import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.IndexingMode;
 import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexEditorProvider;
@@ -302,7 +302,7 @@ public class DocumentQueueTest {
     }
 
     private TopDocs doSearch(String fooValue) throws IOException {
-        IndexNode indexNode = tracker.acquireIndexNode("/oak:index/fooIndex");
+        LuceneIndexNode indexNode = tracker.acquireIndexNode("/oak:index/fooIndex");
         try {
             return indexNode.getSearcher().search(new TermQuery(new Term("foo", fooValue)), 10);
         } finally {

@@ -26,19 +26,19 @@ import javax.annotation.CheckForNull;
 
 import org.apache.jackrabbit.oak.plugins.index.lucene.reader.LuceneIndexReader;
 import org.apache.jackrabbit.oak.plugins.index.lucene.writer.LuceneIndexWriter;
+import org.apache.jackrabbit.oak.plugins.index.search.IndexNode;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.suggest.analyzing.AnalyzingInfixSuggester;
 import org.apache.lucene.store.Directory;
 
-public interface IndexNode {
+public interface LuceneIndexNode extends IndexNode {
 
-    void release();
+    @Override
+    LuceneIndexDefinition getDefinition();
 
     IndexSearcher getSearcher();
 
-    IndexStatistics getIndexStatistics();
-
-    IndexDefinition getDefinition();
+    LuceneIndexStatistics getIndexStatistics();
 
     List<LuceneIndexReader> getPrimaryReaders();
 
@@ -49,8 +49,6 @@ public interface IndexNode {
 
     @CheckForNull
     AnalyzingInfixSuggester getLookup();
-
-    int getIndexNodeId();
 
     @CheckForNull
     LuceneIndexWriter getLocalWriter() throws IOException;

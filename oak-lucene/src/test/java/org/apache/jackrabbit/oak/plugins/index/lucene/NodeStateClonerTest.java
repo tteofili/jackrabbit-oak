@@ -19,7 +19,7 @@
 
 package org.apache.jackrabbit.oak.plugins.index.lucene;
 
-import org.apache.jackrabbit.oak.plugins.index.lucene.NodeStateCloner;
+import org.apache.jackrabbit.oak.plugins.index.search.NodeStateCloner;
 import org.apache.jackrabbit.oak.spi.state.EqualsDiff;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;

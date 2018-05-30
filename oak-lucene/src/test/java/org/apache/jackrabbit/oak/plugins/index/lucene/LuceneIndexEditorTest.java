@@ -65,6 +65,9 @@ import org.apache.jackrabbit.oak.plugins.index.IndexUtils;
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.OakDirectory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.writer.MultiplexersLucene;
 import org.apache.jackrabbit.oak.plugins.index.property.PropertyIndexEditorProvider;
+import org.apache.jackrabbit.oak.plugins.index.search.ExtractedTextCache;
+import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
+import org.apache.jackrabbit.oak.plugins.index.search.IndexFormatVersion;
 import org.apache.jackrabbit.oak.spi.commit.CommitInfo;
 import org.apache.jackrabbit.oak.spi.commit.DefaultEditor;
 import org.apache.jackrabbit.oak.spi.commit.Editor;
@@ -105,7 +108,7 @@ public class LuceneIndexEditorTest {
 
     private IndexTracker tracker = new IndexTracker();
 
-    private IndexNode indexNode;
+    private LuceneIndexNode indexNode;
 
     @Rule
     public final TemporaryFolder temporaryFolder = new TemporaryFolder(new File("target"));
@@ -137,7 +140,7 @@ public class LuceneIndexEditorTest {
         NodeBuilder index = builder.child(INDEX_DEFINITIONS_NAME);
         NodeBuilder idxnb = newLuceneIndexDefinitionV2(index, "lucene",
                 of(TYPENAME_STRING));
-        IndexDefinition defn = new IndexDefinition(root, idxnb.getNodeState(), "/foo");
+        LuceneIndexDefinition defn = new LuceneIndexDefinition(root, idxnb.getNodeState(), "/foo");
         NodeState before = builder.getNodeState();
         builder.child("test").setProperty("foo", "fox is jumping");
         builder.child("test").setProperty("price", 100);
@@ -192,7 +195,7 @@ public class LuceneIndexEditorTest {
                 of(TYPENAME_STRING));
         nb.setProperty(LuceneIndexConstants.FULL_TEXT_ENABLED, false);
         nb.setProperty(createProperty(INCLUDE_PROPERTY_NAMES, of("foo", "price", "weight", "bool", "creationTime"), STRINGS));
-        IndexDefinition defn = new IndexDefinition(root, nb.getNodeState(), "/foo");
+        LuceneIndexDefinition defn = new LuceneIndexDefinition(root, nb.getNodeState(), "/foo");
         NodeState before = builder.getNodeState();
         builder.child("test").setProperty("foo", "fox is jumping");
         builder.child("test").setProperty("bar", "kite is flying");
@@ -476,7 +479,7 @@ public class LuceneIndexEditorTest {
     private int numDocs(Mount m) throws IOException {
         String indexDirName = MultiplexersLucene.getIndexDirName(m);
         NodeBuilder defnBuilder = builder.child(INDEX_DEFINITIONS_NAME).child("lucene");
-        Directory d = new OakDirectory(defnBuilder, indexDirName, new IndexDefinition(root, defnBuilder.getNodeState(), "/foo"), true);
+        Directory d = new OakDirectory(defnBuilder, indexDirName, new LuceneIndexDefinition(root, defnBuilder.getNodeState(), "/foo"), true);
         IndexReader r = DirectoryReader.open(d);
         return r.numDocs();
     }
@@ -531,7 +534,7 @@ public class LuceneIndexEditorTest {
         return builder.getNodeState();
     }
 
-    private String query(String query, IndexDefinition defn) throws IOException, ParseException {
+    private String query(String query, LuceneIndexDefinition defn) throws IOException, ParseException {
         QueryParser queryParser = new QueryParser(VERSION, "", defn.getAnalyzer());
         return getPath(queryParser.parse(query));
     }

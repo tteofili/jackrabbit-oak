@@ -31,6 +31,7 @@ import org.apache.jackrabbit.oak.plugins.index.IndexConstants;
 import org.apache.jackrabbit.oak.plugins.index.lucene.score.ScorerProviderFactory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.spi.FulltextQueryTermsProvider;
 import org.apache.jackrabbit.oak.plugins.index.lucene.spi.IndexFieldProvider;
+import org.apache.jackrabbit.oak.plugins.index.search.ExtractedTextCache;
 import org.apache.jackrabbit.oak.plugins.nodetype.write.NodeTypeRegistry;
 import org.apache.jackrabbit.oak.query.AbstractQueryTest;
 import org.apache.jackrabbit.oak.spi.commit.Observer;
@@ -65,7 +66,7 @@ public class LuceneIndexAugmentTest extends AbstractQueryTest {
 
     private IndexTracker tracker = new IndexTracker();
 
-    private IndexNode indexNode;
+    private LuceneIndexNode indexNode;
 
     @Override
     protected void createTestIndexNode() throws Exception {

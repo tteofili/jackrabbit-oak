@@ -19,18 +19,19 @@
 
 package org.apache.jackrabbit.oak.plugins.index.lucene.directory;
 
-import java.io.File;
-import java.io.IOException;
-
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
-
-import org.apache.jackrabbit.oak.plugins.index.lucene.*;
+import org.apache.jackrabbit.oak.plugins.index.lucene.IndexCopier;
+import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants;
+import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.ActiveDeletedBlobCollectorFactory.BlobDeletionCallback;
 import org.apache.jackrabbit.oak.spi.blob.GarbageCollectableBlobStore;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
+
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
+import java.io.File;
+import java.io.IOException;
 
 import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.PERSISTENCE_PATH;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.SUGGEST_DATA_CHILD_NAME;
@@ -52,7 +53,7 @@ public class DefaultDirectoryFactory implements DirectoryFactory {
     }
 
     @Override
-    public Directory newInstance(IndexDefinition definition, NodeBuilder builder,
+    public Directory newInstance(LuceneIndexDefinition definition, NodeBuilder builder,
                                  String dirName, boolean reindex) throws IOException {
         Directory directory = newIndexDirectory(definition, builder, dirName);
         if (indexCopier != null && !(SUGGEST_DATA_CHILD_NAME.equals(dirName) && definition.getUniqueId() == null)) {
@@ -66,7 +67,7 @@ public class DefaultDirectoryFactory implements DirectoryFactory {
         return indexCopier == null;
     }
 
-    private Directory newIndexDirectory(IndexDefinition indexDefinition,
+    private Directory newIndexDirectory(LuceneIndexDefinition indexDefinition,
                                         NodeBuilder definition, String dirName)
             throws IOException {
         String path = null;

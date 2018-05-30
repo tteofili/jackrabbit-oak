@@ -16,19 +16,12 @@
  */
 package org.apache.jackrabbit.oak.plugins.index.lucene.directory;
 
-import java.io.FileNotFoundException;
-import java.io.IOException;
-import java.util.Arrays;
-import java.util.Random;
-import java.util.Set;
-
 import ch.qos.logback.classic.Level;
 import com.google.common.collect.Sets;
-
 import org.apache.commons.io.FileUtils;
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.commons.junit.LogCustomizer;
-import org.apache.jackrabbit.oak.plugins.index.lucene.IndexDefinition;
+import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexDefinition;
 import org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
@@ -37,6 +30,12 @@ import org.apache.lucene.store.IOContext;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.store.IndexOutput;
 import org.junit.Test;
+
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.util.Arrays;
+import java.util.Random;
+import java.util.Set;
 
 import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.INDEX_DATA_CHILD_NAME;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.directory.BufferedOakDirectory.DELETE_THRESHOLD_UNTIL_REOPEN;
@@ -405,7 +404,7 @@ public class BufferedOakDirectoryTest {
     }
 
     private Directory createDir(NodeBuilder builder, boolean buffered) {
-        IndexDefinition def = new IndexDefinition(root, builder.getNodeState(), "/foo");
+        LuceneIndexDefinition def = new LuceneIndexDefinition(root, builder.getNodeState(), "/foo");
         if (buffered) {
             return new BufferedOakDirectory(builder, INDEX_DATA_CHILD_NAME, def, null);
         } else {

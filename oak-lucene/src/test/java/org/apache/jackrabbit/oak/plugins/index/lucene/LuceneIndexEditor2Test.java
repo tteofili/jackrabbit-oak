@@ -19,15 +19,6 @@
 
 package org.apache.jackrabbit.oak.plugins.index.lucene;
 
-import java.io.IOException;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Set;
-
-import javax.annotation.CheckForNull;
-import javax.annotation.Nonnull;
-
 import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.commons.PathUtils;
@@ -38,7 +29,11 @@ import org.apache.jackrabbit.oak.plugins.index.IndexUpdateProvider;
 import org.apache.jackrabbit.oak.plugins.index.IndexingContext;
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.IndexDefinitionBuilder;
 import org.apache.jackrabbit.oak.plugins.index.lucene.writer.LuceneIndexWriter;
-import org.apache.jackrabbit.oak.plugins.index.lucene.writer.LuceneIndexWriterFactory;
+import org.apache.jackrabbit.oak.plugins.index.search.ExtractedTextCache;
+import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
+import org.apache.jackrabbit.oak.plugins.index.search.PropertyDefinition;
+import org.apache.jackrabbit.oak.plugins.index.search.PropertyUpdateCallback;
+import org.apache.jackrabbit.oak.plugins.index.search.spi.editor.FulltextIndexWriterFactory;
 import org.apache.jackrabbit.oak.spi.commit.CommitInfo;
 import org.apache.jackrabbit.oak.spi.commit.Editor;
 import org.apache.jackrabbit.oak.spi.commit.EditorHook;
@@ -47,7 +42,16 @@ import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.apache.lucene.index.IndexableField;
 import org.junit.Test;
 
+import javax.annotation.CheckForNull;
+import javax.annotation.Nonnull;
+import java.io.IOException;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
+
 import static org.apache.jackrabbit.oak.InitialContent.INITIAL_CONTENT;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.TYPE_LUCENE;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.junit.Assert.assertEquals;
@@ -196,7 +200,7 @@ public class LuceneIndexEditor2Test {
             public Editor getIndexEditor(@Nonnull String type, @Nonnull NodeBuilder definition,
                                          @Nonnull NodeState root, @Nonnull IndexUpdateCallback callback)
                     throws CommitFailedException {
-                if ("lucene".equals(type)) {
+                if (TYPE_LUCENE.equals(type)) {
                     return new LuceneIndexEditor(context);
                 }
                 return null;
@@ -278,7 +282,7 @@ public class LuceneIndexEditor2Test {
     }
 
 
-    private class TestWriterFactory implements LuceneIndexWriterFactory {
+    private class TestWriterFactory implements FulltextIndexWriterFactory {
         @Override
         public LuceneIndexWriter newInstance(IndexDefinition definition,
                                              NodeBuilder definitionBuilder, boolean reindex) {

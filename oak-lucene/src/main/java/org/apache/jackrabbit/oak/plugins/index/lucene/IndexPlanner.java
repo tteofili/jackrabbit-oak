@@ -19,6 +19,31 @@
 
 package org.apache.jackrabbit.oak.plugins.index.lucene;
 
+import com.google.common.collect.ArrayListMultimap;
+import com.google.common.collect.Iterables;
+import com.google.common.collect.Multimap;
+import org.apache.jackrabbit.JcrConstants;
+import org.apache.jackrabbit.oak.api.PropertyValue;
+import org.apache.jackrabbit.oak.api.Type;
+import org.apache.jackrabbit.oak.commons.PathUtils;
+import org.apache.jackrabbit.oak.plugins.index.IndexConstants;
+import org.apache.jackrabbit.oak.plugins.index.lucene.util.FacetHelper;
+import org.apache.jackrabbit.oak.plugins.index.property.ValuePatternUtil;
+import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
+import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition.IndexingRule;
+import org.apache.jackrabbit.oak.plugins.index.search.IndexFormatVersion;
+import org.apache.jackrabbit.oak.plugins.index.search.PropertyDefinition;
+import org.apache.jackrabbit.oak.spi.query.Filter;
+import org.apache.jackrabbit.oak.spi.query.Filter.PropertyRestriction;
+import org.apache.jackrabbit.oak.spi.query.QueryConstants;
+import org.apache.jackrabbit.oak.spi.query.fulltext.FullTextContains;
+import org.apache.jackrabbit.oak.spi.query.fulltext.FullTextExpression;
+import org.apache.jackrabbit.oak.spi.query.fulltext.FullTextTerm;
+import org.apache.jackrabbit.oak.spi.query.fulltext.FullTextVisitor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import javax.annotation.CheckForNull;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -28,29 +53,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
-
-import javax.annotation.CheckForNull;
-
-import com.google.common.collect.ArrayListMultimap;
-import com.google.common.collect.Iterables;
-import com.google.common.collect.Multimap;
-import org.apache.jackrabbit.JcrConstants;
-import org.apache.jackrabbit.oak.api.PropertyValue;
-import org.apache.jackrabbit.oak.api.Type;
-import org.apache.jackrabbit.oak.commons.PathUtils;
-import org.apache.jackrabbit.oak.plugins.index.IndexConstants;
-import org.apache.jackrabbit.oak.plugins.index.lucene.IndexDefinition.IndexingRule;
-import org.apache.jackrabbit.oak.plugins.index.lucene.util.FacetHelper;
-import org.apache.jackrabbit.oak.plugins.index.property.ValuePatternUtil;
-import org.apache.jackrabbit.oak.spi.query.fulltext.FullTextContains;
-import org.apache.jackrabbit.oak.spi.query.fulltext.FullTextExpression;
-import org.apache.jackrabbit.oak.spi.query.fulltext.FullTextTerm;
-import org.apache.jackrabbit.oak.spi.query.fulltext.FullTextVisitor;
-import org.apache.jackrabbit.oak.spi.query.Filter;
-import org.apache.jackrabbit.oak.spi.query.QueryConstants;
-import org.apache.jackrabbit.oak.spi.query.Filter.PropertyRestriction;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import static com.google.common.collect.Lists.newArrayList;
 import static com.google.common.collect.Lists.newArrayListWithCapacity;
@@ -70,11 +72,11 @@ class IndexPlanner {
 
     private static final String FLAG_ENTRY_COUNT = "oak.lucene.useActualEntryCount";
     private static final Logger log = LoggerFactory.getLogger(IndexPlanner.class);
-    private final IndexDefinition definition;
+    private final LuceneIndexDefinition definition;
     private final Filter filter;
     private final String indexPath;
     private final List<OrderEntry> sortOrder;
-    private IndexNode indexNode;
+    private LuceneIndexNode indexNode;
     private PlanResult result;
     private static boolean useActualEntryCount = false;
 
@@ -86,7 +88,7 @@ class IndexPlanner {
         }
     }
 
-    public IndexPlanner(IndexNode indexNode,
+    public IndexPlanner(LuceneIndexNode indexNode,
                         String indexPath,
                         Filter filter, List<OrderEntry> sortOrder) {
         this.indexNode = indexNode;
@@ -746,7 +748,7 @@ class IndexPlanner {
     }
 
     private int getMaxPossibleNumDocs(Map<String, PropertyDefinition> propDefns, Filter filter) {
-        IndexStatistics indexStatistics = indexNode.getIndexStatistics();
+        LuceneIndexStatistics indexStatistics = indexNode.getIndexStatistics();
         int minNumDocs = indexStatistics.numDocs();
         for (Map.Entry<String, PropertyDefinition> propDef : propDefns.entrySet()) {
             String key = propDef.getKey();
@@ -853,7 +855,7 @@ class IndexPlanner {
                         //This would though not work for the case where rule is related to nodetype as used
                         //in query matched via some inheritance chain
                         //TODO Need a way to check if nodetype reg as seen by IndexDefinition is old then
-                        //IndexNode is reopened
+                        //LuceneIndexNode is reopened
                         matchingRule = rule;
                     }
                     if (matchingRule != null){
@@ -912,7 +914,7 @@ class IndexPlanner {
 
     public static class PlanResult {
         final String indexPath;
-        final IndexDefinition indexDefinition;
+        final LuceneIndexDefinition indexDefinition;
         final IndexingRule indexingRule;
         private final List<PropertyDefinition> sortedProperties = newArrayList();
 
@@ -933,7 +935,7 @@ class IndexPlanner {
         private PropertyIndexResult propertyIndexResult;
         private boolean syncNodeTypeRestrictions;
 
-        public PlanResult(String indexPath, IndexDefinition defn, IndexingRule indexingRule) {
+        public PlanResult(String indexPath, LuceneIndexDefinition defn, IndexingRule indexingRule) {
             this.indexPath = indexPath;
             this.indexDefinition = defn;
             this.indexingRule = indexingRule;

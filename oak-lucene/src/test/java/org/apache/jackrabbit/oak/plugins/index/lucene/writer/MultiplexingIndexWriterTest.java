@@ -19,16 +19,12 @@
 
 package org.apache.jackrabbit.oak.plugins.index.lucene.writer;
 
-import java.io.File;
-import java.io.IOException;
-import java.util.List;
-
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import org.apache.jackrabbit.oak.plugins.blob.datastore.CachingFileDataStore;
 import org.apache.jackrabbit.oak.plugins.blob.datastore.DataStoreBlobStore;
 import org.apache.jackrabbit.oak.plugins.blob.datastore.DataStoreUtils;
-import org.apache.jackrabbit.oak.plugins.index.lucene.IndexDefinition;
+import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.DefaultDirectoryFactory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.DirectoryFactory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.OakDirectory;
@@ -45,9 +41,13 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
+import java.io.File;
+import java.io.IOException;
+import java.util.List;
+
+import static org.apache.jackrabbit.oak.InitialContent.INITIAL_CONTENT;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.TestUtil.newDoc;
 import static org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState.EMPTY_NODE;
-import static org.apache.jackrabbit.oak.InitialContent.INITIAL_CONTENT;
 import static org.hamcrest.CoreMatchers.instanceOf;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsInAnyOrder;
@@ -61,7 +61,7 @@ public class MultiplexingIndexWriterTest {
 
     private NodeState root = INITIAL_CONTENT;
     private NodeBuilder builder = EMPTY_NODE.builder();
-    private IndexDefinition defn = new IndexDefinition(root, builder.getNodeState(), "/foo");
+    private LuceneIndexDefinition defn = new LuceneIndexDefinition(root, builder.getNodeState(), "/foo");
     private MountInfoProvider mip = Mounts.newBuilder()
             .mount("foo", "/libs", "/apps").build();
 
@@ -76,14 +76,14 @@ public class MultiplexingIndexWriterTest {
 
     @Test
     public void defaultWriterWithNoMounts() throws Exception{
-        LuceneIndexWriterFactory factory = newDirectoryFactory(Mounts.defaultMountInfoProvider());
+        DefaultIndexWriterFactory factory = newDirectoryFactory(Mounts.defaultMountInfoProvider());
         LuceneIndexWriter writer = factory.newInstance(defn, builder, true);
         assertThat(writer, instanceOf(DefaultIndexWriter.class));
     }
 
     @Test
     public void closeWithoutChange() throws Exception{
-        LuceneIndexWriterFactory factory = newDirectoryFactory();
+        DefaultIndexWriterFactory factory = newDirectoryFactory();
         LuceneIndexWriter writer = factory.newInstance(defn, builder, true);
         assertFalse(writer.close(0));
         assertEquals(0, Iterables.size(getIndexDirNodes()));
@@ -91,7 +91,7 @@ public class MultiplexingIndexWriterTest {
 
     @Test
     public void writesInDefaultMount() throws Exception{
-        LuceneIndexWriterFactory factory = newDirectoryFactory();
+        DefaultIndexWriterFactory factory = newDirectoryFactory();
         LuceneIndexWriter writer = factory.newInstance(defn, builder, true);
 
         //1. Add entry in foo mount
@@ -118,7 +118,7 @@ public class MultiplexingIndexWriterTest {
                 folder.newFolder().getAbsolutePath());
 
         DirectoryFactory directoryFactory = new DefaultDirectoryFactory(null, new DataStoreBlobStore(ds));
-        LuceneIndexWriterFactory factory = new DefaultIndexWriterFactory(mip, directoryFactory, writerConfig);
+        DefaultIndexWriterFactory factory = new DefaultIndexWriterFactory(mip, directoryFactory, writerConfig);
         LuceneIndexWriter writer = factory.newInstance(defn, builder, true);
 
         //1. Add entry in foo mount
@@ -140,7 +140,7 @@ public class MultiplexingIndexWriterTest {
 
     @Test
     public void deletes() throws Exception{
-        LuceneIndexWriterFactory factory = newDirectoryFactory();
+        DefaultIndexWriterFactory factory = newDirectoryFactory();
         LuceneIndexWriter writer = factory.newInstance(defn, builder, true);
 
         writer.updateDocument("/libs/config", newDoc("/libs/config"));
@@ -172,7 +172,7 @@ public class MultiplexingIndexWriterTest {
         mip = Mounts.newBuilder()
                 .mount("foo", "/content/remote").build();
         initializeMounts();
-        LuceneIndexWriterFactory factory = newDirectoryFactory();
+        DefaultIndexWriterFactory factory = newDirectoryFactory();
         LuceneIndexWriter writer = factory.newInstance(defn, builder, true);
 
         writer.updateDocument("/content/remote/a", newDoc("/content/remote/a"));
@@ -218,11 +218,11 @@ public class MultiplexingIndexWriterTest {
         return MultiplexersLucene.getIndexDirName(m);
     }
 
-    private LuceneIndexWriterFactory newDirectoryFactory(){
+    private DefaultIndexWriterFactory newDirectoryFactory(){
         return newDirectoryFactory(mip);
     }
 
-    private LuceneIndexWriterFactory newDirectoryFactory(MountInfoProvider mountInfoProvider){
+    private DefaultIndexWriterFactory newDirectoryFactory(MountInfoProvider mountInfoProvider){
         DirectoryFactory directoryFactory = new DefaultDirectoryFactory(null, null);
         return new DefaultIndexWriterFactory(mountInfoProvider, directoryFactory, writerConfig);
     }

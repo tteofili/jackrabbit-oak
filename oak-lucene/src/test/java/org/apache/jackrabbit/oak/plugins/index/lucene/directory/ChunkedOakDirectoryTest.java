@@ -22,8 +22,8 @@ package org.apache.jackrabbit.oak.plugins.index.lucene.directory;
 import org.apache.commons.io.IOUtils;
 import org.apache.jackrabbit.oak.api.Blob;
 import org.apache.jackrabbit.oak.api.PropertyState;
-import org.apache.jackrabbit.oak.plugins.index.lucene.IndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants;
+import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexDefinition;
 import org.apache.jackrabbit.oak.segment.SegmentNodeStore;
 import org.apache.jackrabbit.oak.segment.SegmentNodeStoreBuilders;
 import org.apache.jackrabbit.oak.segment.SegmentTestConstants;
@@ -99,7 +99,7 @@ public class ChunkedOakDirectoryTest extends OakDirectoryTestBase {
     }
 
     @Override
-    OakDirectoryBuilder getOakDirectoryBuilder(NodeBuilder builder, IndexDefinition indexDefinition) {
+    OakDirectoryBuilder getOakDirectoryBuilder(NodeBuilder builder, LuceneIndexDefinition indexDefinition) {
         return new OakDirectoryBuilder(builder, indexDefinition, false);
     }
 

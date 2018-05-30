@@ -42,7 +42,7 @@ import com.google.common.hash.Hashing;
 import org.apache.commons.io.FileUtils;
 import org.apache.jackrabbit.oak.commons.IOUtils;
 import org.apache.jackrabbit.oak.commons.PathUtils;
-import org.apache.jackrabbit.oak.plugins.index.lucene.IndexDefinition;
+import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.lucene.hybrid.NRTIndex;
 import org.apache.jackrabbit.oak.stats.Clock;
 import org.slf4j.Logger;

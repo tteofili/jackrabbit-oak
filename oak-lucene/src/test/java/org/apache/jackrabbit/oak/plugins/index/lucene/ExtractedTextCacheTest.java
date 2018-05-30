@@ -24,22 +24,23 @@ import org.apache.jackrabbit.oak.api.Blob;
 import org.apache.jackrabbit.oak.plugins.index.fulltext.ExtractedText;
 import org.apache.jackrabbit.oak.plugins.index.fulltext.ExtractedText.ExtractionResult;
 import org.apache.jackrabbit.oak.plugins.index.fulltext.PreExtractedTextProvider;
+import org.apache.jackrabbit.oak.plugins.index.search.ExtractedTextCache;
 import org.apache.jackrabbit.oak.plugins.memory.ArrayBasedBlob;
 import org.junit.Test;
 
-import static org.junit.Assert.fail;
+import java.util.concurrent.Callable;
+import java.util.concurrent.TimeoutException;
+
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 import static org.mockito.Matchers.any;
 import static org.mockito.Matchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyZeroInteractions;
 import static org.mockito.Mockito.when;
-
-import java.util.concurrent.Callable;
-import java.util.concurrent.TimeoutException;
 
 public class ExtractedTextCacheTest {
 

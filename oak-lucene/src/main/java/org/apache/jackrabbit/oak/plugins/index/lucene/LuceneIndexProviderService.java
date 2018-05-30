@@ -69,6 +69,9 @@ import org.apache.jackrabbit.oak.plugins.index.lucene.hybrid.LuceneJournalProper
 import org.apache.jackrabbit.oak.plugins.index.lucene.hybrid.NRTIndexFactory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.property.PropertyIndexCleaner;
 import org.apache.jackrabbit.oak.plugins.index.lucene.reader.DefaultIndexReaderFactory;
+import org.apache.jackrabbit.oak.plugins.index.search.ExtractedTextCache;
+import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
+import org.apache.jackrabbit.oak.plugins.index.search.TextExtractionStatsMBean;
 import org.apache.jackrabbit.oak.spi.blob.GarbageCollectableBlobStore;
 import org.apache.jackrabbit.oak.spi.commit.BackgroundObserver;
 import org.apache.jackrabbit.oak.plugins.index.lucene.score.ScorerProviderFactory;
@@ -97,6 +100,7 @@ import org.slf4j.LoggerFactory;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static java.util.Collections.emptyMap;
 import static org.apache.commons.io.FileUtils.ONE_MB;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.TYPE_LUCENE;
 import static org.apache.jackrabbit.oak.spi.blob.osgi.SplitBlobStoreService.ONLY_STANDALONE_TARGET;
 import static org.apache.jackrabbit.oak.spi.whiteboard.WhiteboardUtils.registerMBean;
 import static org.apache.jackrabbit.oak.spi.whiteboard.WhiteboardUtils.scheduleWithFixedDelay;
@@ -503,7 +507,7 @@ public class LuceneIndexProviderService {
         }
 
         Dictionary<String, Object> props = new Hashtable<String, Object>();
-        props.put("type", "lucene");
+        props.put("type", TYPE_LUCENE);
         regs.add(bundleContext.registerService(IndexEditorProvider.class.getName(), editorProvider, props));
         oakRegs.add(registerMBean(whiteboard,
                 TextExtractionStatsMBean.class,

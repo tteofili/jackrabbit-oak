@@ -34,7 +34,7 @@ public interface ReaderRefreshPolicy {
 
     /**
      * This would be invoked before any query is performed
-     * to provide a chance for IndexNode to refresh the readers
+     * to provide a chance for LuceneIndexNode to refresh the readers
      *
      * <p>The index may or may not be updated when this method
      * is invoked

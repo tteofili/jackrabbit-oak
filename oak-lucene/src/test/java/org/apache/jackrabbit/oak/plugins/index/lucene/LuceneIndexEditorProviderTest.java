@@ -38,9 +38,9 @@ import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.junit.Test;
 
+import static org.apache.jackrabbit.oak.InitialContent.INITIAL_CONTENT;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.TYPE_LUCENE;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.util.LuceneIndexHelper.newLucenePropertyIndexDefinition;
-import static org.apache.jackrabbit.oak.InitialContent.INITIAL_CONTENT;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.fail;
@@ -89,7 +89,7 @@ public class LuceneIndexEditorProviderTest {
         //from tracker with a marker property
         NodeBuilder testBuilder = createIndexDefinition("fooIndex").builder();
         testBuilder.setProperty("foo", "bar");
-        IndexDefinition defn = new IndexDefinition(root, testBuilder.getNodeState(), "/foo");
+        LuceneIndexDefinition defn = new LuceneIndexDefinition(root, testBuilder.getNodeState(), "/foo");
         when(tracker.getIndexDefinition("/oak:index/fooIndex")).thenReturn(defn);
 
         IndexUpdateCallback callback = new TestCallback("/oak:index/fooIndex", newCommitInfo(), false, false);
@@ -121,7 +121,7 @@ public class LuceneIndexEditorProviderTest {
                 idxName, ImmutableSet.of("foo"), "async");
         TestUtil.enableIndexingMode(idx, IndexingMode.NRT);
         LuceneIndexEditorContext.configureUniqueId(idx);
-        IndexDefinition.updateDefinition(idx);
+        LuceneIndexDefinition.updateDefinition(idx);
         return idx.getNodeState();
     }
 

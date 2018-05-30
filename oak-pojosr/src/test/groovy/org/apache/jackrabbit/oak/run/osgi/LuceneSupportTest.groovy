@@ -22,7 +22,7 @@ package org.apache.jackrabbit.oak.run.osgi
 import org.apache.felix.connect.launch.PojoServiceRegistry
 
 import org.apache.jackrabbit.oak.plugins.index.aggregate.SimpleNodeAggregator
-import org.apache.jackrabbit.oak.plugins.index.lucene.IndexFormatVersion
+import org.apache.jackrabbit.oak.plugins.index.search.IndexFormatVersion
 import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.LuceneIndexHelper
 import org.apache.jackrabbit.oak.spi.lifecycle.RepositoryInitializer

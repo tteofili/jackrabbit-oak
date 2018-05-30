@@ -25,7 +25,7 @@ import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.commons.PerfLogger;
 import org.apache.jackrabbit.oak.commons.StringUtils;
 import org.apache.jackrabbit.oak.plugins.blob.datastore.InMemoryDataRecord;
-import org.apache.jackrabbit.oak.plugins.index.lucene.IndexDefinition;
+import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.ActiveDeletedBlobCollectorFactory.BlobDeletionCallback;
 import org.apache.jackrabbit.oak.spi.blob.GarbageCollectableBlobStore;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
@@ -75,7 +75,7 @@ public class OakDirectory extends Directory {
     protected final NodeBuilder builder;
     protected final String dataNodeName;
     protected final NodeBuilder directoryBuilder;
-    private final IndexDefinition definition;
+    private final LuceneIndexDefinition definition;
     private LockFactory lockFactory;
     private final boolean readOnly;
     private final boolean streamingWriteEnabled;
@@ -86,20 +86,20 @@ public class OakDirectory extends Directory {
     private final BlobDeletionCallback blobDeletionCallback;
     private volatile boolean dirty;
 
-    public OakDirectory(NodeBuilder builder, IndexDefinition definition, boolean readOnly) {
+    public OakDirectory(NodeBuilder builder, LuceneIndexDefinition definition, boolean readOnly) {
         this(builder, INDEX_DATA_CHILD_NAME, definition, readOnly);
     }
 
-    public OakDirectory(NodeBuilder builder, String dataNodeName, IndexDefinition definition, boolean readOnly) {
+    public OakDirectory(NodeBuilder builder, String dataNodeName, LuceneIndexDefinition definition, boolean readOnly) {
         this(builder, dataNodeName, definition, readOnly, BlobFactory.getNodeBuilderBlobFactory(builder));
     }
 
-    public OakDirectory(NodeBuilder builder, String dataNodeName, IndexDefinition definition,
+    public OakDirectory(NodeBuilder builder, String dataNodeName, LuceneIndexDefinition definition,
                         boolean readOnly, @Nullable GarbageCollectableBlobStore blobStore) {
         this(builder, dataNodeName, definition, readOnly, blobStore, BlobDeletionCallback.NOOP);
     }
 
-    public OakDirectory(NodeBuilder builder, String dataNodeName, IndexDefinition definition,
+    public OakDirectory(NodeBuilder builder, String dataNodeName, LuceneIndexDefinition definition,
                         boolean readOnly, @Nullable GarbageCollectableBlobStore blobStore,
                         @Nonnull BlobDeletionCallback blobDeletionCallback) {
         this(builder, dataNodeName, definition, readOnly,
@@ -107,18 +107,18 @@ public class OakDirectory extends Directory {
                 blobDeletionCallback);
     }
 
-    public OakDirectory(NodeBuilder builder, String dataNodeName, IndexDefinition definition,
+    public OakDirectory(NodeBuilder builder, String dataNodeName, LuceneIndexDefinition definition,
                         boolean readOnly, BlobFactory blobFactory) {
         this(builder, dataNodeName, definition, readOnly, blobFactory, BlobDeletionCallback.NOOP);
     }
 
-    public OakDirectory(NodeBuilder builder, String dataNodeName, IndexDefinition definition,
+    public OakDirectory(NodeBuilder builder, String dataNodeName, LuceneIndexDefinition definition,
                         boolean readOnly, BlobFactory blobFactory,
                         @Nonnull BlobDeletionCallback blobDeletionCallback) {
         this(builder, dataNodeName, definition, readOnly, blobFactory, blobDeletionCallback, false);
     }
 
-    public OakDirectory(NodeBuilder builder, String dataNodeName, IndexDefinition definition,
+    public OakDirectory(NodeBuilder builder, String dataNodeName, LuceneIndexDefinition definition,
                         boolean readOnly, BlobFactory blobFactory,
                         @Nonnull BlobDeletionCallback blobDeletionCallback,
                         boolean streamingWriteEnabled) {

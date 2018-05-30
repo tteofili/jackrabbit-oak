@@ -24,6 +24,7 @@ import java.util.Set;
 
 import com.google.common.collect.Sets;
 import org.apache.jackrabbit.oak.commons.PathUtils;
+import org.apache.jackrabbit.oak.plugins.index.search.IndexFormatVersion;
 import org.apache.jackrabbit.oak.spi.query.Filter;
 import org.apache.jackrabbit.oak.spi.state.ChildNodeEntry;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
@@ -44,7 +45,7 @@ class LuceneIndexLookup {
      */
     public String getOldFullTextIndexPath(Filter filter, IndexTracker tracker) {
         Collection<String> indexPaths = collectIndexNodePaths(filter, false);
-        IndexNode indexNode = null;
+        LuceneIndexNode indexNode = null;
         for (String path : indexPaths) {
             try {
                 indexNode = tracker.acquireIndexNode(path);

@@ -19,87 +19,18 @@
 
 package org.apache.jackrabbit.oak.plugins.index.lucene;
 
-import javax.annotation.Nonnull;
-import javax.jcr.PropertyType;
-
-import static com.google.common.collect.ImmutableSet.of;
-import static com.google.common.collect.Lists.newArrayList;
-import static java.util.Arrays.asList;
-import static org.apache.jackrabbit.JcrConstants.JCR_CONTENT;
-import static org.apache.jackrabbit.JcrConstants.JCR_DATA;
-import static org.apache.jackrabbit.JcrConstants.NT_FILE;
-import static org.apache.jackrabbit.oak.api.QueryEngine.NO_BINDINGS;
-import static org.apache.jackrabbit.oak.api.QueryEngine.NO_MAPPINGS;
-import static org.apache.jackrabbit.oak.api.Type.NAMES;
-import static org.apache.jackrabbit.oak.api.Type.STRING;
-import static org.apache.jackrabbit.oak.api.Type.STRINGS;
-import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.ASYNC_PROPERTY_NAME;
-import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.DECLARING_NODE_TYPES;
-import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.INDEX_DEFINITIONS_NAME;
-import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.INDEX_DEFINITIONS_NODE_TYPE;
-import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.QUERY_PATHS;
-import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.REINDEX_PROPERTY_NAME;
-import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.TYPE_PROPERTY_NAME;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.IndexDefinition.INDEX_DEFINITION_NODE;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.ANALYZERS;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.INCLUDE_PROPERTY_NAMES;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.ORDERED_PROP_NAMES;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.INDEX_ORIGINAL_TERM;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.PROPDEF_PROP_NODE_NAME;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.PROP_ANALYZED;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.PROP_NAME;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.PROP_NODE;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.PROP_NODE_SCOPE_INDEX;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.PROP_PROPERTY_INDEX;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.PROP_TYPE;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.TIKA;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexEditorTest.createCal;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.TestUtil.child;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.TestUtil.newNodeAggregator;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.TestUtil.useV2;
-import static org.apache.jackrabbit.oak.plugins.index.property.OrderedIndex.OrderDirection;
-import static org.apache.jackrabbit.oak.plugins.memory.PropertyStates.createProperty;
-import static org.apache.jackrabbit.oak.InitialContent.INITIAL_CONTENT;
-import static org.apache.jackrabbit.oak.spi.filter.PathFilter.PROP_EXCLUDED_PATHS;
-import static org.apache.jackrabbit.oak.spi.filter.PathFilter.PROP_INCLUDED_PATHS;
-import static org.hamcrest.CoreMatchers.containsString;
-import static org.hamcrest.CoreMatchers.not;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertThat;
-import static org.junit.Assert.assertTrue;
-
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
-import java.text.ParseException;
-import java.util.Calendar;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.Iterator;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.Random;
-import java.util.Set;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-
 import com.google.common.base.Charsets;
 import com.google.common.collect.ComparisonChain;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
-import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.io.CountingInputStream;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.IOUtils;
 import org.apache.jackrabbit.JcrConstants;
+import org.apache.jackrabbit.oak.InitialContent;
 import org.apache.jackrabbit.oak.Oak;
 import org.apache.jackrabbit.oak.api.Blob;
 import org.apache.jackrabbit.oak.api.CommitFailedException;
@@ -122,11 +53,13 @@ import org.apache.jackrabbit.oak.plugins.index.lucene.directory.CopyOnReadDirect
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.IndexDefinitionBuilder;
 import org.apache.jackrabbit.oak.plugins.index.nodetype.NodeTypeIndexProvider;
 import org.apache.jackrabbit.oak.plugins.index.property.PropertyIndexEditorProvider;
+import org.apache.jackrabbit.oak.plugins.index.search.ExtractedTextCache;
+import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
+import org.apache.jackrabbit.oak.plugins.index.search.IndexFormatVersion;
 import org.apache.jackrabbit.oak.plugins.memory.ArrayBasedBlob;
 import org.apache.jackrabbit.oak.plugins.memory.MemoryNodeStore;
 import org.apache.jackrabbit.oak.plugins.memory.PropertyStates;
 import org.apache.jackrabbit.oak.plugins.nodetype.TypeEditorProvider;
-import org.apache.jackrabbit.oak.InitialContent;
 import org.apache.jackrabbit.oak.plugins.nodetype.write.NodeTypeRegistry;
 import org.apache.jackrabbit.oak.query.AbstractQueryTest;
 import org.apache.jackrabbit.oak.spi.commit.CommitInfo;
@@ -146,6 +79,74 @@ import org.junit.Ignore;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
+
+import javax.annotation.Nonnull;
+import javax.jcr.PropertyType;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.text.ParseException;
+import java.util.Calendar;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+import static com.google.common.collect.ImmutableSet.of;
+import static com.google.common.collect.Lists.newArrayList;
+import static java.util.Arrays.asList;
+import static org.apache.jackrabbit.JcrConstants.JCR_CONTENT;
+import static org.apache.jackrabbit.JcrConstants.JCR_DATA;
+import static org.apache.jackrabbit.JcrConstants.NT_FILE;
+import static org.apache.jackrabbit.oak.InitialContent.INITIAL_CONTENT;
+import static org.apache.jackrabbit.oak.api.QueryEngine.NO_BINDINGS;
+import static org.apache.jackrabbit.oak.api.QueryEngine.NO_MAPPINGS;
+import static org.apache.jackrabbit.oak.api.Type.NAMES;
+import static org.apache.jackrabbit.oak.api.Type.STRING;
+import static org.apache.jackrabbit.oak.api.Type.STRINGS;
+import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.ASYNC_PROPERTY_NAME;
+import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.DECLARING_NODE_TYPES;
+import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.INDEX_DEFINITIONS_NAME;
+import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.INDEX_DEFINITIONS_NODE_TYPE;
+import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.QUERY_PATHS;
+import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.REINDEX_PROPERTY_NAME;
+import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.TYPE_PROPERTY_NAME;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.ANALYZERS;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.INCLUDE_PROPERTY_NAMES;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.INDEX_ORIGINAL_TERM;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.ORDERED_PROP_NAMES;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.PROPDEF_PROP_NODE_NAME;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.PROP_ANALYZED;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.PROP_NAME;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.PROP_NODE;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.PROP_NODE_SCOPE_INDEX;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.PROP_PROPERTY_INDEX;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.PROP_TYPE;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.TIKA;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.TYPE_LUCENE;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexEditorTest.createCal;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.TestUtil.child;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.TestUtil.newNodeAggregator;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.TestUtil.useV2;
+import static org.apache.jackrabbit.oak.plugins.index.property.OrderedIndex.OrderDirection;
+import static org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition.INDEX_DEFINITION_NODE;
+import static org.apache.jackrabbit.oak.plugins.memory.PropertyStates.createProperty;
+import static org.apache.jackrabbit.oak.spi.filter.PathFilter.PROP_EXCLUDED_PATHS;
+import static org.apache.jackrabbit.oak.spi.filter.PathFilter.PROP_INCLUDED_PATHS;
+import static org.hamcrest.CoreMatchers.containsString;
+import static org.hamcrest.CoreMatchers.not;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertThat;
+import static org.junit.Assert.assertTrue;
 
 @SuppressWarnings("ArraysAsListWithZeroOrOneArgument")
 public class LucenePropertyIndexTest extends AbstractQueryTest {
@@ -206,7 +207,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
         try {
             return new IndexCopier(executorService, temporaryFolder.getRoot()) {
                 @Override
-                public Directory wrapForRead(String indexPath, IndexDefinition definition,
+                public Directory wrapForRead(String indexPath, LuceneIndexDefinition definition,
                                              Directory remote, String dirName) throws IOException {
                     Directory ret = super.wrapForRead(indexPath, definition, remote, dirName);
                     corDir = getFSDirPath(ret);
@@ -214,7 +215,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
                 }
 
                 @Override
-                public Directory wrapForWrite(IndexDefinition definition,
+                public Directory wrapForWrite(LuceneIndexDefinition definition,
                                               Directory remote, boolean reindexMode, String dirName) throws IOException {
                     Directory ret = super.wrapForWrite(definition, remote, reindexMode, dirName);
                     cowDir = getFSDirPath(ret);
@@ -895,7 +896,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
     @Test
     public void wildcardQueryToLookupUnanalyzedText() throws Exception {
         Tree idx = createIndex("test1", of("propa", "propb"));
-        idx.setProperty(PROP_TYPE, "lucene");
+        idx.setProperty(PROP_TYPE, TYPE_LUCENE);
         idx.addChild(ANALYZERS).setProperty(INDEX_ORIGINAL_TERM, true);
         useV2(idx);
         //Do not provide type information
@@ -1878,7 +1879,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
     @Test
     // Copied and modified slightly from org.apache.jackrabbit.core.query.FulltextQueryTest#testFulltextExcludeSQL
     public void luceneAndExclude() throws Exception {
-        Tree indexDefn = createTestIndexNode(root.getTree("/"), LuceneIndexConstants.TYPE_LUCENE);
+        Tree indexDefn = createTestIndexNode(root.getTree("/"), TYPE_LUCENE);
         Tree r = root.getTree("/").addChild("test");
 
         Tree n = r.addChild("node1");
@@ -1910,7 +1911,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
     public void indexTimeFieldBoostAndRelativeProperty() throws Exception {
         // Index Definition
         Tree index = root.getTree("/");
-        Tree indexDefn = createTestIndexNode(index, LuceneIndexConstants.TYPE_LUCENE);
+        Tree indexDefn = createTestIndexNode(index, TYPE_LUCENE);
         useV2(indexDefn);
 
         addPropertyDefn(indexDefn, "jcr:content/metadata/title", 4.0);
@@ -2390,7 +2391,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
         idx.setProperty(JcrConstants.JCR_PRIMARYTYPE,
                 INDEX_DEFINITIONS_NODE_TYPE, Type.NAME);
         // idx.setProperty(LuceneIndexConstants.FULL_TEXT_ENABLED, true);
-        idx.setProperty(TYPE_PROPERTY_NAME, LuceneIndexConstants.TYPE_LUCENE);
+        idx.setProperty(TYPE_PROPERTY_NAME, TYPE_LUCENE);
         idx.setProperty(REINDEX_PROPERTY_NAME, true);
         Tree props = TestUtil.newRulePropTree(idx, "nt:base");
         Tree prop = props.addChild(TestUtil.unique("jcr:mimeType"));
@@ -2430,7 +2431,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
         Tree idx = index.addChild(INDEX_DEFINITIONS_NAME).addChild("test2");
         idx.setProperty(JcrConstants.JCR_PRIMARYTYPE,
                 INDEX_DEFINITIONS_NODE_TYPE, Type.NAME);
-        idx.setProperty(TYPE_PROPERTY_NAME, LuceneIndexConstants.TYPE_LUCENE);
+        idx.setProperty(TYPE_PROPERTY_NAME, TYPE_LUCENE);
         idx.setProperty(REINDEX_PROPERTY_NAME, true);
         Tree props = TestUtil.newRulePropTree(idx, "nt:base");
         Tree prop = props.addChild(TestUtil.unique("text"));
@@ -2673,7 +2674,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
     @Test
     public void relativePropertyWithIndexOnNtBase() throws Exception {
         Tree idx = createIndex("test1", of("propa"));
-        idx.setProperty(PROP_TYPE, "lucene");
+        idx.setProperty(PROP_TYPE, TYPE_LUCENE);
         useV2(idx);
         //Do not provide type information
         root.commit();
@@ -3025,7 +3026,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
         Tree def = index.addChild(INDEX_DEFINITIONS_NAME).addChild(name);
         def.setProperty(JcrConstants.JCR_PRIMARYTYPE,
                 INDEX_DEFINITIONS_NODE_TYPE, Type.NAME);
-        def.setProperty(TYPE_PROPERTY_NAME, LuceneIndexConstants.TYPE_LUCENE);
+        def.setProperty(TYPE_PROPERTY_NAME, TYPE_LUCENE);
         def.setProperty(REINDEX_PROPERTY_NAME, true);
         def.setProperty(LuceneIndexConstants.FULL_TEXT_ENABLED, false);
         def.setProperty(PropertyStates.createProperty(LuceneIndexConstants.INCLUDE_PROPERTY_NAMES, propNames, Type.STRINGS));
@@ -3036,7 +3037,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
     private Tree createFullTextIndex(Tree index, String name) throws CommitFailedException {
         Tree def = index.addChild(INDEX_DEFINITIONS_NAME).addChild(name);
         def.setProperty(JcrConstants.JCR_PRIMARYTYPE, INDEX_DEFINITIONS_NODE_TYPE, Type.NAME);
-        def.setProperty(TYPE_PROPERTY_NAME, LuceneIndexConstants.TYPE_LUCENE);
+        def.setProperty(TYPE_PROPERTY_NAME, TYPE_LUCENE);
         def.setProperty(REINDEX_PROPERTY_NAME, true);
         def.setProperty(LuceneIndexConstants.EVALUATE_PATH_RESTRICTION, true);
         def.setProperty(LuceneIndexConstants.COMPAT_MODE, IndexFormatVersion.V2.getVersion());

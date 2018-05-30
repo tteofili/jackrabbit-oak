@@ -43,7 +43,7 @@ public class LuceneDocumentMakerTest {
                 .analyzed()
                 .valueExcludedPrefixes("/jobs");
 
-        IndexDefinition defn = IndexDefinition.newBuilder(root, builder.build(), "/foo").build();
+        LuceneIndexDefinition defn = LuceneIndexDefinition.newBuilder(root, builder.build(), "/foo").build();
         LuceneDocumentMaker docMaker = new LuceneDocumentMaker(defn,
                 defn.getApplicableIndexingRule("nt:base"), "/x");
 

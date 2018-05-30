@@ -22,7 +22,7 @@ package org.apache.jackrabbit.oak.console.commands
 import com.google.common.base.Stopwatch
 import org.apache.jackrabbit.oak.commons.PathUtils
 import org.apache.jackrabbit.oak.console.ConsoleSession
-import org.apache.jackrabbit.oak.plugins.index.lucene.IndexDefinition
+import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexDefinition
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.OakDirectory
 import org.apache.jackrabbit.oak.spi.commit.CommitInfo
 import org.apache.jackrabbit.oak.spi.commit.EmptyHook
@@ -130,7 +130,7 @@ class LuceneCommand extends ComplexCommandSupport {
             //OakDirectory is package scope but Groovy allows us
             //to use it. Good or bad but its helpful debug scripts
             //can access inner classes and prod code cannot. Win win :)
-            return new OakDirectory(new ReadOnlyBuilder(definition), new IndexDefinition(session.root, definition, path), true);
+            return new OakDirectory(new ReadOnlyBuilder(definition), new LuceneIndexDefinition(session.root, definition, path), true);
         }
         return null
     }

@@ -51,6 +51,7 @@ import org.apache.jackrabbit.oak.plugins.index.lucene.directory.DirectoryUtils;
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.IndexRootDirectory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.LocalIndexDir;
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.LocalIndexFile;
+import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.store.FilterDirectory;
@@ -115,14 +116,14 @@ public class IndexCopier implements CopyOnReadStatsMBean, Closeable {
         this.indexRootDirectory = new IndexRootDirectory(indexRootDir);
     }
 
-    public Directory wrapForRead(String indexPath, IndexDefinition definition,
+    public Directory wrapForRead(String indexPath, LuceneIndexDefinition definition,
                                  Directory remote, String dirName) throws IOException {
         Directory local = createLocalDirForIndexReader(indexPath, definition, dirName);
         checkIntegrity(indexPath, local, remote);
         return new CopyOnReadDirectory(this, remote, local, prefetchEnabled, indexPath, executor);
     }
 
-    public Directory wrapForWrite(IndexDefinition definition, Directory remote, boolean reindexMode, String dirName) throws IOException {
+    public Directory wrapForWrite(LuceneIndexDefinition definition, Directory remote, boolean reindexMode, String dirName) throws IOException {
         Directory local = createLocalDirForIndexWriter(definition, dirName);
         String indexPath = definition.getIndexPath();
         checkIntegrity(indexPath, local, remote);
@@ -146,7 +147,7 @@ public class IndexCopier implements CopyOnReadStatsMBean, Closeable {
         return indexRootDirectory;
     }
 
-    protected Directory createLocalDirForIndexWriter(IndexDefinition definition, String dirName) throws IOException {
+    protected Directory createLocalDirForIndexWriter(LuceneIndexDefinition definition, String dirName) throws IOException {
         String indexPath = definition.getIndexPath();
         File indexWriterDir = getIndexDir(definition, indexPath, dirName);
 
@@ -158,7 +159,7 @@ public class IndexCopier implements CopyOnReadStatsMBean, Closeable {
         return dir;
     }
 
-    protected Directory createLocalDirForIndexReader(String indexPath, IndexDefinition definition, String dirName) throws IOException {
+    protected Directory createLocalDirForIndexReader(String indexPath, LuceneIndexDefinition definition, String dirName) throws IOException {
         File indexDir = getIndexDir(definition, indexPath, dirName);
         Directory result = FSDirectory.open(indexDir);
 
@@ -221,7 +222,7 @@ public class IndexCopier implements CopyOnReadStatsMBean, Closeable {
      * about new files it is creating while indexing. This would allow COR to ignore
      * such files while determining the deletion candidates.
      *
-     * @param defn index definition for which the directory is being created
+     * @param indexPath index definition for which the directory is being created
      * @return a set to maintain the state of new files being created by the COW Directory
      */
     private Set<String> getSharedWorkingSet(String indexPath){

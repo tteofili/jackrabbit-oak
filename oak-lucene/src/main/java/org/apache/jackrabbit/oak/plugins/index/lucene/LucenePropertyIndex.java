@@ -33,7 +33,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.stream.Collectors;
 
 import com.google.common.base.Joiner;
 import com.google.common.collect.AbstractIterator;
@@ -52,7 +51,8 @@ import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.commons.PerfLogger;
 import org.apache.jackrabbit.oak.commons.json.JsopBuilder;
 import org.apache.jackrabbit.oak.commons.json.JsopWriter;
-import org.apache.jackrabbit.oak.plugins.index.lucene.IndexDefinition.IndexingRule;
+import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
+import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition.IndexingRule;
 import org.apache.jackrabbit.oak.plugins.index.lucene.IndexPlanner.PlanResult;
 import org.apache.jackrabbit.oak.plugins.index.lucene.IndexPlanner.PropertyIndexResult;
 import org.apache.jackrabbit.oak.plugins.index.lucene.property.HybridPropertyIndexLookup;
@@ -63,6 +63,8 @@ import org.apache.jackrabbit.oak.plugins.index.lucene.util.MoreLikeThisHelper;
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.PathStoredFieldVisitor;
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.SpellcheckHelper;
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.SuggestHelper;
+import org.apache.jackrabbit.oak.plugins.index.search.PropertyDefinition;
+import org.apache.jackrabbit.oak.plugins.index.search.SizeEstimator;
 import org.apache.jackrabbit.oak.plugins.memory.PropertyValues;
 import org.apache.jackrabbit.oak.spi.query.fulltext.FullTextAnd;
 import org.apache.jackrabbit.oak.spi.query.fulltext.FullTextContains;
@@ -140,7 +142,7 @@ import static org.apache.jackrabbit.oak.api.Type.STRING;
 import static org.apache.jackrabbit.oak.commons.PathUtils.denotesRoot;
 import static org.apache.jackrabbit.oak.commons.PathUtils.getParentPath;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.FieldNames.ANALYZED_FIELD_PREFIX;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.IndexDefinition.NATIVE_SORT_ORDER;
+import static org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition.NATIVE_SORT_ORDER;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.EXCERPT_NODE_FIELD_NAME;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.VERSION;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.TermFactory.newAncestorTerm;
@@ -244,7 +246,7 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
         Collection<String> indexPaths = new LuceneIndexLookup(rootState).collectIndexNodePaths(filter);
         List<IndexPlan> plans = Lists.newArrayListWithCapacity(indexPaths.size());
         for (String path : indexPaths) {
-            IndexNode indexNode = null;
+            LuceneIndexNode indexNode = null;
             try {
                 indexNode = tracker.acquireIndexNode(path);
 
@@ -279,7 +281,7 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
     @Override
     public String getPlanDescription(IndexPlan plan, NodeState root) {
         Filter filter = plan.getFilter();
-        IndexNode index = tracker.acquireIndexNode(getPlanResult(plan).indexPath);
+        LuceneIndexNode index = tracker.acquireIndexNode(getPlanResult(plan).indexPath);
         checkState(index != null, "The Lucene index is not available");
         try {
             FullTextExpression ft = filter.getFullTextConstraint();
@@ -404,7 +406,7 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
 
                 ScoreDoc lastDocToRecord = null;
 
-                final IndexNode indexNode = acquireIndexNode(plan);
+                final LuceneIndexNode indexNode = acquireIndexNode(plan);
                 checkState(indexNode != null);
                 try {
                     IndexSearcher searcher = getCurrentSearcher(indexNode);
@@ -566,7 +568,7 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
                 return !queue.isEmpty();
             }
 
-            private IndexSearcher getCurrentSearcher(IndexNode indexNode) {
+            private IndexSearcher getCurrentSearcher(LuceneIndexNode indexNode) {
                 //The searcher once obtained is held till either cursor is finished
                 //or if the index gets updated. It needs to be ensured that
                 //searcher is obtained via this method only in this iterator
@@ -575,7 +577,7 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
                 //For NRT case its fine to keep a reference to searcher i.e. not
                 //acquire it for every loadDocs call otherwise with frequent change
                 //the reset of lastDoc would happen very frequently.
-                //Upon IndexNode change i.e. when new async index update is detected
+                //Upon LuceneIndexNode change i.e. when new async index update is detected
                 //the searcher would be refreshed as done earlier
                 if (indexNodeId != indexNode.getIndexNodeId()){
                     //if already initialized then log about change
@@ -598,7 +600,7 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
         SizeEstimator sizeEstimator = new SizeEstimator() {
             @Override
             public long getSize() {
-                IndexNode indexNode = acquireIndexNode(plan);
+                LuceneIndexNode indexNode = acquireIndexNode(plan);
                 checkState(indexNode != null);
                 try {
                     IndexSearcher searcher = indexNode.getSearcher();
@@ -801,7 +803,7 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
         return fulltextTermPath.endsWith("/*");
     }
 
-    private IndexNode acquireIndexNode(IndexPlan plan) {
+    private LuceneIndexNode acquireIndexNode(IndexPlan plan) {
         return tracker.acquireIndexNode(getPlanResult(plan).indexPath);
     }
 
@@ -894,7 +896,7 @@ public class LucenePropertyIndex implements AdvancedQueryIndex, QueryIndex, Nati
         Filter filter = plan.getFilter();
         FullTextExpression ft = filter.getFullTextConstraint();
         PlanResult planResult = getPlanResult(plan);
-        IndexDefinition defn = planResult.indexDefinition;
+        LuceneIndexDefinition defn = planResult.indexDefinition;
         Analyzer analyzer = defn.getAnalyzer();
         if (ft == null) {
             // there might be no full-text constraint

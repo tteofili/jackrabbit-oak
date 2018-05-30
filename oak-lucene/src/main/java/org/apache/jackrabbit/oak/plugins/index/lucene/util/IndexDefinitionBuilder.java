@@ -46,6 +46,7 @@ import static org.apache.jackrabbit.JcrConstants.JCR_PRIMARYTYPE;
 import static org.apache.jackrabbit.JcrConstants.NT_UNSTRUCTURED;
 import static org.apache.jackrabbit.oak.api.Type.NAME;
 import static org.apache.jackrabbit.oak.api.Type.STRINGS;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.TYPE_LUCENE;
 import static org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState.EMPTY_NODE;
 
 public final class IndexDefinitionBuilder {
@@ -167,7 +168,7 @@ public final class IndexDefinitionBuilder {
     private void setType() {
         PropertyState type = tree.getProperty(IndexConstants.TYPE_PROPERTY_NAME);
         if (type == null || !"disabled".equals(type.getValue(Type.STRING))) {
-            tree.setProperty(IndexConstants.TYPE_PROPERTY_NAME, "lucene");
+            tree.setProperty(IndexConstants.TYPE_PROPERTY_NAME, TYPE_LUCENE);
         }
     }
 

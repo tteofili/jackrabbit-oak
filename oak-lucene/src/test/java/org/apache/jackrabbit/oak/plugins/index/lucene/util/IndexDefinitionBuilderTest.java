@@ -39,6 +39,7 @@ import org.junit.Test;
 import static java.util.Arrays.asList;
 import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.REINDEX_PROPERTY_NAME;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.AGGREGATES;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.TYPE_LUCENE;
 import static org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState.EMPTY_NODE;
 import static org.junit.Assert.*;
 
@@ -56,7 +57,7 @@ public class IndexDefinitionBuilderTest {
         NodeState state = builder.build();
         assertEquals(2, state.getLong("compatVersion"));
         assertEquals("async", state.getString("async"));
-        assertEquals("lucene", state.getString("type"));
+        assertEquals(TYPE_LUCENE, state.getString("type"));
     }
 
     @Test
@@ -265,7 +266,7 @@ public class IndexDefinitionBuilderTest {
     @Test
     public void typeNotChangedIfSet() throws Exception{
         NodeState state = builder.build();
-        assertEquals("lucene", state.getString("type"));
+        assertEquals(TYPE_LUCENE, state.getString("type"));
 
         NodeBuilder updated = state.builder();
         updated.setProperty("type", "disabled");
@@ -276,7 +277,7 @@ public class IndexDefinitionBuilderTest {
 
         //Type other than 'disabled' would be reset
         updated.setProperty("type", "foo");
-        assertEquals("lucene", new IndexDefinitionBuilder(updated).build().getString("type"));
+        assertEquals(TYPE_LUCENE, new IndexDefinitionBuilder(updated).build().getString("type"));
     }
 
     @Test

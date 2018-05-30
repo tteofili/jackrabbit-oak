@@ -20,7 +20,6 @@
 package org.apache.jackrabbit.oak.plugins.index.lucene.hybrid;
 
 import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
 
 import org.apache.jackrabbit.oak.spi.commit.CommitContext;
 import org.apache.jackrabbit.oak.spi.commit.CommitInfo;

@@ -23,7 +23,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
-import org.apache.jackrabbit.oak.plugins.index.lucene.IndexNode;
+import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexNode;
 import org.apache.jackrabbit.oak.plugins.index.lucene.IndexTracker;
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.PathStoredFieldVisitor;
 import org.apache.lucene.index.IndexReader;
@@ -50,7 +50,7 @@ public class LuceneIndexPropertyQuery implements PropertyQuery {
     @Override
     public Iterable<String> getIndexedPaths(String propertyRelativePath, String value) {
         List<String> indexPaths = new ArrayList<>(2);
-        IndexNode indexNode = tracker.acquireIndexNode(indexPath);
+        LuceneIndexNode indexNode = tracker.acquireIndexNode(indexPath);
         if (indexNode != null) {
             try {
                 TermQuery query = new TermQuery(new Term(propertyRelativePath, value));

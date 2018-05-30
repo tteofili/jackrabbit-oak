@@ -27,16 +27,15 @@ import javax.annotation.Nonnull;
 import org.apache.commons.io.FileUtils;
 import org.apache.jackrabbit.oak.index.IndexHelper;
 import org.apache.jackrabbit.oak.index.IndexerSupport;
-import org.apache.jackrabbit.oak.plugins.index.lucene.ExtractedTextCache;
-import org.apache.jackrabbit.oak.plugins.index.lucene.IndexDefinition;
-import org.apache.jackrabbit.oak.plugins.index.lucene.binary.BinaryTextExtractor;
+import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexDefinition;
+import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexWriterFactory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.DirectoryFactory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.FSDirectoryFactory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.writer.DefaultIndexWriterFactory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.writer.LuceneIndexWriter;
-import org.apache.jackrabbit.oak.plugins.index.lucene.writer.LuceneIndexWriterConfig;
-import org.apache.jackrabbit.oak.plugins.index.lucene.writer.LuceneIndexWriterFactory;
 import org.apache.jackrabbit.oak.plugins.index.progress.IndexingProgressReporter;
+import org.apache.jackrabbit.oak.plugins.index.search.ExtractedTextCache;
+import org.apache.jackrabbit.oak.plugins.index.search.spi.binary.FulltextBinaryTextExtractor;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 
@@ -65,10 +64,10 @@ public class LuceneIndexerProvider implements NodeStateIndexerProvider {
             return null;
         }
 
-        IndexDefinition idxDefinition = IndexDefinition.newBuilder(root, definition.getNodeState(), indexPath).reindex().build();
+        LuceneIndexDefinition idxDefinition = LuceneIndexDefinition.newBuilder(root, definition.getNodeState(), indexPath).reindex().build();
 
         LuceneIndexWriter indexWriter = indexWriterFactory.newInstance(idxDefinition, definition, true);
-        BinaryTextExtractor textExtractor = new BinaryTextExtractor(textCache, idxDefinition, true);
+        FulltextBinaryTextExtractor textExtractor = new FulltextBinaryTextExtractor(textCache, idxDefinition, true);
         return new LuceneIndexer(
                 idxDefinition,
                 indexWriter,

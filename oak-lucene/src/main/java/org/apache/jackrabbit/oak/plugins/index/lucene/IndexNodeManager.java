@@ -16,28 +16,9 @@
  */
 package org.apache.jackrabbit.oak.plugins.index.lucene;
 
-import static com.google.common.base.Preconditions.checkArgument;
-import static com.google.common.base.Preconditions.checkState;
-import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.ASYNC_PROPERTY_NAME;
-import static org.apache.jackrabbit.oak.plugins.index.IndexUtils.getAsyncLaneName;
-
-import java.io.IOException;
-import java.util.Collections;
-import java.util.List;
-import java.util.concurrent.Semaphore;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.locks.ReadWriteLock;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
-
-
-import javax.annotation.CheckForNull;
-import javax.annotation.Nullable;
-
 import com.google.common.collect.Iterables;
 import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.commons.PerfLogger;
-import org.apache.jackrabbit.oak.plugins.index.IndexUtils;
 import org.apache.jackrabbit.oak.plugins.index.lucene.hybrid.NRTIndex;
 import org.apache.jackrabbit.oak.plugins.index.lucene.hybrid.NRTIndexFactory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.hybrid.ReaderRefreshPolicy;
@@ -52,6 +33,22 @@ import org.apache.lucene.search.suggest.analyzing.AnalyzingInfixSuggester;
 import org.apache.lucene.store.Directory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.annotation.CheckForNull;
+import javax.annotation.Nullable;
+import java.io.IOException;
+import java.util.Collections;
+import java.util.List;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
+
+import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.base.Preconditions.checkState;
+import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.ASYNC_PROPERTY_NAME;
+import static org.apache.jackrabbit.oak.plugins.index.IndexUtils.getAsyncLaneName;
 
 public class IndexNodeManager {
     /**
@@ -68,7 +65,7 @@ public class IndexNodeManager {
     static IndexNodeManager open(String indexPath, NodeState root, NodeState defnNodeState,
                                  LuceneIndexReaderFactory readerFactory, @Nullable NRTIndexFactory nrtFactory)
             throws IOException {
-        IndexDefinition definition = new IndexDefinition(root, defnNodeState, indexPath);
+        LuceneIndexDefinition definition = new LuceneIndexDefinition(root, defnNodeState, indexPath);
         List<LuceneIndexReader> readers = readerFactory.createReaders(definition, defnNodeState, indexPath);
         NRTIndex nrtIndex = nrtFactory != null ? nrtFactory.createIndex(definition) : null;
         if (!readers.isEmpty() || (nrtIndex != null && !hasAsyncIndexerRun(root, indexPath, defnNodeState))){
@@ -98,7 +95,7 @@ public class IndexNodeManager {
 
     private final String name;
 
-    private final IndexDefinition definition;
+    private final LuceneIndexDefinition definition;
 
     private final ReadWriteLock lock = new ReentrantReadWriteLock();
 
@@ -125,7 +122,7 @@ public class IndexNodeManager {
 
     private boolean closed = false;
 
-    IndexNodeManager(String name, IndexDefinition definition, List<LuceneIndexReader> readers, @Nullable NRTIndex nrtIndex)
+    IndexNodeManager(String name, LuceneIndexDefinition definition, List<LuceneIndexReader> readers, @Nullable NRTIndex nrtIndex)
             throws IOException {
         checkArgument(!readers.isEmpty() || nrtIndex != null);
         this.name = name;
@@ -140,7 +137,7 @@ public class IndexNodeManager {
         return name;
     }
 
-    IndexDefinition getDefinition() {
+    LuceneIndexDefinition getDefinition() {
         return definition;
     }
 
@@ -155,7 +152,7 @@ public class IndexNodeManager {
     }
 
     @CheckForNull
-    IndexNode acquire() {
+    LuceneIndexNode acquire() {
         lock.readLock().lock();
         if (closed) {
             lock.readLock().unlock();
@@ -171,7 +168,7 @@ public class IndexNodeManager {
                             "get open searcher in %s attempts", tryCount);
                     local = searcherHolder;
                 }
-                IndexNode indexNode = new IndexNodeImpl(local);
+                LuceneIndexNode indexNode = new IndexNodeImpl(local);
                 success = true;
                 return indexNode;
             } finally {
@@ -289,20 +286,20 @@ public class IndexNodeManager {
         final IndexSearcher searcher;
         final List<LuceneIndexReader> nrtReaders;
         final int searcherId = SEARCHER_ID_COUNTER.incrementAndGet();
-        final IndexStatistics indexStatistics;
+        final LuceneIndexStatistics indexStatistics;
 
         public SearcherHolder(IndexSearcher searcher, List<LuceneIndexReader> nrtReaders) {
             this.searcher = searcher;
             this.nrtReaders = nrtReaders;
-            this.indexStatistics = new IndexStatistics(searcher.getIndexReader());
+            this.indexStatistics = new LuceneIndexStatistics(searcher.getIndexReader());
         }
 
-        public IndexStatistics getIndexStatistics() {
+        public LuceneIndexStatistics getIndexStatistics() {
             return indexStatistics;
         }
     }
 
-    private class IndexNodeImpl implements IndexNode {
+    private class IndexNodeImpl implements LuceneIndexNode {
         private final SearcherHolder holder;
         private final AtomicBoolean released = new AtomicBoolean();
 
@@ -328,12 +325,12 @@ public class IndexNodeManager {
         }
 
         @Override
-        public IndexStatistics getIndexStatistics() {
+        public LuceneIndexStatistics getIndexStatistics() {
             return holder.getIndexStatistics();
         }
 
         @Override
-        public IndexDefinition getDefinition() {
+        public LuceneIndexDefinition getDefinition() {
             return definition;
         }
 

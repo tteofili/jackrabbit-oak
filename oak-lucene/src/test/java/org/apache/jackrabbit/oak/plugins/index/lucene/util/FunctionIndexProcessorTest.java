@@ -20,7 +20,6 @@ package org.apache.jackrabbit.oak.plugins.index.lucene.util;
 
 import static org.junit.Assert.assertEquals;
 
-import java.text.ParseException;
 import java.util.Arrays;
 
 import org.junit.Test;

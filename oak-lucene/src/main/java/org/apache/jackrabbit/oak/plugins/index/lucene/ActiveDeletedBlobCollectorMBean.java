@@ -21,7 +21,6 @@ package org.apache.jackrabbit.oak.plugins.index.lucene;
 
 import javax.annotation.Nonnull;
 import javax.management.openmbean.CompositeData;
-import java.util.Map;
 
 /**
  * MBean for starting and monitoring the progress of

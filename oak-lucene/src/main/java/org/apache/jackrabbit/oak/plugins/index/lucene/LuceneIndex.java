@@ -35,11 +35,14 @@ import com.google.common.collect.Sets;
 import org.apache.jackrabbit.JcrConstants;
 import org.apache.jackrabbit.oak.api.PropertyValue;
 import org.apache.jackrabbit.oak.api.Result.SizePrecision;
-import org.apache.jackrabbit.oak.plugins.index.lucene.IndexDefinition.IndexingRule;
+import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
+import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition.IndexingRule;
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.MoreLikeThisHelper;
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.PathStoredFieldVisitor;
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.SpellcheckHelper;
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.SuggestHelper;
+import org.apache.jackrabbit.oak.plugins.index.search.PropertyDefinition;
+import org.apache.jackrabbit.oak.plugins.index.search.SizeEstimator;
 import org.apache.jackrabbit.oak.plugins.memory.PropertyValues;
 import org.apache.jackrabbit.oak.spi.query.fulltext.FullTextAnd;
 import org.apache.jackrabbit.oak.spi.query.fulltext.FullTextContains;
@@ -206,7 +209,7 @@ public class LuceneIndex implements AdvanceFulltextQueryIndex {
             // "contains(a/x, 'hello') and contains(b/x, 'world')"
             return Collections.emptyList();
         }
-        IndexNode node = tracker.acquireIndexNode(indexPath);
+        LuceneIndexNode node = tracker.acquireIndexNode(indexPath);
         try{
             if (node != null){
                 IndexDefinition defn = node.getDefinition();
@@ -239,7 +242,7 @@ public class LuceneIndex implements AdvanceFulltextQueryIndex {
     @Override
     public String getPlanDescription(IndexPlan plan, NodeState root) {
         Filter filter = plan.getFilter();
-        IndexNode index = tracker.acquireIndexNode((String) plan.getAttribute(ATTR_INDEX_PATH));
+        LuceneIndexNode index = tracker.acquireIndexNode((String) plan.getAttribute(ATTR_INDEX_PATH));
         checkState(index != null, "The Lucene index is not available");
         try {
             FullTextExpression ft = filter.getFullTextConstraint();
@@ -340,7 +343,7 @@ public class LuceneIndex implements AdvanceFulltextQueryIndex {
 
                 ScoreDoc lastDocToRecord = null;
 
-                IndexNode indexNode = tracker.acquireIndexNode((String) plan.getAttribute(ATTR_INDEX_PATH));
+                LuceneIndexNode indexNode = tracker.acquireIndexNode((String) plan.getAttribute(ATTR_INDEX_PATH));
                 checkState(indexNode != null);
                 try {
                     IndexSearcher searcher = indexNode.getSearcher();
@@ -474,7 +477,7 @@ public class LuceneIndex implements AdvanceFulltextQueryIndex {
         SizeEstimator sizeEstimator = new SizeEstimator() {
             @Override
             public long getSize() {
-                IndexNode indexNode = tracker.acquireIndexNode((String) plan.getAttribute(ATTR_INDEX_PATH));
+                LuceneIndexNode indexNode = tracker.acquireIndexNode((String) plan.getAttribute(ATTR_INDEX_PATH));
                 checkState(indexNode != null);
                 try {
                     IndexSearcher searcher = indexNode.getSearcher();
@@ -596,8 +599,8 @@ public class LuceneIndex implements AdvanceFulltextQueryIndex {
      * @param indexDefinition nodestate that contains the index definition
      * @return the Lucene query
      */
-    private static LuceneRequestFacade getLuceneRequest(Filter filter, IndexReader reader,
-                                                        boolean nonFullTextConstraints, IndexDefinition indexDefinition) {
+    private static LuceneRequestFacade getLuceneRequest(Filter filter, IndexReader reader, boolean nonFullTextConstraints,
+                                                        LuceneIndexDefinition indexDefinition) {
         List<Query> qs = new ArrayList<Query>();
         Analyzer analyzer = indexDefinition.getAnalyzer();
         FullTextExpression ft = filter.getFullTextConstraint();

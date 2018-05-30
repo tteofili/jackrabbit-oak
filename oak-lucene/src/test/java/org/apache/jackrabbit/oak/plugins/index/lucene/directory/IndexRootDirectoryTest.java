@@ -26,7 +26,7 @@ import java.util.List;
 import com.google.common.base.Strings;
 import org.apache.commons.io.FileUtils;
 import org.apache.jackrabbit.oak.plugins.index.IndexConstants;
-import org.apache.jackrabbit.oak.plugins.index.lucene.IndexDefinition;
+import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexEditorContext;
 import org.apache.jackrabbit.oak.plugins.index.lucene.hybrid.NRTIndex;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;

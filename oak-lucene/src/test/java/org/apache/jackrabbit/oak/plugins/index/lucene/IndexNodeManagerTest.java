@@ -19,10 +19,6 @@
 
 package org.apache.jackrabbit.oak.plugins.index.lucene;
 
-import java.io.File;
-import java.io.IOException;
-import java.util.Collections;
-
 import com.google.common.collect.ImmutableList;
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.OakDirectory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.hybrid.NRTIndex;
@@ -48,11 +44,15 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
+import java.io.File;
+import java.io.IOException;
+import java.util.Collections;
+
 import static com.google.common.util.concurrent.MoreExecutors.sameThreadExecutor;
+import static org.apache.jackrabbit.oak.InitialContent.INITIAL_CONTENT;
 import static org.apache.jackrabbit.oak.api.Type.STRINGS;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.FieldNames.PATH;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.TestUtil.newDoc;
-import static org.apache.jackrabbit.oak.InitialContent.INITIAL_CONTENT;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -96,7 +96,7 @@ public class IndexNodeManagerTest {
     @Test
     public void nonNullIndex_OnlyNRT() throws Exception{
         IndexNodeManager nodeManager = IndexNodeManager.open("/foo", root, createNRTIndex(), readerFactory, nrtFactory);
-        IndexNode node = nodeManager.acquire();
+        LuceneIndexNode node = nodeManager.acquire();
         assertNotNull(node.getSearcher());
         TopDocs docs = node.getSearcher().search(new TermQuery(new Term(PATH, "/content/en")), 100);
         assertEquals(0, docs.totalHits);
@@ -121,7 +121,7 @@ public class IndexNodeManagerTest {
     @Test
     public void lockAndRefreshPolicy() throws Exception {
         NodeState state = createNRTIndex();
-        IndexDefinition definition = new IndexDefinition(root, state, "/foo");
+        LuceneIndexDefinition definition = new LuceneIndexDefinition(root, state, "/foo");
         NRTIndex nrtIndex = nrtFactory.createIndex(definition);
         NRTIndex mock = spy(nrtIndex);
         doReturn(new FailingPolicy()).when(mock).getRefreshPolicy();
@@ -184,7 +184,7 @@ public class IndexNodeManagerTest {
         NodeState nrtIndex = createNRTIndex();
         {
             NodeBuilder indexBuilder = nrtIndex.builder();
-            IndexDefinition indexDefinition = new IndexDefinition(root, indexBuilder.getNodeState(), "/foo");
+            LuceneIndexDefinition indexDefinition = new LuceneIndexDefinition(root, indexBuilder.getNodeState(), "/foo");
             IndexWriterConfig config = IndexWriterUtils.getIndexWriterConfig(indexDefinition, false);
             OakDirectory directory = new OakDirectory(indexBuilder, indexDefinition, false);
             IndexWriter writer = new IndexWriter(directory, config);

@@ -17,7 +17,7 @@
 package org.apache.jackrabbit.oak.plugins.index.lucene.directory;
 
 import com.google.common.collect.Sets;
-import org.apache.jackrabbit.oak.plugins.index.lucene.IndexDefinition;
+import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.ActiveDeletedBlobCollectorFactory.BlobDeletionCallback;
 import org.apache.jackrabbit.oak.spi.blob.BlobStore;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
@@ -88,7 +88,7 @@ public final class BufferedOakDirectory extends Directory {
 
     private final String dataNodeName;
 
-    private final IndexDefinition definition;
+    private final LuceneIndexDefinition definition;
 
     private final OakDirectory base;
 
@@ -103,14 +103,14 @@ public final class BufferedOakDirectory extends Directory {
 
     public BufferedOakDirectory(@Nonnull NodeBuilder builder,
                                 @Nonnull String dataNodeName,
-                                @Nonnull IndexDefinition definition,
+                                @Nonnull LuceneIndexDefinition definition,
                                 @Nullable BlobStore blobStore) {
         this(builder, dataNodeName, definition, blobStore, BlobDeletionCallback.NOOP);
     }
 
     public BufferedOakDirectory(@Nonnull NodeBuilder builder,
                                 @Nonnull String dataNodeName,
-                                @Nonnull IndexDefinition definition,
+                                @Nonnull LuceneIndexDefinition definition,
                                 @Nullable BlobStore blobStore,
                                 @Nonnull BlobDeletionCallback blobDeletionCallback) {
         this.blobFactory = blobStore != null ?
