@@ -58,19 +58,19 @@ public class PropertyDefinition {
      * property etc then it should be defined via 'name' property in NodeState.
      * In such case NodeState name can be set to anything
      */
-    final String name;
+    public final String name;
 
     private final int propertyType;
     /**
      * The boost value for a property.
      */
-    final float boost;
+    public final float boost;
 
-    final boolean isRegexp;
+    public final boolean isRegexp;
 
     public final boolean index;
 
-    final boolean stored;
+    public final boolean stored;
 
     public final boolean nodeScopeIndex;
 
@@ -82,7 +82,7 @@ public class PropertyDefinition {
 
     public final boolean nullCheckEnabled;
 
-    final boolean notNullCheckEnabled;
+    public final boolean notNullCheckEnabled;
 
     final int includedPropertyTypes;
 

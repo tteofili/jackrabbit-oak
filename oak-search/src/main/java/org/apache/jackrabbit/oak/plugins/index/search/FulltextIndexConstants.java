@@ -290,6 +290,12 @@ public interface FulltextIndexConstants {
     String COMPAT_MODE = "compatVersion";
 
     /**
+     * Optional (index definition) property indicating whether facets should be ACL checked.
+     * Default is true
+     */
+    String PROP_SECURE_FACETS = "secure";
+
+    /**
      * Optional (index definition) property indicating max number of facets that will be retrieved
      * in query
      * Default is {@link IndexDefinition#DEFAULT_FACET_COUNT}

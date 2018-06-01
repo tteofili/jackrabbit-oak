@@ -23,6 +23,7 @@ import java.io.InputStream;
 import java.net.URL;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Callable;
@@ -30,6 +31,7 @@ import java.util.concurrent.TimeoutException;
 
 import javax.annotation.Nullable;
 
+import com.google.common.collect.Lists;
 import com.google.common.io.CountingInputStream;
 import org.apache.commons.io.IOUtils;
 import org.apache.jackrabbit.JcrConstants;
@@ -89,9 +91,9 @@ public class FulltextBinaryTextExtractor {
     textExtractionStats.collectStats(extractedTextCache);
   }
 
-  public Map<String, String> newBinary(
-      PropertyState property, NodeState state, String nodePath, String path) {
-    Map<String,String> fields = new HashMap<>();
+  public List<String> newBinary(
+      PropertyState property, NodeState state, String path) {
+    List<String> values = Lists.newArrayList();
     Metadata metadata = new Metadata();
 
     //jcr:mimeType is mandatory for a binary to be indexed
@@ -102,7 +104,7 @@ public class FulltextBinaryTextExtractor {
       log.trace(
           "[{}] Ignoring binary content for node {} due to unsupported (or null) jcr:mimeType [{}]",
           getIndexName(), path, type);
-      return fields;
+      return values;
     }
 
     metadata.set(Metadata.CONTENT_TYPE, type);
@@ -119,13 +121,9 @@ public class FulltextBinaryTextExtractor {
         continue;
       }
 
-      if (nodePath != null){
-        fields.put(nodePath, value);
-      } else {
-        fields.put(NO_NODEPATH_KEY, value);
-      }
+      values.add(value);
     }
-    return fields;
+    return values;
   }
 
   private String parseStringValue(Blob v, Metadata metadata, String path, String propertyName) {

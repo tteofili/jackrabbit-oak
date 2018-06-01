@@ -242,13 +242,13 @@ public class ExtractedTextCache {
         return extractedTextProvider;
     }
 
-    void resetCache(){
+    public void resetCache(){
         if (cache != null){
             cache.invalidateAll();
         }
     }
 
-    boolean isAlwaysUsePreExtractedCache() {
+    public boolean isAlwaysUsePreExtractedCache() {
         return alwaysUsePreExtractedCache;
     }
 

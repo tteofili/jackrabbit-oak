@@ -59,9 +59,9 @@ public abstract class FulltextIndexEditorContext<D> {
   private static final PerfLogger PERF_LOGGER =
       new PerfLogger(LoggerFactory.getLogger(FulltextIndexEditorContext.class.getName() + ".perf"));
 
-  private IndexDefinition definition;
+  protected IndexDefinition definition;
 
-  private final NodeBuilder definitionBuilder;
+  protected final NodeBuilder definitionBuilder;
 
   private final FulltextIndexWriterFactory indexWriterFactory;
 
@@ -115,12 +115,16 @@ public abstract class FulltextIndexEditorContext<D> {
     }
   }
 
+  public abstract IndexDefinition.Builder newDefinitionBuilder();
 
-  protected abstract DocumentMaker<D> newDocumentMaker(IndexDefinition.IndexingRule rule, String path);
+  public abstract DocumentMaker<D> newDocumentMaker(IndexDefinition.IndexingRule rule, String path);
 
-  protected abstract FulltextBinaryTextExtractor createBinaryTextExtractor(ExtractedTextCache extractedTextCache, IndexDefinition definition, boolean reindex);
+  protected FulltextBinaryTextExtractor createBinaryTextExtractor(ExtractedTextCache extractedTextCache,
+                                                                  IndexDefinition definition, boolean reindex) {
+    return new FulltextBinaryTextExtractor(extractedTextCache, definition, reindex);
+  }
 
-  FulltextIndexWriter getWriter() throws IOException {
+  public FulltextIndexWriter<D> getWriter() throws IOException {
     if (writer == null) {
       //Lazy initialization so as to ensure that definition is based
       //on latest NodeBuilder state specially in case of reindexing
@@ -138,14 +142,14 @@ public abstract class FulltextIndexEditorContext<D> {
     return propertyUpdateCallback;
   }
 
-  void setPropertyUpdateCallback(PropertyUpdateCallback propertyUpdateCallback) {
+  public void setPropertyUpdateCallback(PropertyUpdateCallback propertyUpdateCallback) {
     this.propertyUpdateCallback = propertyUpdateCallback;
   }
 
   /**
    * close writer if it's not null
    */
-  void closeWriter() throws IOException {
+  public void closeWriter() throws IOException {
     Calendar currentTime = getCalendar();
     final long start = PERF_LOGGER.start();
     boolean indexUpdated = getWriter().close(currentTime.getTimeInMillis());
@@ -177,7 +181,7 @@ public abstract class FulltextIndexEditorContext<D> {
   }
 
   /** Only set for testing */
-  static void setClock(Clock c) {
+  protected static void setClock(Clock c) {
     checkNotNull(c);
     clock = c;
   }
@@ -190,7 +194,8 @@ public abstract class FulltextIndexEditorContext<D> {
 
   public void enableReindexMode(){
     reindex = true;
-    ReindexOperations reindexOps = new ReindexOperations(root, definitionBuilder, definition.getIndexPath());
+    ReindexOperations reindexOps =
+            new ReindexOperations(root, definitionBuilder, definition.getIndexPath(), newDefinitionBuilder());
     definition = reindexOps.apply(indexDefnRewritten);
   }
 
@@ -199,7 +204,7 @@ public abstract class FulltextIndexEditorContext<D> {
     return indexedNodes;
   }
 
-  boolean isAsyncIndexing() {
+  public boolean isAsyncIndexing() {
     return asyncIndexing;
   }
 
@@ -207,7 +212,7 @@ public abstract class FulltextIndexEditorContext<D> {
     return indexedNodes;
   }
 
-  void indexUpdate() throws CommitFailedException {
+  public void indexUpdate() throws CommitFailedException {
     updateCallback.indexUpdate();
   }
 
@@ -215,7 +220,7 @@ public abstract class FulltextIndexEditorContext<D> {
     return definition;
   }
 
-  private FulltextBinaryTextExtractor getTextExtractor(){
+  protected FulltextBinaryTextExtractor getTextExtractor(){
     if (textExtractor == null && isAsyncIndexing()){
       //Create lazily to ensure that if its reindex case then update definition is picked
       textExtractor = createBinaryTextExtractor(extractedTextCache, definition, reindex);
@@ -242,7 +247,7 @@ public abstract class FulltextIndexEditorContext<D> {
     return uid;
   }
 
-  private static IndexDefinition createIndexDefinition(NodeState root, NodeBuilder definition, IndexingContext
+  private IndexDefinition createIndexDefinition(NodeState root, NodeBuilder definition, IndexingContext
       indexingContext, boolean asyncIndexing) {
     NodeState defnState = definition.getBaseState();
     if (asyncIndexing && !IndexDefinition.isDisableStoredIndexDefinition()){
@@ -260,6 +265,10 @@ public abstract class FulltextIndexEditorContext<D> {
             "effective post reindexing", indexingContext.getIndexPath());
       }
     }
-    return new IndexDefinition(root, defnState,indexingContext.getIndexPath());
+    return newDefinitionBuilder()
+            .root(root)
+            .defn(defnState)
+            .indexPath(indexingContext.getIndexPath())
+            .build();
   }
 }

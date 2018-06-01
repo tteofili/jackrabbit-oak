@@ -29,11 +29,14 @@ public class ReindexOperations {
     private final NodeState root;
     private final NodeBuilder definitionBuilder;
     private final String indexPath;
+    private final IndexDefinition.Builder indexDefBuilder;
 
-    public ReindexOperations(NodeState root, NodeBuilder definitionBuilder, String indexPath) {
+    public ReindexOperations(NodeState root, NodeBuilder definitionBuilder, String indexPath,
+                             IndexDefinition.Builder indexDefBuilder) {
         this.root = root;
         this.definitionBuilder = definitionBuilder;
         this.indexPath = indexPath;
+        this.indexDefBuilder = indexDefBuilder;
     }
 
     public IndexDefinition apply(boolean useStateFromBuilder) {
@@ -50,8 +53,10 @@ public class ReindexOperations {
         String uid = configureUniqueId(definitionBuilder);
 
         //Refresh the index definition based on update builder state
-        return IndexDefinition
-                .newBuilder(root, defnState, indexPath)
+        return indexDefBuilder
+                .root(root)
+                .defn(defnState)
+                .indexPath(indexPath)
                 .version(version)
                 .uid(uid)
                 .reindex()

@@ -117,15 +117,15 @@ public class BadIndexTracker {
         return badIndexesForRead.keySet();
     }
 
-    BadIndexInfo getInfo(String indexPath){
+    public BadIndexInfo getInfo(String indexPath){
         return badIndexesForRead.get(indexPath);
     }
 
-    Set<String> getBadPersistedIndexPaths() {
+    public Set<String> getBadPersistedIndexPaths() {
         return badPersistedIndexes.keySet();
     }
 
-    BadIndexInfo getPersistedIndexInfo(String indexPath){
+    public BadIndexInfo getPersistedIndexInfo(String indexPath){
         return badPersistedIndexes.get(indexPath);
     }
 
@@ -133,7 +133,7 @@ public class BadIndexTracker {
         return recheckIntervalMillis;
     }
 
-    void setTicker(Ticker ticker) {
+    public void setTicker(Ticker ticker) {
         this.ticker = ticker;
     }
 
@@ -141,8 +141,8 @@ public class BadIndexTracker {
         return !(badIndexesForRead.isEmpty() && badPersistedIndexes.isEmpty());
     }
 
-    class BadIndexInfo {
-        final String path;
+    public class BadIndexInfo {
+        public final String path;
         final int lastIndexerCycleCount = indexerCycleCount;
         private final long createdTime = TimeUnit.NANOSECONDS.toMillis(ticker.read());
         private final boolean persistedIndex;

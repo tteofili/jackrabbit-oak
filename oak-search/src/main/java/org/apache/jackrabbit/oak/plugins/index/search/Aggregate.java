@@ -57,7 +57,7 @@ public class Aggregate {
     public static final int RECURSIVE_AGGREGATION_LIMIT_DEFAULT = 5;
     private final String nodeTypeName;
     private final List<? extends Include> includes;
-    final int reAggregationLimit;
+    public final int reAggregationLimit;
     private final List<NodeInclude> relativeNodeIncludes;
     private final boolean nodeAggregates;
 
@@ -65,7 +65,7 @@ public class Aggregate {
        this(nodeTypeName, Collections.<Include>emptyList());
     }
 
-    Aggregate(String nodeTypeName, List<? extends Include> includes) {
+    public Aggregate(String nodeTypeName, List<? extends Include> includes) {
         this(nodeTypeName, includes, RECURSIVE_AGGREGATION_LIMIT_DEFAULT);
     }
 
@@ -273,8 +273,8 @@ public class Aggregate {
     }
 
     public static class NodeInclude extends Include<NodeInclude> {
-        final String primaryType;
-        final boolean relativeNode;
+        public final String primaryType;
+        public final boolean relativeNode;
         private final String pattern;
         private final AggregateMapper aggMapper;
 
