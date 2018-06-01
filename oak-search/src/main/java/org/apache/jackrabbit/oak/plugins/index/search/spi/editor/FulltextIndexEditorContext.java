@@ -35,6 +35,7 @@ import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.search.NodeStateCloner;
 import org.apache.jackrabbit.oak.plugins.index.search.PropertyUpdateCallback;
 import org.apache.jackrabbit.oak.plugins.index.search.ReindexOperations;
+import org.apache.jackrabbit.oak.plugins.index.search.spi.binary.FulltextBinaryTextExtractor;
 import org.apache.jackrabbit.oak.spi.commit.CommitInfo;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
