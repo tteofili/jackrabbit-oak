@@ -852,7 +852,7 @@ public class LuceneIndexTest {
         tracker = new IndexTracker();
 
         //Create 2 indexes. /oak:index/lucene and /test/oak:index/lucene
-        //The way LuceneIndexLookup works is. It collect child first and then
+        //The way LuceneIndexLookupUtil works is. It collect child first and then
         //parent
         NodeBuilder index = builder.child(INDEX_DEFINITIONS_NAME);
         NodeBuilder nb = newLuceneIndexDefinitionV2(index, "lucene", of(TYPENAME_STRING));

@@ -38,18 +38,4 @@ public class FacetHelperTest {
         FacetsConfig facetsConfig = FacetHelper.getFacetsConfig(root.builder());
         assertNotNull(facetsConfig);
     }
-
-    @Test
-    public void testParseFacetField() throws Exception {
-        String field = FacetHelper.parseFacetField("rep:facet(text)");
-        assertNotNull(field);
-        assertEquals("text", field);
-        field = FacetHelper.parseFacetField("rep:facet(jcr:title)");
-        assertNotNull(field);
-        assertEquals("jcr:title", field);
-        field = FacetHelper.parseFacetField("rep:facet(jcr:primaryType)");
-        assertNotNull(field);
-        assertEquals("jcr:primaryType", field);
-
-    }
 }

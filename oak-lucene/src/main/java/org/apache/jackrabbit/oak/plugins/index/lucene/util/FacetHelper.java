@@ -86,9 +86,4 @@ public class FacetHelper {
         }
         return facets;
     }
-
-
-    public static String parseFacetField(String columnName) {
-        return columnName.substring(QueryConstants.REP_FACET.length() + 1, columnName.length() - 1);
-    }
 }

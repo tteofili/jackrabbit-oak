@@ -40,6 +40,7 @@ import org.apache.jackrabbit.oak.plugins.index.lucene.writer.MultiplexersLucene;
 import org.apache.jackrabbit.oak.plugins.index.nodetype.NodeTypeIndexProvider;
 import org.apache.jackrabbit.oak.plugins.index.property.PropertyIndexEditorProvider;
 import org.apache.jackrabbit.oak.plugins.index.search.ExtractedTextCache;
+import org.apache.jackrabbit.oak.plugins.index.search.spi.query.FulltextIndexPlanner;
 import org.apache.jackrabbit.oak.plugins.memory.MemoryNodeStore;
 import org.apache.jackrabbit.oak.plugins.memory.PropertyValues;
 import org.apache.jackrabbit.oak.query.AbstractQueryTest;
@@ -157,7 +158,7 @@ public class MultiplexingLucenePropertyIndexTest extends AbstractQueryTest {
         //3 Obtain the plan
         FilterImpl filter = createFilter("nt:base");
         filter.restrictProperty("foo", Operator.EQUAL, PropertyValues.newString("bar"));
-        IndexPlanner planner = new IndexPlanner(node.acquire(), "/foo", filter, Collections.<QueryIndex.OrderEntry>emptyList());
+        FulltextIndexPlanner planner = new FulltextIndexPlanner(node.acquire(), "/foo", filter, Collections.<QueryIndex.OrderEntry>emptyList());
         QueryIndex.IndexPlan plan = planner.getPlan();
 
         //Count should be sum of both readers
