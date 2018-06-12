@@ -35,9 +35,13 @@ import org.apache.jackrabbit.oak.plugins.index.AsyncIndexInfo;
 import org.apache.jackrabbit.oak.plugins.index.AsyncIndexInfoService;
 import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.search.PropertyDefinition;
-import org.apache.jackrabbit.oak.plugins.index.lucene.property.PropertyIndexCleaner.CleanupStats;
+import org.apache.jackrabbit.oak.plugins.index.search.property.HybridPropertyIndexInfo;
+import org.apache.jackrabbit.oak.plugins.index.search.property.HybridPropertyIndexLookup;
+import org.apache.jackrabbit.oak.plugins.index.search.property.PropertyIndexCleaner;
+import org.apache.jackrabbit.oak.plugins.index.search.property.PropertyIndexCleaner.CleanupStats;
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.IndexDefinitionBuilder;
 import org.apache.jackrabbit.oak.plugins.index.search.PropertyUpdateCallback;
+import org.apache.jackrabbit.oak.plugins.index.search.property.PropertyIndexUpdateCallback;
 import org.apache.jackrabbit.oak.plugins.memory.MemoryNodeStore;
 import org.apache.jackrabbit.oak.plugins.memory.PropertyValues;
 import org.apache.jackrabbit.oak.query.index.FilterImpl;
@@ -379,6 +383,4 @@ public class PropertyIndexCleanerTest {
             infos.put(name, new AsyncIndexInfo(name, lastIndexedTo, 0, false, null));
         }
     }
-
-
 }

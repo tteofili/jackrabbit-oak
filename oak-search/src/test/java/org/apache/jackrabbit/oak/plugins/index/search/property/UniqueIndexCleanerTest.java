@@ -17,7 +17,7 @@
  * under the License.
  */
 
-package org.apache.jackrabbit.oak.plugins.index.lucene.property;
+package org.apache.jackrabbit.oak.plugins.index.search.property;
 
 
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
@@ -25,7 +25,7 @@ import org.junit.Test;
 
 import static com.google.common.collect.ImmutableList.copyOf;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.property.HybridPropertyIndexUtil.PROP_CREATED;
+import static org.apache.jackrabbit.oak.plugins.index.search.property.HybridPropertyIndexUtil.PROP_CREATED;
 import static org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState.EMPTY_NODE;
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.junit.Assert.*;

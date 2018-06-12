@@ -72,7 +72,7 @@ import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexProvider
 import org.apache.jackrabbit.oak.plugins.index.lucene.hybrid.DocumentQueue;
 import org.apache.jackrabbit.oak.plugins.index.lucene.hybrid.LocalIndexObserver;
 import org.apache.jackrabbit.oak.plugins.index.lucene.hybrid.NRTIndexFactory;
-import org.apache.jackrabbit.oak.plugins.index.lucene.property.PropertyIndexCleaner;
+import org.apache.jackrabbit.oak.plugins.index.search.property.PropertyIndexCleaner;
 import org.apache.jackrabbit.oak.plugins.index.lucene.reader.DefaultIndexReaderFactory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.reader.LuceneIndexReaderFactory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.IndexDefinitionBuilder;

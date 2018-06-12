@@ -17,7 +17,7 @@
  * under the License.
  */
 
-package org.apache.jackrabbit.oak.plugins.index.lucene.property;
+package org.apache.jackrabbit.oak.plugins.index.search.property;
 
 import java.util.concurrent.TimeUnit;
 
@@ -25,7 +25,7 @@ import org.apache.jackrabbit.oak.spi.state.ChildNodeEntry;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 
-import static org.apache.jackrabbit.oak.plugins.index.lucene.property.HybridPropertyIndexUtil.PROP_CREATED;
+import static org.apache.jackrabbit.oak.plugins.index.search.property.HybridPropertyIndexUtil.PROP_CREATED;
 
 class UniqueIndexCleaner {
     private final long createTimeMarginMillis;

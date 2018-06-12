@@ -17,26 +17,26 @@
  * under the License.
  */
 
-package org.apache.jackrabbit.oak.plugins.index.lucene.property;
+package org.apache.jackrabbit.oak.plugins.index.search.property;
 
 import org.apache.jackrabbit.JcrConstants;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 
-class HybridPropertyIndexUtil {
+public class HybridPropertyIndexUtil {
     /**
      * Node name under which all property indexes are created
      */
-    static final String PROPERTY_INDEX = ":property-index";
+    public static final String PROPERTY_INDEX = ":property-index";
 
     /**
      * Property name referring to 'head' bucket
      */
-    static final String PROP_HEAD_BUCKET = "head";
+    public static final String PROP_HEAD_BUCKET = "head";
 
     /**
      * Property name referring to 'previous' bucket
      */
-    static final String PROP_PREVIOUS_BUCKET = "previous";
+    public static final String PROP_PREVIOUS_BUCKET = "previous";
 
     /**
      * Property set on each bucket to record that it entries after
@@ -57,7 +57,7 @@ class HybridPropertyIndexUtil {
 
     static final String STORAGE_TYPE_UNIQUE = "unique";
 
-    static String getNodeName(String propertyRelativePath) {
+    public static String getNodeName(String propertyRelativePath) {
         return propertyRelativePath.replace('/', '_');
     }
 

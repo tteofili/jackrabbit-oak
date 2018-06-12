@@ -74,7 +74,7 @@ import org.apache.jackrabbit.oak.plugins.index.lucene.hybrid.ExternalObserverBui
 import org.apache.jackrabbit.oak.plugins.index.lucene.hybrid.LocalIndexObserver;
 import org.apache.jackrabbit.oak.plugins.index.lucene.hybrid.LuceneJournalPropertyService;
 import org.apache.jackrabbit.oak.plugins.index.lucene.hybrid.NRTIndexFactory;
-import org.apache.jackrabbit.oak.plugins.index.lucene.property.PropertyIndexCleaner;
+import org.apache.jackrabbit.oak.plugins.index.search.property.PropertyIndexCleaner;
 import org.apache.jackrabbit.oak.plugins.index.lucene.reader.DefaultIndexReaderFactory;
 import org.apache.jackrabbit.oak.plugins.index.search.TextExtractionCache;
 import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;

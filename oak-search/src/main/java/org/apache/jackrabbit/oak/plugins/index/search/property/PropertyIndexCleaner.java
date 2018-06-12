@@ -17,7 +17,7 @@
  * under the License.
  */
 
-package org.apache.jackrabbit.oak.plugins.index.lucene.property;
+package org.apache.jackrabbit.oak.plugins.index.search.property;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -59,10 +59,9 @@ import org.slf4j.LoggerFactory;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static java.util.Collections.singletonList;
 import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.TYPE_PROPERTY_NAME;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.TYPE_LUCENE;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.property.HybridPropertyIndexUtil.PROPERTY_INDEX;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.property.HybridPropertyIndexUtil.simplePropertyIndex;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.property.HybridPropertyIndexUtil.uniquePropertyIndex;
+import static org.apache.jackrabbit.oak.plugins.index.search.property.HybridPropertyIndexUtil.PROPERTY_INDEX;
+import static org.apache.jackrabbit.oak.plugins.index.search.property.HybridPropertyIndexUtil.simplePropertyIndex;
+import static org.apache.jackrabbit.oak.plugins.index.search.property.HybridPropertyIndexUtil.uniquePropertyIndex;
 import static org.apache.jackrabbit.oak.spi.state.NodeStateUtils.getNode;
 
 public class PropertyIndexCleaner implements Runnable{
@@ -154,12 +153,13 @@ public class PropertyIndexCleaner implements Runnable{
         this.recursiveDelete = recursiveDelete;
     }
 
-    List<String> getSyncIndexPaths() {
+    public List<String> getSyncIndexPaths() {
         List<String> indexPaths = new ArrayList<>();
         NodeState root = nodeStore.getRoot();
         for (String indexPath : indexPathService.getIndexPaths()) {
             NodeState idx = getNode(root, indexPath);
-            if (TYPE_LUCENE.equals(idx.getString(TYPE_PROPERTY_NAME))
+            // TODO wrt OAK-7411 ... how to filter indexes without referring to index type
+            if ("lucene".equals(idx.getString(TYPE_PROPERTY_NAME))
                     && idx.hasChildNode(PROPERTY_INDEX)) {
                 indexPaths.add(indexPath);
             }

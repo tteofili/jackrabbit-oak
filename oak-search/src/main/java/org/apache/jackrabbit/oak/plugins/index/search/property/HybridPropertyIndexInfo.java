@@ -17,7 +17,7 @@
  * under the License.
  */
 
-package org.apache.jackrabbit.oak.plugins.index.lucene.property;
+package org.apache.jackrabbit.oak.plugins.index.search.property;
 
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -28,11 +28,11 @@ import org.apache.jackrabbit.oak.commons.json.JsopBuilder;
 import org.apache.jackrabbit.oak.spi.state.ChildNodeEntry;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 
-import static org.apache.jackrabbit.oak.plugins.index.lucene.property.HybridPropertyIndexUtil.PROPERTY_INDEX;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.property.HybridPropertyIndexUtil.PROP_HEAD_BUCKET;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.property.HybridPropertyIndexUtil.PROP_PREVIOUS_BUCKET;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.property.HybridPropertyIndexUtil.simplePropertyIndex;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.property.HybridPropertyIndexUtil.uniquePropertyIndex;
+import static org.apache.jackrabbit.oak.plugins.index.search.property.HybridPropertyIndexUtil.PROPERTY_INDEX;
+import static org.apache.jackrabbit.oak.plugins.index.search.property.HybridPropertyIndexUtil.PROP_HEAD_BUCKET;
+import static org.apache.jackrabbit.oak.plugins.index.search.property.HybridPropertyIndexUtil.PROP_PREVIOUS_BUCKET;
+import static org.apache.jackrabbit.oak.plugins.index.search.property.HybridPropertyIndexUtil.simplePropertyIndex;
+import static org.apache.jackrabbit.oak.plugins.index.search.property.HybridPropertyIndexUtil.uniquePropertyIndex;
 
 public class HybridPropertyIndexInfo {
     private final JsopBuilder json = new JsopBuilder();

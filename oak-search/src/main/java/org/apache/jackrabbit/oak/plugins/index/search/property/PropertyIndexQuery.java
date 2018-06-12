@@ -17,15 +17,15 @@
  * under the License.
  */
 
-package org.apache.jackrabbit.oak.plugins.index.lucene.property;
+package org.apache.jackrabbit.oak.plugins.index.search.property;
 
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 
 import static com.google.common.base.Preconditions.checkState;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.property.HybridPropertyIndexUtil.PROPERTY_INDEX;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.property.HybridPropertyIndexUtil.PROP_STORAGE_TYPE;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.property.HybridPropertyIndexUtil.STORAGE_TYPE_UNIQUE;
+import static org.apache.jackrabbit.oak.plugins.index.search.property.HybridPropertyIndexUtil.PROPERTY_INDEX;
+import static org.apache.jackrabbit.oak.plugins.index.search.property.HybridPropertyIndexUtil.PROP_STORAGE_TYPE;
+import static org.apache.jackrabbit.oak.plugins.index.search.property.HybridPropertyIndexUtil.STORAGE_TYPE_UNIQUE;
 
 /**
  * Performs simple property=value query against a unique property index storage
