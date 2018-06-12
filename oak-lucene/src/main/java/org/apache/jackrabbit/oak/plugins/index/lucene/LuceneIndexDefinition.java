@@ -96,7 +96,7 @@ public class LuceneIndexDefinition extends IndexDefinition {
         }
 
         @Override
-        protected IndexDefinition createInstance(NodeState indexDefnStateToUse) {
+        protected LuceneIndexDefinition createInstance(NodeState indexDefnStateToUse) {
             return new LuceneIndexDefinition(root, indexDefnStateToUse, version, uid, indexPath);
         }
     }

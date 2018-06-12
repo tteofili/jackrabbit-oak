@@ -267,18 +267,8 @@ public class LuceneDocumentMaker extends FulltextDocumentMaker<Document> {
     }
 
     @Override
-    protected StringPropertyState createNodeNamePS() {
-        return new StringPropertyState(FieldNames.NODE_NAME, getName(path));
-    }
-
-    @Override
     protected boolean isFacetingEnabled(){
         return facetsConfigProvider != null;
-    }
-
-    @Override
-    protected boolean isNodeName(String pname) {
-        return FieldNames.NODE_NAME.equals(pname);
     }
 
     @Override
