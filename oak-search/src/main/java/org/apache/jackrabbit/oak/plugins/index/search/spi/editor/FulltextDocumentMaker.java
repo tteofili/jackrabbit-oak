@@ -36,6 +36,7 @@ import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.commons.PathUtils;
 
 import org.apache.jackrabbit.oak.plugins.index.search.Aggregate;
+import org.apache.jackrabbit.oak.plugins.index.search.FieldNames;
 import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.search.PropertyDefinition;
 import org.apache.jackrabbit.oak.plugins.index.search.spi.binary.FulltextBinaryTextExtractor;
@@ -78,11 +79,7 @@ public abstract class FulltextDocumentMaker<D> implements DocumentMaker<D> {
 
     protected abstract D finalizeDoc(D fields, boolean dirty, boolean facet) throws IOException;
 
-    protected abstract StringPropertyState createNodeNamePS();
-
     protected abstract boolean isFacetingEnabled();
-
-    protected abstract boolean isNodeName(String pname);
 
     protected abstract boolean indexTypeOrderedFields(D doc, String pname, int tag, PropertyState property, PropertyDefinition pd);
 
@@ -124,11 +121,12 @@ public abstract class FulltextDocumentMaker<D> implements DocumentMaker<D> {
 
         //We 'intentionally' are indexing node names only on root state as we don't support indexing relative or
         //regex for node name indexing
-        PropertyState nodenamePS = createNodeNamePS();
+        PropertyState nodenamePS =
+                new StringPropertyState(FieldNames.NODE_NAME, getName(path));
         for (PropertyState property : Iterables.concat(state.getProperties(), Collections.singleton(nodenamePS))) {
             String pname = property.getName();
 
-            if (!isVisible(pname) && !isNodeName(pname)) {
+            if (!isVisible(pname) && !FieldNames.NODE_NAME.equals(pname)) {
                 continue;
             }
 
