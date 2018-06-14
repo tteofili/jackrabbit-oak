@@ -51,6 +51,11 @@ import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstant
 import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.VERSION;
 import static org.apache.jackrabbit.oak.plugins.index.search.util.ConfigUtil.getOptionalValue;
 
+/**
+ * The index definition (configuration) of a Lucene index.
+ *
+ * Index definitions are typically stored under /oak:index
+ */
 public class LuceneIndexDefinition extends IndexDefinition {
     private static final Logger log = LoggerFactory.getLogger(IndexDefinition.class);
 

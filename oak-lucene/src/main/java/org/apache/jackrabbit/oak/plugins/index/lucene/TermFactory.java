@@ -20,8 +20,7 @@ import org.apache.jackrabbit.oak.plugins.index.search.FieldNames;
 import org.apache.lucene.index.Term;
 
 /**
- * {@code TermFactory} is a factory for <code>Term</code> instances with
- * frequently used field names.
+ * A factory for Lucene Term instances with frequently used field names.
  */
 public final class TermFactory {
 

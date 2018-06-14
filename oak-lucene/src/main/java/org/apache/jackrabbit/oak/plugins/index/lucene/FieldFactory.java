@@ -36,8 +36,7 @@ import static org.apache.lucene.document.Field.Store.YES;
 import static org.apache.lucene.index.FieldInfo.IndexOptions.DOCS_AND_FREQS_AND_POSITIONS_AND_OFFSETS;
 
 /**
- * {@code FieldFactory} is a factory for <code>Field</code> instances with
- * frequently used fields.
+ * A factory for Lucene Field instances with frequently used fields.
  */
 public final class FieldFactory {
 

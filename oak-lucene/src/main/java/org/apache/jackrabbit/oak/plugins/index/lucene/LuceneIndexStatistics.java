@@ -31,9 +31,11 @@ import java.util.Collections;
 import java.util.Map;
 
 /**
- * This class would populate some statistics from a reader. We want to be careful here such that
- * we only collect statistics which don't incur reads from the index i.e. we would only collect
- * stats that lucene would already have read into memory when the reader was opened.
+ * Populates statistics from a reader.
+ *
+ * We want to be careful here such that we only collect statistics which don't
+ * incur reads from the index i.e. we would only collect stats that lucene would
+ * already have read into memory when the reader was opened.
  */
 public class LuceneIndexStatistics implements IndexStatistics {
     private static final Logger LOG = LoggerFactory.getLogger(LuceneIndexStatistics.class);
@@ -106,9 +108,9 @@ public class LuceneIndexStatistics implements IndexStatistics {
      * @return number of indexed documents (without subtracting potentially deleted ones)
      *         for the given {@code field}.<br>
      *         -1: if index codec doesn't store doc-count-for-field statistics, OR <br>
-     *             &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;reader threw an exception while reading fields, OR <br>
-     *             &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;exception thrown while reading count for the field, OR <br>
-     *             &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;doc-count is asked for a non-property field.
+     *             reader threw an exception while reading fields, OR <br>
+     *             exception thrown while reading count for the field, OR <br>
+     *             doc-count is asked for a non-property field.
      */
     public int getDocCountFor(String field) {
         if (!safelyInitialized) {

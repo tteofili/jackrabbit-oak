@@ -20,6 +20,9 @@ import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.util.AbstractAnalysisFactory;
 import org.apache.lucene.util.Version;
 
+/**
+ * Constants used internally in Lucene indexes.
+ */
 public interface LuceneIndexConstants {
 
     enum IndexingMode {

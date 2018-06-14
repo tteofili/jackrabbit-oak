@@ -54,4 +54,5 @@ public interface LuceneIndexNode extends IndexNode {
     LuceneIndexWriter getLocalWriter() throws IOException;
 
     void refreshReadersOnWriteIfRequired();
+
 }

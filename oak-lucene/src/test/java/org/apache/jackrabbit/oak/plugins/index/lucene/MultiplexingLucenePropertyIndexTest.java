@@ -30,6 +30,8 @@ import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.DefaultDirectoryFactory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.DirectoryFactory;
+import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexEditorProvider;
+import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexProvider;
 import org.apache.jackrabbit.oak.plugins.index.lucene.reader.DefaultIndexReaderFactory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.reader.LuceneIndexReader;
 import org.apache.jackrabbit.oak.plugins.index.lucene.reader.LuceneIndexReaderFactory;
@@ -153,7 +155,7 @@ public class MultiplexingLucenePropertyIndexTest extends AbstractQueryTest {
         LuceneIndexReaderFactory readerFactory = new DefaultIndexReaderFactory(mip, null);
         List<LuceneIndexReader> readers = readerFactory.createReaders(defn, builder.getNodeState(),"/foo");
 
-        IndexNodeManager node = new IndexNodeManager("foo", defn, readers, null);
+        LuceneIndexNodeManager node = new LuceneIndexNodeManager("foo", defn, readers, null);
 
         //3 Obtain the plan
         FilterImpl filter = createFilter("nt:base");
@@ -195,8 +197,8 @@ public class MultiplexingLucenePropertyIndexTest extends AbstractQueryTest {
         createIndex(root.getTree("/"), idxName, Collections.singleton("foo"));
         root.commit();
 
-        int expectedSize = LucenePropertyIndex.LUCENE_QUERY_BATCH_SIZE * 2 * 2;
-        for (int i = 0; i < LucenePropertyIndex.LUCENE_QUERY_BATCH_SIZE * 2; i++) {
+        int expectedSize = LuceneIndex.LUCENE_QUERY_BATCH_SIZE * 2 * 2;
+        for (int i = 0; i < LuceneIndex.LUCENE_QUERY_BATCH_SIZE * 2; i++) {
             createPath("/libs/a"+i).setProperty("foo", "bar");
             createPath("/content/a"+i).setProperty("foo", "bar");
         }

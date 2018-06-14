@@ -31,6 +31,7 @@ import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.TYPE_PROPER
 import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.TYPE_LUCENE;
 
 class LuceneIndexLookupUtil {
+
     static final Predicate<NodeState> LUCENE_INDEX_DEFINITION_PREDICATE =
             state -> TYPE_LUCENE.equals(state.getString(TYPE_PROPERTY_NAME));
 
@@ -38,8 +39,8 @@ class LuceneIndexLookupUtil {
     }
 
     /**
-     * Returns the path of the first Lucene index node which supports
-     * fulltext search
+     * Returns the path of the first Lucene index node which supports fulltext
+     * search
      */
     public static String getOldFullTextIndexPath(NodeState root, Filter filter, IndexTracker tracker) {
         Collection<String> indexPaths = getLuceneIndexLookup(root).collectIndexNodePaths(filter, false);
@@ -64,4 +65,5 @@ class LuceneIndexLookupUtil {
     public static IndexLookup getLuceneIndexLookup(NodeState root) {
         return new IndexLookup(root, LUCENE_INDEX_DEFINITION_PREDICATE);
     }
+
 }

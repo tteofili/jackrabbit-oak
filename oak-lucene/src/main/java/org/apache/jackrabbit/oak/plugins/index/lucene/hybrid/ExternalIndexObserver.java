@@ -26,7 +26,7 @@ import javax.annotation.Nonnull;
 import com.google.common.collect.Sets;
 import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.lucene.IndexTracker;
-import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneDocumentMaker;
+import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneDocumentMaker;
 import org.apache.jackrabbit.oak.plugins.observation.Filter;
 import org.apache.jackrabbit.oak.spi.commit.CommitContext;
 import org.apache.jackrabbit.oak.spi.commit.CommitInfo;

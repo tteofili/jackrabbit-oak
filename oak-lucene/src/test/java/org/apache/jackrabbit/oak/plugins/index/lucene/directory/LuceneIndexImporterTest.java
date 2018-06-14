@@ -22,7 +22,7 @@ package org.apache.jackrabbit.oak.plugins.index.lucene.directory;
 import com.google.common.collect.ImmutableSet;
 import org.apache.jackrabbit.oak.InitialContent;
 import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexDefinition;
-import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexEditorContext;
+import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexEditorContext;
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.IndexDefinitionBuilder;
 import org.apache.jackrabbit.oak.plugins.index.lucene.writer.MultiplexersLucene;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;

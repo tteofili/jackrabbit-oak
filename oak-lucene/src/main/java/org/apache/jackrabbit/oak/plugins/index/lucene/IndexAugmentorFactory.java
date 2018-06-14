@@ -47,6 +47,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+/**
+ * A hook for an implementation to inject fields in the index.
+ */
 @SuppressWarnings("UnusedDeclaration")
 @Component
 @Service(value = IndexAugmentorFactory.class)
@@ -90,7 +93,7 @@ public class IndexAugmentorFactory {
     }
 
     @Nonnull
-    public FulltextQueryTermsProvider getFulltextQueryTermsProvider(String nodeType) {
+    FulltextQueryTermsProvider getFulltextQueryTermsProvider(String nodeType) {
         FulltextQueryTermsProvider provider = fulltextQueryTermsProviderMap.get(nodeType);
         return (provider != null) ? provider : FulltextQueryTermsProvider.DEFAULT;
     }
@@ -161,8 +164,8 @@ public class IndexAugmentorFactory {
         indexFieldProviders.clear();
         fulltextQueryTermsProviders.clear();
 
-        indexFieldProviderMap = Collections.EMPTY_MAP;
-        fulltextQueryTermsProviderMap = Collections.EMPTY_MAP;
+        indexFieldProviderMap = Collections.emptyMap();
+        fulltextQueryTermsProviderMap = Collections.emptyMap();
     }
 
     boolean isStateEmpty() {

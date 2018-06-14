@@ -17,7 +17,7 @@
  * under the License.
  */
 
-package org.apache.jackrabbit.oak.plugins.index.lucene;
+package org.apache.jackrabbit.oak.plugins.index.lucene.directory;
 
 import javax.annotation.Nonnull;
 import javax.management.openmbean.CompositeData;

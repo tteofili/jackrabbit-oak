@@ -14,7 +14,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.jackrabbit.oak.plugins.index.lucene;
+package org.apache.jackrabbit.oak.plugins.index.lucene.editor;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -25,6 +25,10 @@ import org.apache.jackrabbit.oak.plugins.index.IndexEditor;
 import org.apache.jackrabbit.oak.plugins.index.IndexEditorProvider;
 import org.apache.jackrabbit.oak.plugins.index.IndexUpdateCallback;
 import org.apache.jackrabbit.oak.plugins.index.IndexingContext;
+import org.apache.jackrabbit.oak.plugins.index.lucene.IndexAugmentorFactory;
+import org.apache.jackrabbit.oak.plugins.index.lucene.IndexCopier;
+import org.apache.jackrabbit.oak.plugins.index.lucene.IndexTracker;
+import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.ActiveDeletedBlobCollectorFactory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.ActiveDeletedBlobCollectorFactory.ActiveDeletedBlobCollector;
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.ActiveDeletedBlobCollectorFactory.BlobDeletionCallback;
@@ -58,10 +62,10 @@ import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstant
 
 /**
  * Service that provides Lucene based {@link IndexEditor}s
- * 
+ *
  * @see LuceneIndexEditor
  * @see IndexEditorProvider
- * 
+ *
  */
 public class LuceneIndexEditorProvider implements IndexEditorProvider {
     private final Logger log = LoggerFactory.getLogger(getClass());
@@ -223,7 +227,7 @@ public class LuceneIndexEditorProvider implements IndexEditorProvider {
         return indexingQueue;
     }
 
-    ExtractedTextCache getExtractedTextCache() {
+    public ExtractedTextCache getExtractedTextCache() {
         return extractedTextCache;
     }
 

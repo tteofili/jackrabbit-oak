@@ -17,7 +17,7 @@
  * under the License.
  */
 
-package org.apache.jackrabbit.oak.plugins.index.lucene;
+package org.apache.jackrabbit.oak.plugins.index.lucene.directory;
 
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
@@ -109,7 +109,7 @@ public class ActiveDeletedBlobCollectorMBeanImpl implements ActiveDeletedBlobCol
      *                                      used to purge blobs which have been deleted from lucene indexes.
      * @param executor                      executor for running the collection task
      */
-    ActiveDeletedBlobCollectorMBeanImpl(
+    public ActiveDeletedBlobCollectorMBeanImpl(
             @Nonnull ActiveDeletedBlobCollector activeDeletedBlobCollector,
             @Nonnull Whiteboard whiteboard,
             @Nonnull NodeStore store,
