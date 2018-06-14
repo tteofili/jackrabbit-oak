@@ -21,7 +21,7 @@ package org.apache.jackrabbit.oak.plugins.index.lucene.hybrid;
 
 import java.io.IOException;
 
-import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexWriterFactory;
+import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexWriterFactory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.writer.LuceneIndexWriter;
 import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;

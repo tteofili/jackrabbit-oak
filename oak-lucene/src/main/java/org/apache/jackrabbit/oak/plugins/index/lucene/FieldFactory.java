@@ -21,6 +21,7 @@ import java.util.Arrays;
 import com.google.common.primitives.Ints;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.commons.PathUtils;
+import org.apache.jackrabbit.oak.plugins.index.search.FieldNames;
 import org.apache.jackrabbit.util.ISO8601;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.FieldType;
@@ -30,15 +31,12 @@ import org.apache.lucene.document.TextField;
 
 import static org.apache.lucene.index.FieldInfo.IndexOptions.DOCS_AND_FREQS_AND_POSITIONS;
 
-import static org.apache.jackrabbit.oak.plugins.index.lucene.FieldNames.PATH;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.FieldNames.FULLTEXT;
 import static org.apache.lucene.document.Field.Store.NO;
 import static org.apache.lucene.document.Field.Store.YES;
 import static org.apache.lucene.index.FieldInfo.IndexOptions.DOCS_AND_FREQS_AND_POSITIONS_AND_OFFSETS;
 
 /**
- * {@code FieldFactory} is a factory for <code>Field</code> instances with
- * frequently used fields.
+ * A factory for Lucene Field instances with frequently used fields.
  */
 public final class FieldFactory {
 
@@ -92,7 +90,7 @@ public final class FieldFactory {
     }
 
     public static Field newPathField(String path) {
-        return new StringField(PATH, path, YES);
+        return new StringField(FieldNames.PATH, path, YES);
     }
 
     public static Field newPropertyField(String name, String value,
@@ -112,7 +110,7 @@ public final class FieldFactory {
     }
 
     public static Field newFulltextField(String value, boolean stored) {
-        return new TextField(FULLTEXT, value, stored ? YES : NO);
+        return new TextField(FieldNames.FULLTEXT, value, stored ? YES : NO);
     }
 
     public static Field newFulltextField(String name, String value, boolean stored) {

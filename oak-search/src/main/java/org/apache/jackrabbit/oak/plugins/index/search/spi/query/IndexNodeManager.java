@@ -36,6 +36,9 @@ import static com.google.common.base.Preconditions.checkState;
 import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.ASYNC_PROPERTY_NAME;
 import static org.apache.jackrabbit.oak.plugins.index.IndexUtils.getAsyncLaneName;
 
+/**
+ * Keeps track of the open read sessions for an index.
+ */
 public abstract class IndexNodeManager {
     /**
      * Name of the hidden node under which information about the checkpoints

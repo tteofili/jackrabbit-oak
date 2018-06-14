@@ -21,8 +21,8 @@ package org.apache.jackrabbit.oak.plugins.index.lucene.hybrid;
 
 import org.apache.jackrabbit.oak.plugins.index.lucene.IndexCopier;
 import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.IndexingMode;
+import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexEditorContext;
 import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexDefinition;
-import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexEditorContext;
 import org.apache.jackrabbit.oak.plugins.index.lucene.TestUtil;
 import org.apache.jackrabbit.oak.plugins.index.lucene.reader.LuceneIndexReader;
 import org.apache.jackrabbit.oak.plugins.index.lucene.writer.LuceneIndexWriter;

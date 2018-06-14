@@ -61,15 +61,15 @@ import org.apache.jackrabbit.oak.plugins.index.AsyncIndexUpdate;
 import org.apache.jackrabbit.oak.plugins.index.IndexConstants;
 import org.apache.jackrabbit.oak.plugins.index.counter.NodeCounterEditorProvider;
 import org.apache.jackrabbit.oak.plugins.index.lucene.IndexCopier;
-import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.lucene.IndexTracker;
+import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants;
 import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.IndexingMode;
-import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexEditorProvider;
-import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexProvider;
-import org.apache.jackrabbit.oak.plugins.index.lucene.LucenePropertyIndex;
+import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndex;
 import org.apache.jackrabbit.oak.plugins.index.lucene.TestUtil;
 import org.apache.jackrabbit.oak.plugins.index.lucene.TestUtil.OptionalEditorProvider;
+import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexEditorProvider;
+import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexProvider;
 import org.apache.jackrabbit.oak.plugins.index.lucene.reader.DefaultIndexReaderFactory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.reader.LuceneIndexReaderFactory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.IndexDefinitionBuilder;
@@ -397,21 +397,21 @@ public class HybridIndexTest extends AbstractQueryTest {
         root.commit();
         runAsyncIndex();
 
-        createTestData("/content", LucenePropertyIndex.LUCENE_QUERY_BATCH_SIZE * 2);
+        createTestData("/content", LuceneIndex.LUCENE_QUERY_BATCH_SIZE * 2);
         runAsyncIndex();
 
         String query = "select [jcr:path] from [nt:base] where [foo] = 'bar'";
         Result result = executeQuery(query, SQL2, NO_BINDINGS);
         Iterator<? extends ResultRow> itr = result.getRows().iterator();
         int count = 0;
-        for (int i = 0; i < LucenePropertyIndex.LUCENE_QUERY_BATCH_SIZE - 10; i++) {
+        for (int i = 0; i < LuceneIndex.LUCENE_QUERY_BATCH_SIZE - 10; i++) {
             assertTrue(itr.hasNext());
             itr.next();
             count++;
         }
 
         createTestData("/content2", 5);
-        LogCustomizer lc = LogCustomizer.forLogger(LucenePropertyIndex.class.getName())
+        LogCustomizer lc = LogCustomizer.forLogger(LuceneIndex.class.getName())
                 .filter(Level.WARN)
                 .create();
         lc.starting();
@@ -424,7 +424,7 @@ public class HybridIndexTest extends AbstractQueryTest {
 
         lc.finished();
 
-        int totalSize = LucenePropertyIndex.LUCENE_QUERY_BATCH_SIZE * 2 + 5;
+        int totalSize = LuceneIndex.LUCENE_QUERY_BATCH_SIZE * 2 + 5;
         assertEquals(totalSize, count + size);
     }
 

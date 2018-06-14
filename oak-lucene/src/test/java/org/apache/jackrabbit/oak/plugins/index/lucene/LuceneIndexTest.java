@@ -31,6 +31,7 @@ import org.apache.jackrabbit.oak.plugins.index.IndexConstants;
 import org.apache.jackrabbit.oak.plugins.index.IndexUpdateProvider;
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.DefaultDirectoryFactory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.LocalIndexDir;
+import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexEditorProvider;
 import org.apache.jackrabbit.oak.plugins.index.lucene.score.ScorerProvider;
 import org.apache.jackrabbit.oak.plugins.index.lucene.score.ScorerProviderFactory;
 import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
@@ -157,7 +158,7 @@ public class LuceneIndexTest {
 
         tracker = new IndexTracker();
         tracker.update(indexed);
-        AdvancedQueryIndex queryIndex = new LuceneIndex(tracker, null);
+        AdvancedQueryIndex queryIndex = new LuceneIndexOld(tracker, null);
 
         FilterImpl filter = createFilter(NT_BASE);
         filter.restrictPath("/", Filter.PathRestriction.EXACT);
@@ -191,7 +192,7 @@ public class LuceneIndexTest {
 
         tracker = new IndexTracker();
         tracker.update(indexed);
-        AdvancedQueryIndex queryIndex = new LucenePropertyIndex(tracker);
+        AdvancedQueryIndex queryIndex = new LuceneIndex(tracker);
         FilterImpl filter = createFilter(NT_BASE);
         filter.restrictPath("/", Filter.PathRestriction.EXACT);
         filter.restrictProperty("foo", Operator.EQUAL,
@@ -211,7 +212,7 @@ public class LuceneIndexTest {
         NodeState before = builder.getNodeState();
         builder.setProperty("foo", "bar");
 
-        for(int i = 0; i < LuceneIndex.LUCENE_QUERY_BATCH_SIZE; i++){
+        for(int i = 0; i < LuceneIndexOld.LUCENE_QUERY_BATCH_SIZE; i++){
             builder.child("parent").child("child"+i).setProperty("foo", "bar");
         }
 
@@ -221,7 +222,7 @@ public class LuceneIndexTest {
 
         tracker = new IndexTracker();
         tracker.update(indexed);
-        AdvancedQueryIndex queryIndex = new LucenePropertyIndex(tracker);
+        AdvancedQueryIndex queryIndex = new LuceneIndex(tracker);
         FilterImpl filter = createFilter(NT_BASE);
         filter.restrictProperty("foo", Operator.EQUAL,
                 PropertyValues.newString("bar"));
@@ -234,7 +235,7 @@ public class LuceneIndexTest {
             }
         }));
         assertTrue(!paths.isEmpty());
-        assertEquals(LuceneIndex.LUCENE_QUERY_BATCH_SIZE + 1, paths.size());
+        assertEquals(LuceneIndexOld.LUCENE_QUERY_BATCH_SIZE + 1, paths.size());
     }
 
     @Test
@@ -254,7 +255,7 @@ public class LuceneIndexTest {
 
         tracker = new IndexTracker();
         tracker.update(indexed);
-        AdvancedQueryIndex queryIndex = new LucenePropertyIndex(tracker);
+        AdvancedQueryIndex queryIndex = new LuceneIndex(tracker);
         FilterImpl filter = createFilter(NT_BASE);
         // filter.restrictPath("/", Filter.PathRestriction.EXACT);
         filter.restrictProperty("foo", Operator.EQUAL,
@@ -293,7 +294,7 @@ public class LuceneIndexTest {
 
         tracker = new IndexTracker();
         tracker.update(indexed);
-        AdvancedQueryIndex queryIndex = new LucenePropertyIndex(tracker);
+        AdvancedQueryIndex queryIndex = new LuceneIndex(tracker);
         FilterImpl filter = createFilter(NT_BASE);
         // filter.restrictPath("/", Filter.PathRestriction.EXACT);
         filter.restrictProperty("foo", Operator.EQUAL,
@@ -317,7 +318,7 @@ public class LuceneIndexTest {
 
         //1. Create 60 nodes
         NodeState before = builder.getNodeState();
-        int noOfDocs = LucenePropertyIndex.LUCENE_QUERY_BATCH_SIZE + 10;
+        int noOfDocs = LuceneIndex.LUCENE_QUERY_BATCH_SIZE + 10;
         for (int i = 0; i < noOfDocs; i++) {
             builder.child("a"+i).setProperty("foo", (long)i);
         }
@@ -329,7 +330,7 @@ public class LuceneIndexTest {
         tracker.update(indexed);
 
         //Perform query and get hold of cursor
-        AdvancedQueryIndex queryIndex = new LucenePropertyIndex(tracker);
+        AdvancedQueryIndex queryIndex = new LuceneIndex(tracker);
         FilterImpl filter = createFilter(NT_BASE);
         filter.restrictProperty("foo", Operator.GREATER_OR_EQUAL, PropertyValues.newLong(0L));
         List<IndexPlan> plans = queryIndex.getPlans(filter, null, indexed);
@@ -410,7 +411,7 @@ public class LuceneIndexTest {
 
         tracker = new IndexTracker();
         tracker.update(indexed);
-        AdvancedQueryIndex queryIndex = new LucenePropertyIndex(tracker);
+        AdvancedQueryIndex queryIndex = new LuceneIndex(tracker);
 
         FilterImpl filter = createFilter(NT_TEST);
         filter.restrictProperty("foo", Operator.EQUAL, null);
@@ -441,7 +442,7 @@ public class LuceneIndexTest {
 
         tracker = new IndexTracker();
         tracker.update(indexed);
-        AdvancedQueryIndex queryIndex = new LucenePropertyIndex(tracker);
+        AdvancedQueryIndex queryIndex = new LuceneIndex(tracker);
 
         FilterImpl filter = createFilter(NT_TEST);
         filter.restrictProperty("foo", Operator.NOT_EQUAL, null);
@@ -477,7 +478,7 @@ public class LuceneIndexTest {
 
         tracker = new IndexTracker();
         tracker.update(indexed);
-        AdvancedQueryIndex queryIndex = new LucenePropertyIndex(tracker);
+        AdvancedQueryIndex queryIndex = new LuceneIndex(tracker);
 
         FilterImpl filter = createFilter(NT_TEST);
         filter.restrictProperty("jcr:content/bar", Operator.EQUAL, null);
@@ -512,7 +513,7 @@ public class LuceneIndexTest {
 
         tracker = new IndexTracker();
         tracker.update(indexed);
-        AdvancedQueryIndex queryIndex = new LucenePropertyIndex(tracker);
+        AdvancedQueryIndex queryIndex = new LuceneIndex(tracker);
 
         FilterImpl filter = createTestFilter();
         filter.restrictPath("/", Filter.PathRestriction.EXACT);
@@ -548,7 +549,7 @@ public class LuceneIndexTest {
 
         tracker = new IndexTracker();
         tracker.update(indexed);
-        AdvancedQueryIndex queryIndex = new LucenePropertyIndex(tracker);
+        AdvancedQueryIndex queryIndex = new LuceneIndex(tracker);
 
         FilterImpl filter = createFilter(NT_FILE);
         filter.restrictProperty(QueryConstants.RESTRICTION_LOCAL_NAME, Operator.EQUAL, PropertyValues.newString("foo"));
@@ -582,7 +583,7 @@ public class LuceneIndexTest {
 
         tracker = new IndexTracker();
         tracker.update(indexed);
-        AdvancedQueryIndex queryIndex = new LucenePropertyIndex(tracker);
+        AdvancedQueryIndex queryIndex = new LuceneIndex(tracker);
 
         FilterImpl filter = createFilter("nt:base");
 
@@ -605,7 +606,7 @@ public class LuceneIndexTest {
 
         indexed = HOOK.processCommit(before, after,CommitInfo.EMPTY);
         tracker.update(indexed);
-        queryIndex = new LucenePropertyIndex(tracker);
+        queryIndex = new LuceneIndex(tracker);
 
         filter.setFullTextConstraint(new FullTextTerm(null, "fox jumping", false, false, null));
         assertFilter(filter, queryIndex, indexed, ImmutableList.of("/"));
@@ -673,7 +674,7 @@ public class LuceneIndexTest {
         };
 
         factory.providers.put(provider.getName(), provider);
-        AdvancedQueryIndex queryIndex = new LucenePropertyIndex(tracker, factory);
+        AdvancedQueryIndex queryIndex = new LuceneIndex(tracker, factory);
 
         FilterImpl filter = createFilter(NT_BASE);
         filter.setFullTextConstraint(new FullTextTerm(null, "bar", false, false, null));
@@ -684,26 +685,26 @@ public class LuceneIndexTest {
     public void testTokens() {
         Analyzer analyzer = LuceneIndexConstants.ANALYZER;
         assertEquals(ImmutableList.of("parent", "child"),
-                LuceneIndex.tokenize("/parent/child", analyzer));
+                LuceneIndexOld.tokenize("/parent/child", analyzer));
         assertEquals(ImmutableList.of("p1234", "p5678"),
-                LuceneIndex.tokenize("/p1234/p5678", analyzer));
+                LuceneIndexOld.tokenize("/p1234/p5678", analyzer));
         assertEquals(ImmutableList.of("first", "second"),
-                LuceneIndex.tokenize("first_second", analyzer));
+                LuceneIndexOld.tokenize("first_second", analyzer));
         assertEquals(ImmutableList.of("first1", "second2"),
-                LuceneIndex.tokenize("first1_second2", analyzer));
+                LuceneIndexOld.tokenize("first1_second2", analyzer));
         assertEquals(ImmutableList.of("first", "second"),
-                LuceneIndex.tokenize("first. second", analyzer));
+                LuceneIndexOld.tokenize("first. second", analyzer));
         assertEquals(ImmutableList.of("first", "second"),
-                LuceneIndex.tokenize("first.second", analyzer));
+                LuceneIndexOld.tokenize("first.second", analyzer));
 
         assertEquals(ImmutableList.of("hello", "world"),
-                LuceneIndex.tokenize("hello-world", analyzer));
+                LuceneIndexOld.tokenize("hello-world", analyzer));
         assertEquals(ImmutableList.of("hello", "wor*"),
-                LuceneIndex.tokenize("hello-wor*", analyzer));
+                LuceneIndexOld.tokenize("hello-wor*", analyzer));
         assertEquals(ImmutableList.of("*llo", "world"),
-                LuceneIndex.tokenize("*llo-world", analyzer));
+                LuceneIndexOld.tokenize("*llo-world", analyzer));
         assertEquals(ImmutableList.of("*llo", "wor*"),
-                LuceneIndex.tokenize("*llo-wor*", analyzer));
+                LuceneIndexOld.tokenize("*llo-wor*", analyzer));
     }
 
     @Test
@@ -872,7 +873,7 @@ public class LuceneIndexTest {
         NodeState indexed = HOOK.processCommit(before, after, CommitInfo.EMPTY);
         tracker.update(indexed);
 
-        QueryIndex.AdvancedQueryIndex queryIndex = new LucenePropertyIndex(tracker);
+        QueryIndex.AdvancedQueryIndex queryIndex = new LuceneIndex(tracker);
         FilterImpl filter = createFilter(NT_BASE);
         filter.restrictPath("/test", Filter.PathRestriction.EXACT);
         filter.restrictProperty("foo", Operator.EQUAL, PropertyValues.newString("bar"));
@@ -932,7 +933,7 @@ public class LuceneIndexTest {
     }
 
     private void assertQuery(IndexTracker tracker, NodeState indexed, String key, String value){
-        AdvancedQueryIndex queryIndex = new LucenePropertyIndex(tracker);
+        AdvancedQueryIndex queryIndex = new LuceneIndex(tracker);
         FilterImpl filter = createFilter(NT_BASE);
         filter.restrictPath("/", Filter.PathRestriction.EXACT);
         filter.restrictProperty(key, Operator.EQUAL,

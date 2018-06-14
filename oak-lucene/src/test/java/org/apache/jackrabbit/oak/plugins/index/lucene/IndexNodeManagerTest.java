@@ -20,7 +20,13 @@
 package org.apache.jackrabbit.oak.plugins.index.lucene;
 
 import com.google.common.collect.ImmutableList;
+
+import org.apache.jackrabbit.oak.plugins.index.lucene.IndexCopier;
+import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexNodeManager;
+import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexDefinition;
+import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexNode;
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.OakDirectory;
+import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexEditorContext;
 import org.apache.jackrabbit.oak.plugins.index.lucene.hybrid.NRTIndex;
 import org.apache.jackrabbit.oak.plugins.index.lucene.hybrid.NRTIndexFactory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.hybrid.ReaderRefreshPolicy;
@@ -29,6 +35,7 @@ import org.apache.jackrabbit.oak.plugins.index.lucene.reader.LuceneIndexReader;
 import org.apache.jackrabbit.oak.plugins.index.lucene.reader.LuceneIndexReaderFactory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.IndexDefinitionBuilder;
 import org.apache.jackrabbit.oak.plugins.index.lucene.writer.IndexWriterUtils;
+import org.apache.jackrabbit.oak.plugins.index.search.FieldNames;
 import org.apache.jackrabbit.oak.spi.mount.Mounts;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
@@ -51,7 +58,6 @@ import java.util.Collections;
 import static com.google.common.util.concurrent.MoreExecutors.sameThreadExecutor;
 import static org.apache.jackrabbit.oak.InitialContent.INITIAL_CONTENT;
 import static org.apache.jackrabbit.oak.api.Type.STRINGS;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.FieldNames.PATH;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.TestUtil.newDoc;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -89,16 +95,16 @@ public class IndexNodeManagerTest {
 
     @Test
     public void nullIndexNode() throws Exception{
-        assertNull(IndexNodeManager.open("/foo", root, builder.getNodeState(), readerFactory, null));
-        assertNull(IndexNodeManager.open("/foo", root, builder.getNodeState(), readerFactory, nrtFactory));
+        assertNull(LuceneIndexNodeManager.open("/foo", root, builder.getNodeState(), readerFactory, null));
+        assertNull(LuceneIndexNodeManager.open("/foo", root, builder.getNodeState(), readerFactory, nrtFactory));
     }
 
     @Test
     public void nonNullIndex_OnlyNRT() throws Exception{
-        IndexNodeManager nodeManager = IndexNodeManager.open("/foo", root, createNRTIndex(), readerFactory, nrtFactory);
+        LuceneIndexNodeManager nodeManager = LuceneIndexNodeManager.open("/foo", root, createNRTIndex(), readerFactory, nrtFactory);
         LuceneIndexNode node = nodeManager.acquire();
         assertNotNull(node.getSearcher());
-        TopDocs docs = node.getSearcher().search(new TermQuery(new Term(PATH, "/content/en")), 100);
+        TopDocs docs = node.getSearcher().search(new TermQuery(new Term(FieldNames.PATH, "/content/en")), 100);
         assertEquals(0, docs.totalHits);
         node.release();
 
@@ -106,7 +112,7 @@ public class IndexNodeManagerTest {
         node.refreshReadersOnWriteIfRequired();
 
         node = nodeManager.acquire();
-        docs = node.getSearcher().search(new TermQuery(new Term(PATH, "/content/en")), 100);
+        docs = node.getSearcher().search(new TermQuery(new Term(FieldNames.PATH, "/content/en")), 100);
         assertEquals(1, docs.totalHits);
     }
 
@@ -114,8 +120,8 @@ public class IndexNodeManagerTest {
     public void nullIndex_NonFreshIndex() throws Exception{
         NodeBuilder builder = createNRTIndex().builder();
         NodeBuilder rootBuilder = root.builder();
-        rootBuilder.child(IndexNodeManager.ASYNC).setProperty("async", "async");
-        assertNull(IndexNodeManager.open("/foo", rootBuilder.getNodeState(), builder.getNodeState(), readerFactory, nrtFactory));
+        rootBuilder.child(LuceneIndexNodeManager.ASYNC).setProperty("async", "async");
+        assertNull(LuceneIndexNodeManager.open("/foo", rootBuilder.getNodeState(), builder.getNodeState(), readerFactory, nrtFactory));
     }
 
     @Test
@@ -125,7 +131,7 @@ public class IndexNodeManagerTest {
         NRTIndex nrtIndex = nrtFactory.createIndex(definition);
         NRTIndex mock = spy(nrtIndex);
         doReturn(new FailingPolicy()).when(mock).getRefreshPolicy();
-        IndexNodeManager node = new IndexNodeManager("/foo", definition, Collections.<LuceneIndexReader>emptyList(), mock);
+        LuceneIndexNodeManager node = new LuceneIndexNodeManager("/foo", definition, Collections.<LuceneIndexReader>emptyList(), mock);
 
         try {
             node.acquire();
@@ -149,22 +155,22 @@ public class IndexNodeManagerTest {
         }
 
         assertNotNull("nrtIndex; Non existing /:async",
-                IndexNodeManager.open("/foo", root, nrtIndex, readerFactory, nrtFactory));
+                LuceneIndexNodeManager.open("/foo", root, nrtIndex, readerFactory, nrtFactory));
         assertNull("asyncIndex; Non existing /:async",
-                IndexNodeManager.open("/foo", root, asyncIndex, readerFactory, nrtFactory));
+                LuceneIndexNodeManager.open("/foo", root, asyncIndex, readerFactory, nrtFactory));
         assertNull("nonAsyncIndex; Non existing /:async",
-                IndexNodeManager.open("/foo", root, nonAsyncIndex, readerFactory, nrtFactory));
+                LuceneIndexNodeManager.open("/foo", root, nonAsyncIndex, readerFactory, nrtFactory));
 
         // Fake an empty /:async - first indexing cycle isn't done yet
         builder.child(":async");
         root = builder.getNodeState();
 
         assertNotNull("nrtIndex; empty /:async",
-                IndexNodeManager.open("/foo", root, nrtIndex, readerFactory, nrtFactory));
+                LuceneIndexNodeManager.open("/foo", root, nrtIndex, readerFactory, nrtFactory));
         assertNull("asyncIndex; empty /:async",
-                IndexNodeManager.open("/foo", root, asyncIndex, readerFactory, nrtFactory));
+                LuceneIndexNodeManager.open("/foo", root, asyncIndex, readerFactory, nrtFactory));
         assertNull("nonAsyncIndex; empty /:async",
-                IndexNodeManager.open("/foo", root, nonAsyncIndex, readerFactory, nrtFactory));
+                LuceneIndexNodeManager.open("/foo", root, nonAsyncIndex, readerFactory, nrtFactory));
 
 
         // Fake async indexing cycle done with no data
@@ -172,11 +178,11 @@ public class IndexNodeManagerTest {
         root = builder.getNodeState();
 
         assertNull("nrtIndex; fake async cycle run",
-                IndexNodeManager.open("/foo", root, nrtIndex, readerFactory, nrtFactory));
+                LuceneIndexNodeManager.open("/foo", root, nrtIndex, readerFactory, nrtFactory));
         assertNull("asyncIndex; fake async cycle run",
-                IndexNodeManager.open("/foo", root, asyncIndex, readerFactory, nrtFactory));
+                LuceneIndexNodeManager.open("/foo", root, asyncIndex, readerFactory, nrtFactory));
         assertNull("nonAsyncIndex; fake async cycle run",
-                IndexNodeManager.open("/foo", root, nonAsyncIndex, readerFactory, nrtFactory));
+                LuceneIndexNodeManager.open("/foo", root, nonAsyncIndex, readerFactory, nrtFactory));
     }
 
     @Test
@@ -208,11 +214,11 @@ public class IndexNodeManagerTest {
         root = builder.getNodeState();
 
         assertNotNull("nrtIndex; fake async cycle run",
-                IndexNodeManager.open("/foo", root, nrtIndex, readerFactory, nrtFactory));
+                LuceneIndexNodeManager.open("/foo", root, nrtIndex, readerFactory, nrtFactory));
         assertNotNull("asyncIndex; fake async cycle run",
-                IndexNodeManager.open("/foo", root, asyncIndex, readerFactory, nrtFactory));
+                LuceneIndexNodeManager.open("/foo", root, asyncIndex, readerFactory, nrtFactory));
         assertNotNull("nonAsyncIndex; fake async cycle run",
-                IndexNodeManager.open("/foo", root, nonAsyncIndex, readerFactory, nrtFactory));
+                LuceneIndexNodeManager.open("/foo", root, nonAsyncIndex, readerFactory, nrtFactory));
     }
 
     @Test
@@ -227,33 +233,33 @@ public class IndexNodeManagerTest {
         }
 
         assertFalse("nrtIndex; Non existing /:async",
-                IndexNodeManager.hasAsyncIndexerRun(root, "/foo", nrtIndex));
+                LuceneIndexNodeManager.hasAsyncIndexerRun(root, "/foo", nrtIndex));
         assertFalse("asyncIndex; Non existing /:async",
-                IndexNodeManager.hasAsyncIndexerRun(root, "/foo", asyncIndex));
+                LuceneIndexNodeManager.hasAsyncIndexerRun(root, "/foo", asyncIndex));
         assertFalse("nonAsyncIndex; Non existing /:async",
-                IndexNodeManager.hasAsyncIndexerRun(root, "/foo", nonAsyncIndex));
+                LuceneIndexNodeManager.hasAsyncIndexerRun(root, "/foo", nonAsyncIndex));
 
         // Fake an empty /:async - first indexing cycle isn't done yet
         builder.child(":async");
         root = builder.getNodeState();
 
         assertFalse("nrtIndex; Empty /:async",
-                IndexNodeManager.hasAsyncIndexerRun(root, "/foo", nrtIndex));
+                LuceneIndexNodeManager.hasAsyncIndexerRun(root, "/foo", nrtIndex));
         assertFalse("asyncIndex; Non existing /:async",
-                IndexNodeManager.hasAsyncIndexerRun(root, "/foo", asyncIndex));
+                LuceneIndexNodeManager.hasAsyncIndexerRun(root, "/foo", asyncIndex));
         assertFalse("nonAsyncIndex; Non existing /:async",
-                IndexNodeManager.hasAsyncIndexerRun(root, "/foo", nonAsyncIndex));
+                LuceneIndexNodeManager.hasAsyncIndexerRun(root, "/foo", nonAsyncIndex));
 
         // Fake async indexing cycle done
         builder.child(":async").setProperty("async", "some-random-id");
         root = builder.getNodeState();
 
         assertTrue("nrtIndex; fake async cycle run",
-                IndexNodeManager.hasAsyncIndexerRun(root, "/foo", nrtIndex));
+                LuceneIndexNodeManager.hasAsyncIndexerRun(root, "/foo", nrtIndex));
         assertTrue("asyncIndex; fake async cycle run",
-                IndexNodeManager.hasAsyncIndexerRun(root, "/foo", asyncIndex));
+                LuceneIndexNodeManager.hasAsyncIndexerRun(root, "/foo", asyncIndex));
         assertFalse("nonAsyncIndex; fake async cycle run",
-                IndexNodeManager.hasAsyncIndexerRun(root, "/foo", nonAsyncIndex));
+                LuceneIndexNodeManager.hasAsyncIndexerRun(root, "/foo", nonAsyncIndex));
     }
 
     private static NodeState createNRTIndex(){

@@ -14,7 +14,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.jackrabbit.oak.plugins.index.lucene;
+package org.apache.jackrabbit.oak.plugins.index.lucene.editor;
 
 import java.io.Closeable;
 import java.util.List;
@@ -22,6 +22,11 @@ import java.util.List;
 import javax.annotation.Nonnull;
 
 import org.apache.jackrabbit.oak.plugins.index.aggregate.AggregateIndex;
+import org.apache.jackrabbit.oak.plugins.index.lucene.IndexAugmentorFactory;
+import org.apache.jackrabbit.oak.plugins.index.lucene.IndexCopier;
+import org.apache.jackrabbit.oak.plugins.index.lucene.IndexTracker;
+import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexOld;
+import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndex;
 import org.apache.jackrabbit.oak.plugins.index.lucene.score.ScorerProviderFactory;
 import org.apache.jackrabbit.oak.spi.commit.CommitInfo;
 import org.apache.jackrabbit.oak.spi.commit.Observer;
@@ -34,7 +39,7 @@ import com.google.common.collect.ImmutableList;
 /**
  * A provider for Lucene indexes.
  * 
- * @see LuceneIndex
+ * @see LuceneIndexOld
  */
 public class LuceneIndexProvider implements QueryIndexProvider, Observer, Closeable {
 
@@ -82,12 +87,12 @@ public class LuceneIndexProvider implements QueryIndexProvider, Observer, Closea
         return ImmutableList.<QueryIndex> of(new AggregateIndex(newLuceneIndex()), newLucenePropertyIndex());
     }
 
-    protected LuceneIndex newLuceneIndex() {
-        return new LuceneIndex(tracker, aggregator);
+    protected LuceneIndexOld newLuceneIndex() {
+        return new LuceneIndexOld(tracker, aggregator);
     }
 
-    protected LucenePropertyIndex newLucenePropertyIndex() {
-        return new LucenePropertyIndex(tracker, scorerFactory, augmentorFactory);
+    protected LuceneIndex newLucenePropertyIndex() {
+        return new LuceneIndex(tracker, scorerFactory, augmentorFactory);
     }
 
     /**

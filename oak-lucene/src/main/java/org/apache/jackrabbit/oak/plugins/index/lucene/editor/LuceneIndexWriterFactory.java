@@ -17,10 +17,14 @@
  * under the License.
  */
 
-package org.apache.jackrabbit.oak.plugins.index.lucene;
+package org.apache.jackrabbit.oak.plugins.index.lucene.editor;
 
-public class IndexCopierClosedException extends RuntimeException{
-    public IndexCopierClosedException(String message) {
-        super(message);
-    }
+import org.apache.jackrabbit.oak.plugins.index.lucene.writer.LuceneIndexWriter;
+import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
+import org.apache.jackrabbit.oak.plugins.index.search.spi.editor.FulltextIndexWriterFactory;
+import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
+
+public interface LuceneIndexWriterFactory extends FulltextIndexWriterFactory {
+    @Override
+    LuceneIndexWriter newInstance(IndexDefinition definition, NodeBuilder definitionBuilder, boolean reindex);
 }

@@ -14,7 +14,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.jackrabbit.oak.plugins.index.lucene;
+package org.apache.jackrabbit.oak.plugins.index.lucene.editor;
 
 import java.io.IOException;
 import java.util.Collections;
@@ -30,6 +30,7 @@ import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.plugins.index.IndexEditor;
 import org.apache.jackrabbit.oak.plugins.index.search.Aggregate;
 import org.apache.jackrabbit.oak.plugins.index.search.Aggregate.Matcher;
+import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexOld;
 import org.apache.jackrabbit.oak.plugins.index.lucene.writer.LuceneIndexWriter;
 import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.search.PropertyDefinition;
@@ -46,9 +47,9 @@ import static org.apache.jackrabbit.oak.commons.PathUtils.concat;
 
 /**
  * {@link IndexEditor} implementation that is responsible for keeping the
- * {@link LuceneIndex} up to date
+ * {@link LuceneIndexOld} up to date
  *
- * @see LuceneIndex
+ * @see LuceneIndexOld
  */
 public class LuceneIndexEditor implements IndexEditor, Aggregate.AggregateRoot {
 

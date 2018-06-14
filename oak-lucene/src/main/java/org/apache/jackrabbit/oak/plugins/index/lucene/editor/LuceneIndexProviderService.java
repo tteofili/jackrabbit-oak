@@ -17,7 +17,7 @@
  * under the License.
  */
 
-package org.apache.jackrabbit.oak.plugins.index.lucene;
+package org.apache.jackrabbit.oak.plugins.index.lucene.editor;
 
 import java.io.File;
 import java.io.IOException;
@@ -59,7 +59,14 @@ import org.apache.jackrabbit.oak.plugins.index.IndexInfoProvider;
 import org.apache.jackrabbit.oak.plugins.index.IndexPathService;
 import org.apache.jackrabbit.oak.plugins.index.fulltext.PreExtractedTextProvider;
 import org.apache.jackrabbit.oak.plugins.index.importer.IndexImporterProvider;
+import org.apache.jackrabbit.oak.plugins.index.lucene.CopyOnReadStatsMBean;
+import org.apache.jackrabbit.oak.plugins.index.lucene.IndexAugmentorFactory;
+import org.apache.jackrabbit.oak.plugins.index.lucene.IndexCopier;
+import org.apache.jackrabbit.oak.plugins.index.lucene.IndexTracker;
+import org.apache.jackrabbit.oak.plugins.index.lucene.OakCodec;
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.ActiveDeletedBlobCollectorFactory;
+import org.apache.jackrabbit.oak.plugins.index.lucene.directory.ActiveDeletedBlobCollectorMBean;
+import org.apache.jackrabbit.oak.plugins.index.lucene.directory.ActiveDeletedBlobCollectorMBeanImpl;
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.BufferedOakDirectory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.LuceneIndexImporter;
 import org.apache.jackrabbit.oak.plugins.index.lucene.hybrid.DocumentQueue;

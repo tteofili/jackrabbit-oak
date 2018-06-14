@@ -17,6 +17,8 @@
 package org.apache.jackrabbit.oak.plugins.index.lucene;
 
 import com.google.common.collect.Maps;
+
+import org.apache.jackrabbit.oak.plugins.index.search.FieldNames;
 import org.apache.jackrabbit.oak.plugins.index.search.IndexStatistics;
 import org.apache.lucene.index.Fields;
 import org.apache.lucene.index.IndexReader;
@@ -28,12 +30,12 @@ import java.io.IOException;
 import java.util.Collections;
 import java.util.Map;
 
-import static org.apache.jackrabbit.oak.plugins.index.lucene.FieldNames.isPropertyField;
-
 /**
- * This class would populate some statistics from a reader. We want to be careful here such that
- * we only collect statistics which don't incur reads from the index i.e. we would only collect
- * stats that lucene would already have read into memory when the reader was opened.
+ * Populates statistics from a reader.
+ *
+ * We want to be careful here such that we only collect statistics which don't
+ * incur reads from the index i.e. we would only collect stats that lucene would
+ * already have read into memory when the reader was opened.
  */
 public class LuceneIndexStatistics implements IndexStatistics {
     private static final Logger LOG = LoggerFactory.getLogger(LuceneIndexStatistics.class);
@@ -70,7 +72,7 @@ public class LuceneIndexStatistics implements IndexStatistics {
 
         if (fields != null) {
             for(String f : fields) {
-                if (isPropertyField(f)) {
+                if (FieldNames.isPropertyField(f)) {
                     int docCntForField = -1;
                     try {
                         if (failReadingSyntheticallyFalliableField && SYNTHETICALLY_FALLIABLE_FIELD.equals(f)) {
@@ -106,16 +108,16 @@ public class LuceneIndexStatistics implements IndexStatistics {
      * @return number of indexed documents (without subtracting potentially deleted ones)
      *         for the given {@code field}.<br>
      *         -1: if index codec doesn't store doc-count-for-field statistics, OR <br>
-     *             &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;reader threw an exception while reading fields, OR <br>
-     *             &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;exception thrown while reading count for the field, OR <br>
-     *             &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;doc-count is asked for a non-property field.
+     *             reader threw an exception while reading fields, OR <br>
+     *             exception thrown while reading count for the field, OR <br>
+     *             doc-count is asked for a non-property field.
      */
     public int getDocCountFor(String field) {
         if (!safelyInitialized) {
             return -1;
         }
 
-        int docCntForField = isPropertyField(field) ? 0 : -1;
+        int docCntForField = FieldNames.isPropertyField(field) ? 0 : -1;
         if (numDocsForField.containsKey(field)) {
             docCntForField = numDocsForField.get(field);
         }

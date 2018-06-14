@@ -90,7 +90,7 @@ public final class FieldNames {
      * Name of the field that contains the node name
      */
     public static final String NODE_NAME = ":nodeName";
-    
+
     /**
      * Suffix of the fields that contains function values
      */
@@ -132,7 +132,7 @@ public final class FieldNames {
     /**
      * @return if {@code field} represents a field property indexed data
      */
-    static boolean isPropertyField(String field) {
+    public static boolean isPropertyField(String field) {
         return !field.startsWith(ANALYZED_FIELD_PREFIX)
                 && !field.startsWith(FULLTEXT_RELATIVE_NODE)
                 && !field.startsWith(":")

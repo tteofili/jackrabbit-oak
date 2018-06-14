@@ -17,6 +17,8 @@
 package org.apache.jackrabbit.oak.plugins.index.lucene;
 
 import com.google.common.collect.Lists;
+
+import org.apache.jackrabbit.oak.plugins.index.search.FieldNames;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.StringField;
@@ -34,8 +36,8 @@ import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
 
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexStatistics.SYNTHETICALLY_FALLIABLE_FIELD;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.VERSION;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexStatistics.SYNTHETICALLY_FALLIABLE_FIELD;
 import static org.junit.Assert.assertEquals;
 
 public class LuceneIndexStatisticsTest {
