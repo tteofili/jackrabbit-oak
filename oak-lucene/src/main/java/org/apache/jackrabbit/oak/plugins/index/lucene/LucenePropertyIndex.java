@@ -48,6 +48,7 @@ import org.apache.jackrabbit.oak.api.PropertyValue;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.commons.PerfLogger;
+import org.apache.jackrabbit.oak.plugins.index.search.FieldNames;
 import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition.IndexingRule;
 import org.apache.jackrabbit.oak.plugins.index.lucene.property.HybridPropertyIndexLookup;
@@ -134,7 +135,6 @@ import static org.apache.jackrabbit.oak.api.Type.LONG;
 import static org.apache.jackrabbit.oak.api.Type.STRING;
 import static org.apache.jackrabbit.oak.commons.PathUtils.denotesRoot;
 import static org.apache.jackrabbit.oak.commons.PathUtils.getParentPath;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.FieldNames.ANALYZED_FIELD_PREFIX;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.TYPE_LUCENE;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexLookupUtil.LUCENE_INDEX_DEFINITION_PREDICATE;
 import static org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition.NATIVE_SORT_ORDER;
@@ -561,7 +561,7 @@ public class LucenePropertyIndex extends FulltextIndex {
         for (IndexableField field : searcher.getIndexReader().document(docID).getFields()) {
             String name = field.name();
             // postings highlighter can be used on analyzed fields with docs, freqs, positions and offsets stored.
-            if (name.startsWith(ANALYZED_FIELD_PREFIX) && fieldInfos.hasProx() && fieldInfos.hasOffsets()) {
+            if (name.startsWith(FieldNames.ANALYZED_FIELD_PREFIX) && fieldInfos.hasProx() && fieldInfos.hasOffsets()) {
                 names.add(name);
             }
         }

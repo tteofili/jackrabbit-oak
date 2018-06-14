@@ -16,6 +16,7 @@
  */
 package org.apache.jackrabbit.oak.plugins.index.lucene;
 
+import org.apache.jackrabbit.oak.plugins.index.search.FieldNames;
 import org.apache.lucene.index.Term;
 
 /**

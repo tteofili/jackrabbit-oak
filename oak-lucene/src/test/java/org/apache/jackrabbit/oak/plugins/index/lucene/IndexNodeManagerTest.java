@@ -29,6 +29,7 @@ import org.apache.jackrabbit.oak.plugins.index.lucene.reader.LuceneIndexReader;
 import org.apache.jackrabbit.oak.plugins.index.lucene.reader.LuceneIndexReaderFactory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.IndexDefinitionBuilder;
 import org.apache.jackrabbit.oak.plugins.index.lucene.writer.IndexWriterUtils;
+import org.apache.jackrabbit.oak.plugins.index.search.FieldNames;
 import org.apache.jackrabbit.oak.spi.mount.Mounts;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
@@ -51,7 +52,6 @@ import java.util.Collections;
 import static com.google.common.util.concurrent.MoreExecutors.sameThreadExecutor;
 import static org.apache.jackrabbit.oak.InitialContent.INITIAL_CONTENT;
 import static org.apache.jackrabbit.oak.api.Type.STRINGS;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.FieldNames.PATH;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.TestUtil.newDoc;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -98,7 +98,7 @@ public class IndexNodeManagerTest {
         IndexNodeManager nodeManager = IndexNodeManager.open("/foo", root, createNRTIndex(), readerFactory, nrtFactory);
         LuceneIndexNode node = nodeManager.acquire();
         assertNotNull(node.getSearcher());
-        TopDocs docs = node.getSearcher().search(new TermQuery(new Term(PATH, "/content/en")), 100);
+        TopDocs docs = node.getSearcher().search(new TermQuery(new Term(FieldNames.PATH, "/content/en")), 100);
         assertEquals(0, docs.totalHits);
         node.release();
 
@@ -106,7 +106,7 @@ public class IndexNodeManagerTest {
         node.refreshReadersOnWriteIfRequired();
 
         node = nodeManager.acquire();
-        docs = node.getSearcher().search(new TermQuery(new Term(PATH, "/content/en")), 100);
+        docs = node.getSearcher().search(new TermQuery(new Term(FieldNames.PATH, "/content/en")), 100);
         assertEquals(1, docs.totalHits);
     }
 

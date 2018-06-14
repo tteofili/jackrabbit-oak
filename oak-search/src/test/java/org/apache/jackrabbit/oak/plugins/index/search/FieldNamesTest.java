@@ -16,15 +16,11 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package org.apache.jackrabbit.oak.plugins.index.lucene;
+package org.apache.jackrabbit.oak.plugins.index.search;
 
+import org.apache.jackrabbit.oak.plugins.index.search.FieldNames;
 import org.junit.Assert;
 import org.junit.Test;
-
-import static org.apache.jackrabbit.oak.plugins.index.lucene.FieldNames.ANALYZED_FIELD_PREFIX;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.FieldNames.FULLTEXT;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.FieldNames.FULLTEXT_RELATIVE_NODE;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.FieldNames.isPropertyField;
 
 public class FieldNamesTest {
     @Test
@@ -35,9 +31,9 @@ public class FieldNamesTest {
         assertPropertyFieldName("a/b:c", true);
         assertPropertyFieldName("a:b/c", true);
 
-        assertPropertyFieldName(FULLTEXT_RELATIVE_NODE + "a", false);
-        assertPropertyFieldName(ANALYZED_FIELD_PREFIX + "a", false);
-        assertPropertyFieldName(FULLTEXT, false);
+        assertPropertyFieldName(FieldNames.FULLTEXT_RELATIVE_NODE + "a", false);
+        assertPropertyFieldName(FieldNames.ANALYZED_FIELD_PREFIX + "a", false);
+        assertPropertyFieldName(FieldNames.FULLTEXT, false);
         assertPropertyFieldName(":abc", false);
         assertPropertyFieldName("abc_facet", false);
         assertPropertyFieldName("a:b_facet", false);
@@ -48,6 +44,6 @@ public class FieldNamesTest {
 
     private void assertPropertyFieldName(String name, boolean expected) {
         Assert.assertTrue("Check for field name " + name + " doesn't meet expectation - " + expected,
-                isPropertyField(name) == expected);
+                FieldNames.isPropertyField(name) == expected);
     }
 }
