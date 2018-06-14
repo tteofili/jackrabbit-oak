@@ -31,7 +31,14 @@ import org.apache.jackrabbit.oak.spi.state.NodeState;
 
 import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.INDEX_DEFINITIONS_NAME;
 
+/**
+ * Allows to check which indexes can possibly be used for a certain query.
+ *
+ * For example, for a query of the form "/jcr:root/content//*", the indexes
+ * under "/" and the indexes under "/content" can be used.
+ */
 public class IndexLookup {
+
     private final NodeState root;
     private final Predicate<NodeState> definitionPredicate;
 
@@ -41,10 +48,10 @@ public class IndexLookup {
     }
 
     public Collection<String> collectIndexNodePaths(Filter filter) {
-        return collectIndexNodePaths(filter,true);
+        return collectIndexNodePaths(filter, true);
     }
 
-    public Collection<String> collectIndexNodePaths(Filter filter, boolean recurse){
+    public Collection<String> collectIndexNodePaths(Filter filter, boolean recurse) {
         Set<String> paths = Sets.newHashSet();
 
         collectIndexNodePaths(root, "/", paths);
