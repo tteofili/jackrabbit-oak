@@ -42,7 +42,7 @@ import org.apache.jackrabbit.oak.plugins.index.lucene.property.PropertyIndexUpda
 import org.apache.jackrabbit.oak.plugins.index.lucene.property.PropertyQuery;
 import org.apache.jackrabbit.oak.plugins.index.lucene.writer.DefaultIndexWriterFactory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.writer.LuceneIndexWriterConfig;
-import org.apache.jackrabbit.oak.plugins.index.search.ExtractedTextCache;
+import org.apache.jackrabbit.oak.plugins.index.search.TextExtractionCache;
 import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.search.spi.editor.FulltextIndexWriterFactory;
 import org.apache.jackrabbit.oak.spi.blob.GarbageCollectableBlobStore;
@@ -70,7 +70,7 @@ import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstant
 public class LuceneIndexEditorProvider implements IndexEditorProvider {
     private final Logger log = LoggerFactory.getLogger(getClass());
     private final IndexCopier indexCopier;
-    private final ExtractedTextCache extractedTextCache;
+    private final TextExtractionCache extractedTextCache;
     private final IndexAugmentorFactory augmentorFactory;
     private final IndexTracker indexTracker;
     private final MountInfoProvider mountInfoProvider;
@@ -93,16 +93,16 @@ public class LuceneIndexEditorProvider implements IndexEditorProvider {
 
     public LuceneIndexEditorProvider(@Nullable IndexCopier indexCopier) {
         //Disable the cache by default in ExtractedTextCache
-        this(indexCopier, new ExtractedTextCache(0, 0));
+        this(indexCopier, new TextExtractionCache(0, 0));
     }
 
     public LuceneIndexEditorProvider(@Nullable IndexCopier indexCopier,
-                                     ExtractedTextCache extractedTextCache) {
+                                     TextExtractionCache extractedTextCache) {
         this(indexCopier, extractedTextCache, null, Mounts.defaultMountInfoProvider());
     }
 
     public LuceneIndexEditorProvider(@Nullable IndexCopier indexCopier,
-                                     ExtractedTextCache extractedTextCache,
+                                     TextExtractionCache extractedTextCache,
                                      @Nullable IndexAugmentorFactory augmentorFactory,
                                      MountInfoProvider mountInfoProvider) {
         this(indexCopier, null, extractedTextCache, augmentorFactory, mountInfoProvider);
@@ -110,7 +110,7 @@ public class LuceneIndexEditorProvider implements IndexEditorProvider {
 
     public LuceneIndexEditorProvider(@Nullable IndexCopier indexCopier,
                                      @Nullable IndexTracker indexTracker,
-                                     ExtractedTextCache extractedTextCache,
+                                     TextExtractionCache extractedTextCache,
                                      @Nullable IndexAugmentorFactory augmentorFactory,
                                      MountInfoProvider mountInfoProvider) {
         this(indexCopier, indexTracker, extractedTextCache, augmentorFactory, mountInfoProvider,
@@ -118,13 +118,13 @@ public class LuceneIndexEditorProvider implements IndexEditorProvider {
     }
     public LuceneIndexEditorProvider(@Nullable IndexCopier indexCopier,
                                      @Nullable IndexTracker indexTracker,
-                                     ExtractedTextCache extractedTextCache,
+                                     TextExtractionCache extractedTextCache,
                                      @Nullable IndexAugmentorFactory augmentorFactory,
                                      MountInfoProvider mountInfoProvider,
                                      @Nonnull ActiveDeletedBlobCollector activeDeletedBlobCollector) {
         this.indexCopier = indexCopier;
         this.indexTracker = indexTracker;
-        this.extractedTextCache = extractedTextCache != null ? extractedTextCache : new ExtractedTextCache(0, 0);
+        this.extractedTextCache = extractedTextCache != null ? extractedTextCache : new TextExtractionCache(0, 0);
         this.augmentorFactory = augmentorFactory;
         this.mountInfoProvider = checkNotNull(mountInfoProvider);
         this.activeDeletedBlobCollector = activeDeletedBlobCollector;
@@ -227,7 +227,7 @@ public class LuceneIndexEditorProvider implements IndexEditorProvider {
         return indexingQueue;
     }
 
-    public ExtractedTextCache getExtractedTextCache() {
+    public TextExtractionCache getExtractedTextCache() {
         return extractedTextCache;
     }
 

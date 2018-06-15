@@ -56,7 +56,7 @@ import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexProvider
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.IndexDefinitionBuilder;
 import org.apache.jackrabbit.oak.plugins.index.nodetype.NodeTypeIndexProvider;
 import org.apache.jackrabbit.oak.plugins.index.property.PropertyIndexEditorProvider;
-import org.apache.jackrabbit.oak.plugins.index.search.ExtractedTextCache;
+import org.apache.jackrabbit.oak.plugins.index.search.TextExtractionCache;
 import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.search.IndexFormatVersion;
 import org.apache.jackrabbit.oak.plugins.memory.ArrayBasedBlob;
@@ -190,7 +190,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
     @Override
     protected ContentRepository createRepository() {
         IndexCopier copier = createIndexCopier();
-        editorProvider = new LuceneIndexEditorProvider(copier, new ExtractedTextCache(10* FileUtils.ONE_MB, 100));
+        editorProvider = new LuceneIndexEditorProvider(copier, new TextExtractionCache(10* FileUtils.ONE_MB, 100));
         provider = new LuceneIndexProvider(copier);
         queryIndexProvider = new ResultCountingIndexProvider(provider);
         nodeStore = new MemoryNodeStore();

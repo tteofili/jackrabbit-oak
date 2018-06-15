@@ -29,7 +29,7 @@ import org.apache.jackrabbit.oak.plugins.index.lucene.IndexCopier;
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.ActiveDeletedBlobCollectorFactory.ActiveDeletedBlobCollectorImpl;
 import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexEditorProvider;
 import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexProvider;
-import org.apache.jackrabbit.oak.plugins.index.search.ExtractedTextCache;
+import org.apache.jackrabbit.oak.plugins.index.search.TextExtractionCache;
 import org.apache.jackrabbit.oak.segment.SegmentNodeStoreBuilders;
 import org.apache.jackrabbit.oak.segment.file.FileStore;
 import org.apache.jackrabbit.oak.segment.file.FileStoreBuilder;
@@ -70,7 +70,7 @@ public class ActiveDeletedBlobSyncTrackerTest extends AbstractActiveDeletedBlobT
 
             IndexCopier copier = createIndexCopier();
             editorProvider =
-                new LuceneIndexEditorProvider(copier, null, new ExtractedTextCache(10 * FileUtils.ONE_MB,
+                new LuceneIndexEditorProvider(copier, null, new TextExtractionCache(10 * FileUtils.ONE_MB,
                     100), null,
                     Mounts.defaultMountInfoProvider(), adbc);
             provider = new LuceneIndexProvider(copier);

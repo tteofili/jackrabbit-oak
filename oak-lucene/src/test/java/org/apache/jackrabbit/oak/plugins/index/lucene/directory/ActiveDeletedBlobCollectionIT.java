@@ -33,7 +33,7 @@ import org.apache.jackrabbit.oak.plugins.index.lucene.IndexCopier;
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.ActiveDeletedBlobCollectorFactory.ActiveDeletedBlobCollectorImpl;
 import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexEditorProvider;
 import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexProvider;
-import org.apache.jackrabbit.oak.plugins.index.search.ExtractedTextCache;
+import org.apache.jackrabbit.oak.plugins.index.search.TextExtractionCache;
 import org.apache.jackrabbit.oak.spi.commit.Observer;
 import org.apache.jackrabbit.oak.spi.mount.Mounts;
 import org.apache.jackrabbit.oak.spi.query.QueryIndexProvider;
@@ -91,7 +91,7 @@ public class ActiveDeletedBlobCollectionIT extends AbstractActiveDeletedBlobTest
 
         IndexCopier copier = createIndexCopier();
         editorProvider = new LuceneIndexEditorProvider(copier, null,
-                new ExtractedTextCache(10* FileUtils.ONE_MB,100),
+                new TextExtractionCache(10* FileUtils.ONE_MB,100),
                 null, Mounts.defaultMountInfoProvider(), adbc);
         provider = new LuceneIndexProvider(copier);
         mongoConnection = connectionFactory.getConnection();

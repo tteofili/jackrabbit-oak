@@ -44,7 +44,7 @@ import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexProvider
 import org.apache.jackrabbit.oak.plugins.index.lucene.property.PropertyIndexCleaner;
 import org.apache.jackrabbit.oak.plugins.index.lucene.reader.DefaultIndexReaderFactory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.score.ScorerProviderFactory;
-import org.apache.jackrabbit.oak.plugins.index.search.ExtractedTextCache;
+import org.apache.jackrabbit.oak.plugins.index.search.TextExtractionCache;
 import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
 import org.apache.jackrabbit.oak.plugins.memory.MemoryNodeStore;
 import org.apache.jackrabbit.oak.spi.blob.GarbageCollectableBlobStore;
@@ -271,7 +271,7 @@ public class LuceneIndexProviderServiceTest {
         config.put("extractedTextCacheSizeInMB", 11);
         MockOsgi.activate(service, context.bundleContext(), config);
 
-        ExtractedTextCache textCache = service.getExtractedTextCache();
+        TextExtractionCache textCache = service.getExtractedTextCache();
         assertNotNull(textCache.getCacheStats());
         assertNotNull(context.getService(CacheStatsMBean.class));
 

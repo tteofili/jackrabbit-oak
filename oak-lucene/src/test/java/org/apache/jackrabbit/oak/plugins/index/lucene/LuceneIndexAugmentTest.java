@@ -33,7 +33,7 @@ import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexProvider
 import org.apache.jackrabbit.oak.plugins.index.lucene.score.ScorerProviderFactory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.spi.FulltextQueryTermsProvider;
 import org.apache.jackrabbit.oak.plugins.index.lucene.spi.IndexFieldProvider;
-import org.apache.jackrabbit.oak.plugins.index.search.ExtractedTextCache;
+import org.apache.jackrabbit.oak.plugins.index.search.TextExtractionCache;
 import org.apache.jackrabbit.oak.plugins.nodetype.write.NodeTypeRegistry;
 import org.apache.jackrabbit.oak.query.AbstractQueryTest;
 import org.apache.jackrabbit.oak.spi.commit.Observer;
@@ -78,7 +78,7 @@ public class LuceneIndexAugmentTest extends AbstractQueryTest {
     @Override
     protected ContentRepository createRepository() {
         LuceneIndexEditorProvider editorProvider = new LuceneIndexEditorProvider(null,
-                new ExtractedTextCache(0, 0),
+                new TextExtractionCache(0, 0),
                 factory, Mounts.defaultMountInfoProvider());
         LuceneIndexProvider provider = new LuceneIndexProvider(tracker,
                 ScorerProviderFactory.DEFAULT,

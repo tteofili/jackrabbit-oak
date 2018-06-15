@@ -59,7 +59,7 @@ import static org.apache.jackrabbit.oak.commons.PathUtils.concat;
  * A cache to avoid extracting text of binaries that were already processed (in
  * a different node that references the same binary).
  */
-public class ExtractedTextCache {
+public class TextExtractionCache {
     private static final boolean CACHE_ONLY_SUCCESS =
             Boolean.getBoolean("oak.extracted.cacheOnlySuccess");
     private static final int EXTRACTION_TIMEOUT_SECONDS =
@@ -73,7 +73,7 @@ public class ExtractedTextCache {
 
     private static final String TIMEOUT_MAP = "textExtractionTimeout.properties";
     private static final String EMPTY_STRING = "";
-    private static final Logger log = LoggerFactory.getLogger(ExtractedTextCache.class);
+    private static final Logger log = LoggerFactory.getLogger(TextExtractionCache.class);
     private volatile PreExtractedTextProvider extractedTextProvider;
     private int textExtractionCount;
     private long totalBytesRead;
@@ -92,11 +92,11 @@ public class ExtractedTextCache {
     private volatile int timeoutCount;
     private long extractionTimeoutMillis = EXTRACTION_TIMEOUT_SECONDS * 1000;
 
-    public ExtractedTextCache(long maxWeight, long expiryTimeInSecs){
+    public TextExtractionCache(long maxWeight, long expiryTimeInSecs){
         this(maxWeight, expiryTimeInSecs, false, null);
     }
 
-    public ExtractedTextCache(long maxWeight, long expiryTimeInSecs, boolean alwaysUsePreExtractedCache,
+    public TextExtractionCache(long maxWeight, long expiryTimeInSecs, boolean alwaysUsePreExtractedCache,
                               File indexDir) {
         if (maxWeight > 0) {
             cache = CacheBuilder.newBuilder()
