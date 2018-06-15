@@ -17,8 +17,14 @@
  * under the License.
  */
 
-package org.apache.jackrabbit.oak.plugins.index.search;
+package org.apache.jackrabbit.oak.plugins.index.search.update;
 
+/**
+ * The refresh policy interface.
+ *
+ * A class that implements this interface decides when to refresh an index, if
+ * there was a change.
+ */
 public interface ReaderRefreshPolicy {
 
     ReaderRefreshPolicy NEVER = new ReaderRefreshPolicy() {
@@ -35,9 +41,11 @@ public interface ReaderRefreshPolicy {
 
     /**
      * Invoked before any query is performed to provide a chance for IndexNode
-     * to refresh the readers
+     * to refresh the readers. The index may or may not be updated when this
+     * method is invoked.
      *
-     * The index may or may not be updated when this method is invoked.
+     * If the policy decided that refresh is needed, it will call the refresh
+     * callback.
      *
      * @param refreshCallback callback to refresh the readers
      */
@@ -45,9 +53,11 @@ public interface ReaderRefreshPolicy {
 
     /**
      * Invoked after some writes have been performed and as a final step refresh
-     * request is being made.
+     * request is being made. If invoked, it can be assumed that index has been
+     * updated.
      *
-     * If invoked, it can be assumed that index has been updated.
+     * If the policy decided that refresh is needed, it will call the refresh
+     * callback.
      *
      * @param refreshCallback callback to refresh the readers
      */

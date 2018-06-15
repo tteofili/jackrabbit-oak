@@ -24,7 +24,7 @@ import org.apache.jackrabbit.oak.plugins.index.lucene.hybrid.NRTIndexFactory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.reader.LuceneIndexReader;
 import org.apache.jackrabbit.oak.plugins.index.lucene.reader.LuceneIndexReaderFactory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.writer.LuceneIndexWriter;
-import org.apache.jackrabbit.oak.plugins.index.search.ReaderRefreshPolicy;
+import org.apache.jackrabbit.oak.plugins.index.search.update.ReaderRefreshPolicy;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.MultiReader;

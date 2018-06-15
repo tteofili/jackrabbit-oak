@@ -35,7 +35,7 @@ import org.apache.jackrabbit.oak.plugins.index.lucene.reader.LuceneIndexReaderFa
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.IndexDefinitionBuilder;
 import org.apache.jackrabbit.oak.plugins.index.lucene.writer.IndexWriterUtils;
 import org.apache.jackrabbit.oak.plugins.index.search.FieldNames;
-import org.apache.jackrabbit.oak.plugins.index.search.ReaderRefreshPolicy;
+import org.apache.jackrabbit.oak.plugins.index.search.update.ReaderRefreshPolicy;
 import org.apache.jackrabbit.oak.spi.mount.Mounts;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;

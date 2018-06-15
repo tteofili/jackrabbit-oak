@@ -17,9 +17,9 @@
  * under the License.
  */
 
-package org.apache.jackrabbit.oak.plugins.index.lucene.hybrid;
+package org.apache.jackrabbit.oak.plugins.index.search.update;
 
-import org.apache.jackrabbit.oak.plugins.index.search.RefreshOnWritePolicy;
+import org.apache.jackrabbit.oak.plugins.index.search.update.RefreshOnWritePolicy;
 import org.junit.Test;
 
 public class RefreshOnWritePolicyTest {

@@ -27,7 +27,7 @@ import javax.annotation.CheckForNull;
 import org.apache.jackrabbit.oak.commons.PerfLogger;
 import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.search.IndexNode;
-import org.apache.jackrabbit.oak.plugins.index.search.ReaderRefreshPolicy;
+import org.apache.jackrabbit.oak.plugins.index.search.update.ReaderRefreshPolicy;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

@@ -17,11 +17,11 @@
  * under the License.
  */
 
-package org.apache.jackrabbit.oak.plugins.index.lucene.hybrid;
+package org.apache.jackrabbit.oak.plugins.index.search.update;
 
 import java.util.concurrent.TimeUnit;
 
-import org.apache.jackrabbit.oak.plugins.index.search.RefreshOnReadPolicy;
+import org.apache.jackrabbit.oak.plugins.index.search.update.RefreshOnReadPolicy;
 import org.apache.jackrabbit.oak.stats.Clock;
 import org.junit.Test;
 
