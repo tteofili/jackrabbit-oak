@@ -19,7 +19,7 @@
 
 package org.apache.jackrabbit.oak.plugins.index.search;
 
-interface IndexUpdateListener extends ReaderRefreshPolicy {
+public interface IndexUpdateListener extends ReaderRefreshPolicy {
 
     void updated();
 }

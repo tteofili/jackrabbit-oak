@@ -19,6 +19,7 @@
 
 package org.apache.jackrabbit.oak.plugins.index.lucene.hybrid;
 
+import org.apache.jackrabbit.oak.plugins.index.search.RefreshOnWritePolicy;
 import org.junit.Test;
 
 public class RefreshOnWritePolicyTest {
