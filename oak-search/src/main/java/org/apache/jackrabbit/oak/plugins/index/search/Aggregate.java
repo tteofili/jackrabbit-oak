@@ -222,7 +222,7 @@ public class Aggregate {
 
     //~-----------------------------------------------------< Includes >
 
-    public static abstract class Include<T> {
+    public static abstract class Include {
         protected final String[] elements;
 
         public Include(String pattern) {
@@ -243,7 +243,7 @@ public class Aggregate {
             return elements.length;
         }
 
-        public void collectResults(T rootInclude, String rootIncludePath,
+        public void collectResults(Include rootInclude, String rootIncludePath,
                                    String nodePath, NodeState nodeState,  ResultCollector results) {
             collectResults(nodePath, nodeState, results);
         }
@@ -272,7 +272,7 @@ public class Aggregate {
         }
     }
 
-    public static class NodeInclude extends Include<NodeInclude> {
+    public static class NodeInclude extends Include {
         public final String primaryType;
         public final boolean relativeNode;
         private final String pattern;
@@ -303,9 +303,13 @@ public class Aggregate {
         }
 
         @Override
-        public void collectResults(NodeInclude rootInclude, String rootIncludePath, String nodePath,
+        public void collectResults(Include include, String rootIncludePath, String nodePath,
                                    NodeState nodeState, ResultCollector results) {
             //For supporting jcr:contains(jcr:content, 'foo')
+            if (!(include instanceof NodeInclude)) {
+                throw new IllegalArgumentException("" + include);
+            }
+            NodeInclude rootInclude = (NodeInclude) include;
             if (rootInclude.relativeNode){
                 results.onResult(new NodeIncludeResult(nodePath, rootIncludePath, nodeState));
             }
@@ -365,7 +369,7 @@ public class Aggregate {
         }
     }
 
-    public static class PropertyInclude extends Include<PropertyInclude> {
+    public static class PropertyInclude extends Include {
         private final PropertyDefinition propertyDefinition;
         private final String propertyName;
         private final Pattern pattern;
