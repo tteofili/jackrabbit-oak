@@ -34,7 +34,7 @@ import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexWriterFa
 import org.apache.jackrabbit.oak.plugins.index.lucene.writer.DefaultIndexWriterFactory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.writer.LuceneIndexWriter;
 import org.apache.jackrabbit.oak.plugins.index.progress.IndexingProgressReporter;
-import org.apache.jackrabbit.oak.plugins.index.search.ExtractedTextCache;
+import org.apache.jackrabbit.oak.plugins.index.search.TextExtractionCache;
 import org.apache.jackrabbit.oak.plugins.index.search.spi.binary.FulltextBinaryTextExtractor;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
@@ -43,8 +43,8 @@ import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.TYPE_PROPER
 import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.TYPE_LUCENE;
 
 public class LuceneIndexerProvider implements NodeStateIndexerProvider {
-    private final ExtractedTextCache textCache =
-            new ExtractedTextCache(FileUtils.ONE_MB * 5, TimeUnit.HOURS.toSeconds(5));
+    private final TextExtractionCache textCache =
+            new TextExtractionCache(FileUtils.ONE_MB * 5, TimeUnit.HOURS.toSeconds(5));
     private final IndexHelper indexHelper;
     private final DirectoryFactory dirFactory;
     private final LuceneIndexWriterFactory indexWriterFactory;

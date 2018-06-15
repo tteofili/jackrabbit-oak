@@ -49,7 +49,7 @@ import org.apache.jackrabbit.oak.plugins.index.inventory.IndexDefinitionPrinter;
 import org.apache.jackrabbit.oak.plugins.index.inventory.IndexPrinter;
 import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexInfoProvider;
 import org.apache.jackrabbit.oak.plugins.index.property.PropertyIndexInfoProvider;
-import org.apache.jackrabbit.oak.plugins.index.search.ExtractedTextCache;
+import org.apache.jackrabbit.oak.plugins.index.search.TextExtractionCache;
 import org.apache.jackrabbit.oak.spi.blob.BlobStore;
 import org.apache.jackrabbit.oak.spi.blob.GarbageCollectableBlobStore;
 import org.apache.jackrabbit.oak.spi.mount.MountInfoProvider;
@@ -78,7 +78,7 @@ public class IndexHelper implements Closeable{
     private final Closer closer = Closer.create();
     private final BlobStore blobStore;
     private final StatisticsProvider statisticsProvider;
-    private ExtractedTextCache extractedTextCache;
+    private TextExtractionCache extractedTextCache;
 
     IndexHelper(NodeStore store, BlobStore blobStore, Whiteboard whiteboard,
                 File outputDir, File workDir, List<String> indexPaths) {
@@ -156,9 +156,9 @@ public class IndexHelper implements Closeable{
         return luceneIndexHelper;
     }
 
-    public ExtractedTextCache getExtractedTextCache() {
+    public TextExtractionCache getExtractedTextCache() {
         if (extractedTextCache == null) {
-            extractedTextCache = new ExtractedTextCache(FileUtils.ONE_MB * 5, TimeUnit.HOURS.toSeconds(5));
+            extractedTextCache = new TextExtractionCache(FileUtils.ONE_MB * 5, TimeUnit.HOURS.toSeconds(5));
         }
         return extractedTextCache;
     }
