@@ -112,7 +112,7 @@ public class TestUtil {
         prop.setProperty(FulltextIndexConstants.PROP_USE_IN_SPELLCHECK, true);
         return prop;
     }
-    
+
     public static Tree enableForOrdered(Tree props, String propName) {
         Tree prop = enablePropertyIndex(props, propName, false);
         prop.setProperty("ordered", true);

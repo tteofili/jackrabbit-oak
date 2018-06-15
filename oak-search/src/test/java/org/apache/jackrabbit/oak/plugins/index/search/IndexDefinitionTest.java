@@ -32,8 +32,6 @@ import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition.IndexingRu
 import org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.IndexingMode;
 import org.apache.jackrabbit.oak.plugins.index.search.util.IndexDefinitionBuilder;
 import org.apache.jackrabbit.oak.plugins.index.search.util.IndexDefinitionUtils;
-import org.apache.jackrabbit.oak.plugins.index.search.util.IndexDefinitionUtils.newFTIndexDefinition;
-import org.apache.jackrabbit.oak.plugins.index.search.util.IndexDefinitionUtils.newFTPropertyIndexDefinition;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.junit.Test;
@@ -53,8 +51,6 @@ import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConsta
 import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.PROP_NODE;
 import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.TIKA;
 import static org.apache.jackrabbit.oak.plugins.index.search.TestUtil.registerTestNodeType;
-import static org.apache.jackrabbit.oak.plugins.index.search.util.IndexHelper.newFTIndexDefinition;
-import static org.apache.jackrabbit.oak.plugins.index.search.util.IndexHelper.newFTPropertyIndexDefinition;
 import static org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState.EMPTY_NODE;
 import static org.apache.jackrabbit.oak.plugins.memory.PropertyStates.createProperty;
 import static org.apache.jackrabbit.oak.plugins.tree.TreeConstants.OAK_CHILD_ORDER;
