@@ -51,8 +51,8 @@ import org.apache.jackrabbit.oak.fixture.RepositoryFixture;
 import org.apache.jackrabbit.oak.jcr.Jcr;
 import org.apache.jackrabbit.oak.plugins.index.IndexConstants;
 import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants;
-import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexEditorProvider;
-import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexProvider;
+import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexEditorProvider;
+import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexProvider;
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.LuceneInitializerHelper;
 import org.apache.jackrabbit.oak.plugins.index.property.OrderedIndex;
 import org.apache.jackrabbit.oak.spi.nodetype.NodeTypeConstants;
@@ -375,7 +375,7 @@ public class ScalabilityNodeSuite extends ScalabilityAbstractSuite {
                 LOG.error("Exception waiting for join ", e);
             }
         }
-        
+
         LOG.info("Write stats");
         LOG.info(String.format(
             "# min     10%%     50%%     90%%     max       N%n"));
@@ -408,7 +408,7 @@ public class ScalabilityNodeSuite extends ScalabilityAbstractSuite {
         if (PROFILE) {
             context.startProfiler();
         }
-        //Execute the benchmark with the number threads configured 
+        //Execute the benchmark with the number threads configured
         List<Thread> threads = newArrayListWithCapacity(TESTERS);
         for (int idx = 0; idx < TESTERS; idx++) {
             Thread t = new Thread("Tester-" + idx) {

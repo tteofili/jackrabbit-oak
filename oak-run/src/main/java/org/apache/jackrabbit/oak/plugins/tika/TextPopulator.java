@@ -24,6 +24,7 @@ import com.google.common.io.Closer;
 import org.apache.commons.csv.CSVParser;
 import org.apache.commons.csv.CSVRecord;
 import org.apache.jackrabbit.oak.plugins.blob.datastore.TextWriter;
+import org.apache.jackrabbit.oak.plugins.index.search.FieldNames;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.Term;
@@ -40,8 +41,6 @@ import java.io.IOException;
 
 import static com.google.common.base.Charsets.UTF_8;
 import static org.apache.jackrabbit.JcrConstants.JCR_PATH;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.FieldNames.FULLTEXT;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.FieldNames.PATH;
 import static org.apache.jackrabbit.oak.plugins.tika.CSVFileBinaryResourceProvider.FORMAT;
 
 class TextPopulator {
@@ -108,7 +107,7 @@ class TextPopulator {
     private static String getText(DirectoryReader reader, IndexSearcher searcher, String path) {
         TopDocs topDocs;
         try {
-            topDocs = searcher.search(new TermQuery(new Term(PATH, path)), 1);
+            topDocs = searcher.search(new TermQuery(new Term(FieldNames.PATH, path)), 1);
 
             ScoreDoc[] scoreDocs = topDocs.scoreDocs;
             if (scoreDocs.length != 1) {
@@ -117,7 +116,7 @@ class TextPopulator {
 
             Document doc = reader.document(scoreDocs[0].doc);
 
-            String[] ftVals = doc.getValues(FULLTEXT);
+            String[] ftVals = doc.getValues(FieldNames.FULLTEXT);
             if (ftVals.length != 1) {
                 // being conservative... expecting only one stored fulltext field
                 return null;

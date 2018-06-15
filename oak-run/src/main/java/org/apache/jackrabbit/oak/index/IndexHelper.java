@@ -47,7 +47,7 @@ import org.apache.jackrabbit.oak.plugins.index.IndexPathServiceImpl;
 import org.apache.jackrabbit.oak.plugins.index.datastore.DataStoreTextWriter;
 import org.apache.jackrabbit.oak.plugins.index.inventory.IndexDefinitionPrinter;
 import org.apache.jackrabbit.oak.plugins.index.inventory.IndexPrinter;
-import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexInfoProvider;
+import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexInfoProvider;
 import org.apache.jackrabbit.oak.plugins.index.property.PropertyIndexInfoProvider;
 import org.apache.jackrabbit.oak.plugins.index.search.ExtractedTextCache;
 import org.apache.jackrabbit.oak.spi.blob.BlobStore;
