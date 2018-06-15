@@ -47,6 +47,15 @@ import static com.google.common.collect.Lists.newArrayListWithCapacity;
 import static org.apache.jackrabbit.oak.commons.PathUtils.elements;
 import static org.apache.jackrabbit.oak.commons.PathUtils.getParentPath;
 
+/**
+ * Aggregates text from child nodes for fulltext queries.
+ *
+ * Example: let's say node /x is of type 'web page', but the actual content is
+ * stored in child nodes; say /x/section1 contains "Hello" and /x/section2
+ * contains "World". If index aggregation is configured correctly, it will
+ * combine all the text of the child nodes, and index that as /x. When doing a
+ * fulltext search for for "Hello World", the index will then return /x.
+ */
 public class Aggregate {
 
     public static final String MATCH_ALL = "*";

@@ -30,6 +30,16 @@ import com.google.common.collect.Maps;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/**
+ * Track of bad (corrupt) indexes.
+ *
+ * An index can be corrupt for reads (an exception was thrown when index was
+ * opened for query), and persistent (an exception was thrown when index is
+ * reopened after an update).
+ *
+ * Indexes marked bad for reads might become good again later, if another
+ * cluster node fixed the corruption (eg. by reindexing).
+ */
 public class BadIndexTracker {
     /**
      * Time interval in millis after which a bad index would be accessed again

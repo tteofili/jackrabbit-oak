@@ -55,6 +55,10 @@ import org.slf4j.LoggerFactory;
 
 import static org.apache.jackrabbit.oak.commons.PathUtils.concat;
 
+/**
+ * A cache to avoid extracting text of binaries that were already processed
+ * (but, say, stored in a different node).
+ */
 public class ExtractedTextCache {
     private static final boolean CACHE_ONLY_SUCCESS =
             Boolean.getBoolean("oak.extracted.cacheOnlySuccess");
@@ -76,7 +80,10 @@ public class ExtractedTextCache {
     private long totalTextSize;
     private long totalTime;
     private int preFetchedCount;
+
+    // the actual cache. key: content id, value: extracted text
     private final Cache<String, String> cache;
+
     private final ConcurrentHashMap<String, String> timeoutMap;
     private final File indexDir;
     private final CacheStats cacheStats;
