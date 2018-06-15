@@ -40,7 +40,7 @@ import org.apache.jackrabbit.oak.plugins.index.lucene.directory.IndexConsistency
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.OakDirectory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.writer.MultiplexersLucene;
 import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
-import org.apache.jackrabbit.oak.plugins.index.search.NodeStateCloner;
+import org.apache.jackrabbit.oak.plugins.index.search.util.NodeStateCloner;
 import org.apache.jackrabbit.oak.spi.state.EqualsDiff;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.apache.jackrabbit.oak.spi.state.NodeStateUtils;

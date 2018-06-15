@@ -47,6 +47,9 @@ import static org.apache.jackrabbit.oak.api.Type.NAME;
 import static org.apache.jackrabbit.oak.api.Type.STRINGS;
 import static org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState.EMPTY_NODE;
 
+/**
+ * A utility to build index definitions.
+ */
 public final class IndexDefinitionBuilder {
     private final NodeBuilder builder;
     private final Tree tree;

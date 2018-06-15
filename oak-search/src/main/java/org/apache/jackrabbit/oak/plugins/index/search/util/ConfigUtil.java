@@ -33,7 +33,7 @@ import org.apache.jackrabbit.oak.spi.state.NodeState;
 import static com.google.common.base.Preconditions.checkArgument;
 
 /**
- * Utility class to retrieve configuration values for index definitions
+ * Utility class to retrieve configuration values for index definitions.
  */
 public class ConfigUtil {
 

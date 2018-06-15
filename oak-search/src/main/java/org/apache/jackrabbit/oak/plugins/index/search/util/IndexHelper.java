@@ -18,46 +18,28 @@ package org.apache.jackrabbit.oak.plugins.index.search.util;
 
 import java.util.Set;
 
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
-
-import org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants;
-import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 
-import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.collect.ImmutableSet.of;
 import static com.google.common.collect.Sets.newHashSet;
 import static javax.jcr.PropertyType.TYPENAME_BINARY;
 import static javax.jcr.PropertyType.TYPENAME_STRING;
-import static org.apache.jackrabbit.JcrConstants.JCR_PRIMARYTYPE;
 import static org.apache.jackrabbit.JcrConstants.JCR_UUID;
-import static org.apache.jackrabbit.oak.api.Type.NAME;
-import static org.apache.jackrabbit.oak.api.Type.STRINGS;
-import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.ASYNC_PROPERTY_NAME;
-import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.INDEX_DEFINITIONS_NODE_TYPE;
-import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.REINDEX_PROPERTY_NAME;
 import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.TYPE_PROPERTY_NAME;
-import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.EXCLUDE_PROPERTY_NAMES;
-import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.EXPERIMENTAL_STORAGE;
-import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.INCLUDE_PROPERTY_NAMES;
-import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.INCLUDE_PROPERTY_TYPES;
-import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.PERSISTENCE_FILE;
-import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.PERSISTENCE_NAME;
-import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.PERSISTENCE_PATH;
-import static org.apache.jackrabbit.oak.plugins.memory.PropertyStates.createProperty;
 import static org.apache.jackrabbit.oak.spi.security.user.UserConstants.GROUP_PROPERTY_NAMES;
 import static org.apache.jackrabbit.oak.spi.security.user.UserConstants.USER_PROPERTY_NAMES;
 
+/**
+ * A helper class that helps decide what to (not) index.
+ */
 public class IndexHelper {
 
     public static final Set<String> JR_PROPERTY_INCLUDES = of(TYPENAME_STRING,
             TYPENAME_BINARY);
 
     /**
-     * Nodes that represent content that shold not be tokenized (like UUIDs,
+     * Nodes that represent content that should not be tokenized (like UUIDs,
      * etc)
-     * 
      */
     private final static Set<String> NOT_TOKENIZED = newHashSet(JCR_UUID);
 
@@ -69,107 +51,8 @@ public class IndexHelper {
     private IndexHelper() {
     }
 
-    public static NodeBuilder newFTIndexDefinition(
-            @Nonnull NodeBuilder index, @Nonnull String name, String type,
-            @Nullable Set<String> propertyTypes) {
-        return newFTIndexDefinition(index, name, type, propertyTypes, null, null, null);
-    }
-
-    public static NodeBuilder newFTIndexDefinition(
-            @Nonnull NodeBuilder index, @Nonnull String name, String type,
-            @Nullable Set<String> propertyTypes,
-            @Nullable Set<String> excludes, @Nullable String async) {
-        return newFTIndexDefinition(index, type, name, propertyTypes, excludes,
-                async, null);
-    }
-
-    public static NodeBuilder newFTIndexDefinition(
-            @Nonnull NodeBuilder index, @Nonnull String name, String type,
-            @Nullable Set<String> propertyTypes,
-            @Nullable Set<String> excludes, @Nullable String async,
-            @Nullable Boolean stored) {
-        if (index.hasChildNode(name)) {
-            return index.child(name);
-        }
-        index = index.child(name);
-        index.setProperty(JCR_PRIMARYTYPE, INDEX_DEFINITIONS_NODE_TYPE, NAME)
-                .setProperty(TYPE_PROPERTY_NAME, type)
-                .setProperty(REINDEX_PROPERTY_NAME, true);
-        if (async != null) {
-            index.setProperty(ASYNC_PROPERTY_NAME, async);
-        }
-        if (propertyTypes != null && !propertyTypes.isEmpty()) {
-            index.setProperty(createProperty(INCLUDE_PROPERTY_TYPES,
-                    propertyTypes, STRINGS));
-        }
-        if (excludes != null && !excludes.isEmpty()) {
-            index.setProperty(createProperty(EXCLUDE_PROPERTY_NAMES, excludes,
-                    STRINGS));
-        }
-        if (stored != null) {
-            index.setProperty(createProperty(EXPERIMENTAL_STORAGE, stored));
-        }
-        return index;
-    }
-
-    public static NodeBuilder newFTFileIndexDefinition(
-            @Nonnull NodeBuilder index, @Nonnull String name, String type,
-            @Nullable Set<String> propertyTypes, @Nonnull String path) {
-        return newFTFileIndexDefinition(index, type, name, propertyTypes, null,
-                path, null);
-    }
-
-    public static NodeBuilder newFTFileIndexDefinition(
-            @Nonnull NodeBuilder index, @Nonnull String name, String type,
-            @Nullable Set<String> propertyTypes,
-            @Nullable Set<String> excludes, @Nonnull String path,
-            @Nullable String async) {
-        if (index.hasChildNode(name)) {
-            return index.child(name);
-        }
-        index = index.child(name);
-        index.setProperty(JCR_PRIMARYTYPE, INDEX_DEFINITIONS_NODE_TYPE, NAME)
-                .setProperty(TYPE_PROPERTY_NAME, type)
-                .setProperty(PERSISTENCE_NAME, PERSISTENCE_FILE)
-                .setProperty(PERSISTENCE_PATH, path)
-                .setProperty(REINDEX_PROPERTY_NAME, true);
-        if (async != null) {
-            index.setProperty(ASYNC_PROPERTY_NAME, async);
-        }
-        if (propertyTypes != null && !propertyTypes.isEmpty()) {
-            index.setProperty(createProperty(INCLUDE_PROPERTY_TYPES,
-                    propertyTypes, STRINGS));
-        }
-        if (excludes != null && !excludes.isEmpty()) {
-            index.setProperty(createProperty(EXCLUDE_PROPERTY_NAMES, excludes,
-                    STRINGS));
-        }
-        return index;
-    }
-
-    public static NodeBuilder newFTPropertyIndexDefinition(
-            @Nonnull NodeBuilder index, @Nonnull String name, String type,
-            @Nonnull Set<String> includes,
-            @Nonnull String async) {
-        checkArgument(!includes.isEmpty(), "Fulltext property index " +
-                "requires explicit list of property names to be indexed");
-
-        index = index.child(name);
-        index.setProperty(JCR_PRIMARYTYPE, INDEX_DEFINITIONS_NODE_TYPE, NAME)
-                .setProperty(TYPE_PROPERTY_NAME, type)
-                .setProperty(REINDEX_PROPERTY_NAME, true);
-        index.setProperty(FulltextIndexConstants.FULL_TEXT_ENABLED, false);
-        index.setProperty(createProperty(INCLUDE_PROPERTY_NAMES, includes, STRINGS));
-
-        if (async != null) {
-            index.setProperty(ASYNC_PROPERTY_NAME, async);
-        }
-        return index;
-    }
-
     /**
-     * Nodes that represent UUIDs and shold not be tokenized
-     * 
+     * Nodes that represent UUIDs and should not be tokenized
      */
     public static boolean skipTokenization(String name) {
         return NOT_TOKENIZED.contains(name);
