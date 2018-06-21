@@ -75,6 +75,7 @@ public final class IndexDefinitionBuilder {
         this.builder = nodeBuilder;
         this.initial = nodeBuilder.getNodeState();
         this.tree = TreeFactory.createTree(builder);
+        tree.setProperty(FulltextIndexConstants.COMPAT_MODE, 2);
         tree.setProperty("async", "async");
         setType();
         tree.setProperty(JCR_PRIMARYTYPE, "oak:QueryIndexDefinition", NAME);
