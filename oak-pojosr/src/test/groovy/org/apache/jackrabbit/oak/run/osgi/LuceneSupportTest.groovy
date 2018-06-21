@@ -23,6 +23,7 @@ import org.apache.felix.connect.launch.PojoServiceRegistry
 
 import org.apache.jackrabbit.oak.plugins.index.aggregate.SimpleNodeAggregator
 import org.apache.jackrabbit.oak.plugins.index.search.IndexFormatVersion
+import org.apache.jackrabbit.oak.plugins.index.search.util.IndexHelper
 import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.LuceneIndexHelper
 import org.apache.jackrabbit.oak.spi.lifecycle.RepositoryInitializer
@@ -102,7 +103,7 @@ class LuceneSupportTest extends AbstractRepositoryFactoryTest {
                         NodeBuilder index = builder.child(INDEX_DEFINITIONS_NAME);
                         if (!index.hasChildNode("lucene")) {
                             NodeBuilder nb = LuceneIndexHelper.newLuceneIndexDefinition(
-                                    index, "lucene", LuceneIndexHelper.JR_PROPERTY_INCLUDES, null, "async")
+                                    index, "lucene", IndexHelper.JR_PROPERTY_INCLUDES, null, "async")
                             nb.setProperty(LuceneIndexConstants.COMPAT_MODE, IndexFormatVersion.V1.getVersion());
                         }
                     }
