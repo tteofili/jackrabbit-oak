@@ -28,7 +28,6 @@ import static org.apache.jackrabbit.oak.commons.PathUtils.getParentPath;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.VERSION;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.TermFactory.newFulltextTerm;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.TermFactory.newPathTerm;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.util.LuceneIndexHelper.skipTokenization;
 import static org.apache.jackrabbit.oak.spi.query.QueryConstants.JCR_PATH;
 import static org.apache.lucene.search.BooleanClause.Occur.MUST;
 import static org.apache.lucene.search.BooleanClause.Occur.MUST_NOT;
@@ -60,6 +59,7 @@ import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition.IndexingRule;
 import org.apache.jackrabbit.oak.plugins.index.search.PropertyDefinition;
 import org.apache.jackrabbit.oak.plugins.index.search.SizeEstimator;
+import org.apache.jackrabbit.oak.plugins.index.search.util.IndexHelper;
 import org.apache.jackrabbit.oak.plugins.memory.PropertyValues;
 import org.apache.jackrabbit.oak.spi.query.Cursor;
 import org.apache.jackrabbit.oak.spi.query.Filter;
@@ -734,7 +734,7 @@ public class LuceneIndexOld implements AdvanceFulltextQueryIndex {
                 continue;
             }
 
-            if (skipTokenization(name)) {
+            if (IndexHelper.skipTokenization(name)) {
                 qs.add(new TermQuery(new Term(name, pr.first
                         .getValue(STRING))));
                 continue;

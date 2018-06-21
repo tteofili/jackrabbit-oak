@@ -25,6 +25,7 @@ import java.util.Set;
 
 import javax.annotation.Nonnull;
 
+import org.apache.jackrabbit.oak.plugins.index.search.util.IndexHelper;
 import org.apache.jackrabbit.oak.spi.lifecycle.RepositoryInitializer;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 
@@ -43,11 +44,11 @@ public class LuceneInitializerHelper implements RepositoryInitializer {
     private Boolean storageEnabled;
 
     public LuceneInitializerHelper(String name) {
-        this(name, LuceneIndexHelper.JR_PROPERTY_INCLUDES, null, null, null);
+        this(name, IndexHelper.JR_PROPERTY_INCLUDES, null, null, null);
     }
 
     public LuceneInitializerHelper(String name, Boolean storageEnabled) {
-        this(name, LuceneIndexHelper.JR_PROPERTY_INCLUDES, null, null, storageEnabled);
+        this(name, IndexHelper.JR_PROPERTY_INCLUDES, null, null, storageEnabled);
     }
 
     public LuceneInitializerHelper(String name, Set<String> propertyTypes) {
@@ -83,7 +84,7 @@ public class LuceneInitializerHelper implements RepositoryInitializer {
 
     /**
      * will set the {@code async} property to the provided value
-     * 
+     *
      * @param async
      * @return
      */
@@ -91,7 +92,7 @@ public class LuceneInitializerHelper implements RepositoryInitializer {
         this.async = checkNotNull(async);
         return this;
     }
-    
+
     @Override
     public void initialize(@Nonnull NodeBuilder builder) {
         if (builder.hasChildNode(INDEX_DEFINITIONS_NAME)
