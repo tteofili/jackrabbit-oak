@@ -42,7 +42,7 @@ import static org.apache.jackrabbit.oak.api.Type.NAMES;
 /**
  * A utility class that allows to copy a new state (including children).
  */
-final class NodeStateCopyUtils {
+public final class NodeStateCopyUtils {
 
     private static final String OAK_CHILD_ORDER = ":childOrder";
 
