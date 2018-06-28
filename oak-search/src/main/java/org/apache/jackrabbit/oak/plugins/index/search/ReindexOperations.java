@@ -25,6 +25,8 @@ import org.apache.jackrabbit.oak.spi.state.NodeState;
 import static org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition.INDEX_DEFINITION_NODE;
 import static org.apache.jackrabbit.oak.plugins.index.search.spi.editor.FulltextIndexEditorContext.configureUniqueId;
 
+import org.apache.jackrabbit.oak.plugins.index.search.util.NodeStateCloner;
+
 public class ReindexOperations {
     private final NodeState root;
     private final NodeBuilder definitionBuilder;

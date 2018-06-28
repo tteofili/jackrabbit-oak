@@ -30,12 +30,12 @@ import org.apache.jackrabbit.oak.commons.PerfLogger;
 import org.apache.jackrabbit.oak.plugins.index.IndexConstants;
 import org.apache.jackrabbit.oak.plugins.index.IndexUpdateCallback;
 import org.apache.jackrabbit.oak.plugins.index.IndexingContext;
-import org.apache.jackrabbit.oak.plugins.index.search.ExtractedTextCache;
+import org.apache.jackrabbit.oak.plugins.index.search.TextExtractionCache;
 import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
-import org.apache.jackrabbit.oak.plugins.index.search.NodeStateCloner;
 import org.apache.jackrabbit.oak.plugins.index.search.PropertyUpdateCallback;
 import org.apache.jackrabbit.oak.plugins.index.search.ReindexOperations;
 import org.apache.jackrabbit.oak.plugins.index.search.spi.binary.FulltextBinaryTextExtractor;
+import org.apache.jackrabbit.oak.plugins.index.search.util.NodeStateCloner;
 import org.apache.jackrabbit.oak.spi.commit.CommitInfo;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
@@ -74,7 +74,7 @@ public abstract class FulltextIndexEditorContext<D> {
 
   private boolean reindex;
 
-  private final ExtractedTextCache extractedTextCache;
+  private final TextExtractionCache extractedTextCache;
 
   private final NodeState root;
 
@@ -96,7 +96,7 @@ public abstract class FulltextIndexEditorContext<D> {
                            @Nullable IndexDefinition indexDefinition,
                            IndexUpdateCallback updateCallback,
                            FulltextIndexWriterFactory indexWriterFactory,
-                           ExtractedTextCache extractedTextCache,
+                           TextExtractionCache extractedTextCache,
                            IndexingContext indexingContext, boolean asyncIndexing) {
     this.root = root;
     this.indexingContext = checkNotNull(indexingContext);
@@ -120,7 +120,7 @@ public abstract class FulltextIndexEditorContext<D> {
 
   public abstract DocumentMaker<D> newDocumentMaker(IndexDefinition.IndexingRule rule, String path);
 
-  protected FulltextBinaryTextExtractor createBinaryTextExtractor(ExtractedTextCache extractedTextCache,
+  protected FulltextBinaryTextExtractor createBinaryTextExtractor(TextExtractionCache extractedTextCache,
                                                                   IndexDefinition definition, boolean reindex) {
     return new FulltextBinaryTextExtractor(extractedTextCache, definition, reindex);
   }

@@ -23,7 +23,7 @@ import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.FacetHelper;
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.FacetsConfigProvider;
 import org.apache.jackrabbit.oak.plugins.index.lucene.writer.LuceneIndexWriter;
-import org.apache.jackrabbit.oak.plugins.index.search.ExtractedTextCache;
+import org.apache.jackrabbit.oak.plugins.index.search.TextExtractionCache;
 import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.search.spi.editor.FulltextIndexEditorContext;
 import org.apache.jackrabbit.oak.plugins.index.search.spi.editor.FulltextIndexWriterFactory;
@@ -44,7 +44,7 @@ public class LuceneIndexEditorContext extends FulltextIndexEditorContext impleme
                              @Nullable IndexDefinition indexDefinition,
                              IndexUpdateCallback updateCallback,
                              FulltextIndexWriterFactory indexWriterFactory,
-                             ExtractedTextCache extractedTextCache,
+                             TextExtractionCache extractedTextCache,
                              IndexAugmentorFactory augmentorFactory,
                              IndexingContext indexingContext, boolean asyncIndexing) {
         super(root, definition, indexDefinition, updateCallback, indexWriterFactory, extractedTextCache,

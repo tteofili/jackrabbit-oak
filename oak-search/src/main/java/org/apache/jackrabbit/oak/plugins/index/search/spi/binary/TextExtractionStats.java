@@ -21,7 +21,7 @@ package org.apache.jackrabbit.oak.plugins.index.search.spi.binary;
 
 import java.util.concurrent.TimeUnit;
 
-import org.apache.jackrabbit.oak.plugins.index.search.ExtractedTextCache;
+import org.apache.jackrabbit.oak.plugins.index.search.TextExtractionCache;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -53,7 +53,7 @@ class TextExtractionStats {
         }
     }
 
-    public void collectStats(ExtractedTextCache cache){
+    public void collectStats(TextExtractionCache cache){
         cache.addStats(count, totalTime, totalBytesRead, totalTextLength);
     }
 

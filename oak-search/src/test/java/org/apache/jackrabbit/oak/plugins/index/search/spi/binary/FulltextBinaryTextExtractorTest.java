@@ -19,7 +19,7 @@
 
 package org.apache.jackrabbit.oak.plugins.index.search.spi.binary;
 
-import org.apache.jackrabbit.oak.plugins.index.search.ExtractedTextCache;
+import org.apache.jackrabbit.oak.plugins.index.search.TextExtractionCache;
 import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
@@ -32,7 +32,7 @@ public class FulltextBinaryTextExtractorTest {
     private NodeState root = INITIAL_CONTENT;
 
     private NodeBuilder builder = root.builder();
-    private ExtractedTextCache cache = new ExtractedTextCache(1000, 10000);
+    private TextExtractionCache cache = new TextExtractionCache(1000, 10000);
 
     @Test
     public void tikaConfigServiceLoader() throws Exception {

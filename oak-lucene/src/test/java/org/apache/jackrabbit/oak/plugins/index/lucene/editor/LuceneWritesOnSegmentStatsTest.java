@@ -40,7 +40,7 @@ import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexProvider
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.IndexDefinitionBuilder;
 import org.apache.jackrabbit.oak.plugins.index.nodetype.NodeTypeIndexProvider;
 import org.apache.jackrabbit.oak.plugins.index.property.PropertyIndexEditorProvider;
-import org.apache.jackrabbit.oak.plugins.index.search.ExtractedTextCache;
+import org.apache.jackrabbit.oak.plugins.index.search.TextExtractionCache;
 import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
 import org.apache.jackrabbit.oak.query.AbstractQueryTest;
 import org.apache.jackrabbit.oak.segment.SegmentNodeStoreBuilders;
@@ -176,7 +176,7 @@ public class LuceneWritesOnSegmentStatsTest extends AbstractQueryTest {
         LuceneIndexProvider provider;
         if (copyOnRW) {
             IndexCopier copier = createIndexCopier();
-            editorProvider = new LuceneIndexEditorProvider(copier, new ExtractedTextCache(10 * FileUtils.ONE_MB, 100));
+            editorProvider = new LuceneIndexEditorProvider(copier, new TextExtractionCache(10 * FileUtils.ONE_MB, 100));
             provider = new LuceneIndexProvider(copier);
         } else {
             editorProvider = new LuceneIndexEditorProvider();

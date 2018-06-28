@@ -76,7 +76,7 @@ import org.apache.jackrabbit.oak.plugins.index.lucene.hybrid.LuceneJournalProper
 import org.apache.jackrabbit.oak.plugins.index.lucene.hybrid.NRTIndexFactory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.property.PropertyIndexCleaner;
 import org.apache.jackrabbit.oak.plugins.index.lucene.reader.DefaultIndexReaderFactory;
-import org.apache.jackrabbit.oak.plugins.index.search.ExtractedTextCache;
+import org.apache.jackrabbit.oak.plugins.index.search.TextExtractionCache;
 import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.search.TextExtractionStatsMBean;
 import org.apache.jackrabbit.oak.spi.blob.GarbageCollectableBlobStore;
@@ -338,7 +338,7 @@ public class LuceneIndexProviderService {
 
     private int threadPoolSize;
 
-    private ExtractedTextCache extractedTextCache;
+    private TextExtractionCache extractedTextCache;
 
     private boolean hybridIndex;
 
@@ -471,7 +471,7 @@ public class LuceneIndexProviderService {
         return indexCopier;
     }
 
-    ExtractedTextCache getExtractedTextCache() {
+    TextExtractionCache getExtractedTextCache() {
         return extractedTextCache;
     }
 
@@ -688,7 +688,7 @@ public class LuceneIndexProviderService {
         boolean alwaysUsePreExtractedCache = PropertiesUtil.toBoolean(config.get(PROP_PRE_EXTRACTED_TEXT_ALWAYS_USE),
                 PROP_PRE_EXTRACTED_TEXT_ALWAYS_USE_DEFAULT);
 
-        extractedTextCache = new ExtractedTextCache(
+        extractedTextCache = new TextExtractionCache(
                 cacheSizeInMB * ONE_MB,
                 cacheExpiryInSecs,
                 alwaysUsePreExtractedCache,

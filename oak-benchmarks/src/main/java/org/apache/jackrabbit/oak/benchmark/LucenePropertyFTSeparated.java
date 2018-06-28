@@ -27,8 +27,8 @@ import org.apache.jackrabbit.oak.fixture.JcrCreator;
 import org.apache.jackrabbit.oak.fixture.OakRepositoryFixture;
 import org.apache.jackrabbit.oak.fixture.RepositoryFixture;
 import org.apache.jackrabbit.oak.jcr.Jcr;
-import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexEditorProvider;
-import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexProvider;
+import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexEditorProvider;
+import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexProvider;
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.LuceneInitializerHelper;
 import org.apache.jackrabbit.oak.spi.commit.Observer;
 import org.apache.jackrabbit.oak.spi.query.QueryIndexProvider;
@@ -39,8 +39,8 @@ import org.apache.jackrabbit.oak.spi.query.QueryIndexProvider;
  */
 public class LucenePropertyFTSeparated extends LucenePropertyFullTextTest {
 
-    public LucenePropertyFTSeparated(final File dump, 
-                                     final boolean flat, 
+    public LucenePropertyFTSeparated(final File dump,
+                                     final boolean flat,
                                      final boolean doReport,
                                      final Boolean storageEnabled) {
         super(dump, flat, doReport, storageEnabled);

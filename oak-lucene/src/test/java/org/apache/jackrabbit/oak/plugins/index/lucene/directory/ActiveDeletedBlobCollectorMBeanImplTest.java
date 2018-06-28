@@ -48,7 +48,7 @@ import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexEditorPr
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.IndexConsistencyChecker;
 import org.apache.jackrabbit.oak.plugins.index.nodetype.NodeTypeIndexProvider;
 import org.apache.jackrabbit.oak.plugins.index.property.PropertyIndexEditorProvider;
-import org.apache.jackrabbit.oak.plugins.index.search.ExtractedTextCache;
+import org.apache.jackrabbit.oak.plugins.index.search.TextExtractionCache;
 import org.apache.jackrabbit.oak.plugins.memory.MemoryNodeStore;
 import org.apache.jackrabbit.oak.spi.blob.GarbageCollectableBlobStore;
 import org.apache.jackrabbit.oak.spi.blob.MemoryBlobStore;
@@ -343,7 +343,7 @@ public class ActiveDeletedBlobCollectorMBeanImplTest {
         DeletedFileTrackingADBC deletedFileTrackingADBC = new DeletedFileTrackingADBC(
                 new File(temporaryFolder.getRoot(), "adbc-workdir"));
         editorProvider = new LuceneIndexEditorProvider(null, null,
-                new ExtractedTextCache(0, 0),
+                new TextExtractionCache(0, 0),
                 null, Mounts.defaultMountInfoProvider(),
                 deletedFileTrackingADBC);
         repository = new Oak(dns2)

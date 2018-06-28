@@ -32,7 +32,7 @@ import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexEditor;
 import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexEditorContext;
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.IndexDefinitionBuilder;
 import org.apache.jackrabbit.oak.plugins.index.lucene.writer.LuceneIndexWriter;
-import org.apache.jackrabbit.oak.plugins.index.search.ExtractedTextCache;
+import org.apache.jackrabbit.oak.plugins.index.search.TextExtractionCache;
 import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.search.PropertyDefinition;
 import org.apache.jackrabbit.oak.plugins.index.search.PropertyUpdateCallback;
@@ -68,7 +68,7 @@ public class LuceneIndexEditor2Test {
     private NodeState root = INITIAL_CONTENT;
     private NodeState before = root;
     private IndexUpdateCallback updateCallback = mock(IndexUpdateCallback.class);
-    private ExtractedTextCache extractedTextCache = new ExtractedTextCache(0, 0);
+    private TextExtractionCache extractedTextCache = new TextExtractionCache(0, 0);
     private TestIndexingContext indexingContext = new TestIndexingContext();
     private TestWriterFactory writerFactory = new TestWriterFactory();
     private TestPropertyUpdateCallback propCallback = new TestPropertyUpdateCallback();

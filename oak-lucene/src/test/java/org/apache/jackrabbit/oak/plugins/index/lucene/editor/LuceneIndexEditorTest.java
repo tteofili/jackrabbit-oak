@@ -71,7 +71,7 @@ import org.apache.jackrabbit.oak.plugins.index.lucene.directory.OakDirectory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexEditorProvider;
 import org.apache.jackrabbit.oak.plugins.index.lucene.writer.MultiplexersLucene;
 import org.apache.jackrabbit.oak.plugins.index.property.PropertyIndexEditorProvider;
-import org.apache.jackrabbit.oak.plugins.index.search.ExtractedTextCache;
+import org.apache.jackrabbit.oak.plugins.index.search.TextExtractionCache;
 import org.apache.jackrabbit.oak.plugins.index.search.FieldNames;
 import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.search.IndexFormatVersion;
@@ -467,7 +467,7 @@ public class LuceneIndexEditorTest {
                 .mount("foo", "/libs", "/apps").build();
         EditorHook hook = new EditorHook(
                 new IndexUpdateProvider(
-                        new LuceneIndexEditorProvider(null, new ExtractedTextCache(0, 0), null, mip)));
+                        new LuceneIndexEditorProvider(null, new TextExtractionCache(0, 0), null, mip)));
 
         NodeState indexed = hook.processCommit(EMPTY_NODE, builder.getNodeState(), CommitInfo.EMPTY);
         builder = indexed.builder();

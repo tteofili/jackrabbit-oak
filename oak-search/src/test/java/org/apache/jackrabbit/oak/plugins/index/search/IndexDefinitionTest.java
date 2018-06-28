@@ -31,6 +31,7 @@ import org.apache.jackrabbit.oak.plugins.index.IndexConstants;
 import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition.IndexingRule;
 import org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.IndexingMode;
 import org.apache.jackrabbit.oak.plugins.index.search.util.IndexDefinitionBuilder;
+import org.apache.jackrabbit.oak.plugins.index.search.util.IndexDefinitionUtils;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.junit.Test;
@@ -50,8 +51,6 @@ import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConsta
 import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.PROP_NODE;
 import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.TIKA;
 import static org.apache.jackrabbit.oak.plugins.index.search.TestUtil.registerTestNodeType;
-import static org.apache.jackrabbit.oak.plugins.index.search.util.IndexHelper.newFTIndexDefinition;
-import static org.apache.jackrabbit.oak.plugins.index.search.util.IndexHelper.newFTPropertyIndexDefinition;
 import static org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState.EMPTY_NODE;
 import static org.apache.jackrabbit.oak.plugins.memory.PropertyStates.createProperty;
 import static org.apache.jackrabbit.oak.plugins.tree.TreeConstants.OAK_CHILD_ORDER;
@@ -371,7 +370,7 @@ public class IndexDefinitionTest {
 
     @Test
     public void formatUpdate() throws Exception{
-        NodeBuilder defnb = newFTIndexDefinition(builder.child(INDEX_DEFINITIONS_NAME), "foo",
+        NodeBuilder defnb = IndexDefinitionUtils.newFTIndexDefinition(builder.child(INDEX_DEFINITIONS_NAME), "foo",
                 "lucene", of(TYPENAME_STRING), of("foo", "Bar"), "async");
         IndexDefinition defn = new IndexDefinition(root, defnb.getNodeState(), "/foo");
         assertTrue(defn.isOfOldFormat());
@@ -388,7 +387,7 @@ public class IndexDefinitionTest {
 
     @Test
     public void propertyRegExAndRelativeProperty() throws Exception{
-        NodeBuilder defnb = newFTIndexDefinition(builder.child(INDEX_DEFINITIONS_NAME), "foo",
+        NodeBuilder defnb = IndexDefinitionUtils.newFTIndexDefinition(builder.child(INDEX_DEFINITIONS_NAME), "foo",
                 "lucene", of(TYPENAME_STRING), of("foo"), "async");
         IndexDefinition defn = new IndexDefinition(root, defnb.getNodeState(), "/foo");
         assertTrue(defn.isOfOldFormat());
@@ -403,7 +402,7 @@ public class IndexDefinitionTest {
 
     @Test
     public void fulltextEnabledAndAggregate() throws Exception{
-        NodeBuilder defnb = newFTPropertyIndexDefinition(builder.child(INDEX_DEFINITIONS_NAME), "foo",
+        NodeBuilder defnb = IndexDefinitionUtils.newFTPropertyIndexDefinition(builder.child(INDEX_DEFINITIONS_NAME), "foo",
                 "lucene", of("foo"), "async");
         IndexDefinition defn = new IndexDefinition(root, defnb.getNodeState(), "/foo");
         assertFalse(defn.isFullTextEnabled());
@@ -418,7 +417,7 @@ public class IndexDefinitionTest {
 
     @Test
     public void costConfig() throws Exception {
-        NodeBuilder defnb = newFTPropertyIndexDefinition(builder.child(INDEX_DEFINITIONS_NAME), "foo",
+        NodeBuilder defnb = IndexDefinitionUtils.newFTPropertyIndexDefinition(builder.child(INDEX_DEFINITIONS_NAME), "foo",
                 "lucene", of("foo"), "async");
         IndexDefinition defn = new IndexDefinition(root, defnb.getNodeState(), "/foo");
         assertEquals(1.0, defn.getCostPerEntry(), 0);
@@ -438,7 +437,7 @@ public class IndexDefinitionTest {
 
     @Test
     public void fulltextCost() throws Exception{
-        NodeBuilder defnb = newFTPropertyIndexDefinition(builder.child(INDEX_DEFINITIONS_NAME), "foo",
+        NodeBuilder defnb = IndexDefinitionUtils.newFTPropertyIndexDefinition(builder.child(INDEX_DEFINITIONS_NAME), "foo",
                 "lucene", of("foo"), "async");
         IndexDefinition defn = new IndexDefinition(root, defnb.getNodeState(), "/foo");
         assertEquals(300, defn.getFulltextEntryCount(300));
@@ -454,7 +453,7 @@ public class IndexDefinitionTest {
 
     @Test
     public void customTikaConfig() throws Exception{
-        NodeBuilder defnb = newFTIndexDefinition(builder.child(INDEX_DEFINITIONS_NAME), "foo",
+        NodeBuilder defnb = IndexDefinitionUtils.newFTIndexDefinition(builder.child(INDEX_DEFINITIONS_NAME), "foo",
                 "lucene", of(TYPENAME_STRING));
         IndexDefinition defn = new IndexDefinition(root, defnb.getNodeState(), "/foo");
         assertFalse(defn.hasCustomTikaConfig());
@@ -469,7 +468,7 @@ public class IndexDefinitionTest {
 
     @Test
     public void customTikaMimeTypes() throws Exception{
-        NodeBuilder defnb = newFTIndexDefinition(builder.child(INDEX_DEFINITIONS_NAME), "foo",
+        NodeBuilder defnb = IndexDefinitionUtils.newFTIndexDefinition(builder.child(INDEX_DEFINITIONS_NAME), "foo",
                 "lucene", of(TYPENAME_STRING));
         IndexDefinition defn = new IndexDefinition(root, defnb.getNodeState(), "/foo");
         assertEquals("application/test", defn.getTikaMappedMimeType("application/test"));
@@ -487,7 +486,7 @@ public class IndexDefinitionTest {
 
     @Test
     public void maxExtractLength() throws Exception{
-        NodeBuilder defnb = newFTIndexDefinition(builder.child(INDEX_DEFINITIONS_NAME), "foo",
+        NodeBuilder defnb = IndexDefinitionUtils.newFTIndexDefinition(builder.child(INDEX_DEFINITIONS_NAME), "foo",
                 "lucene", of(TYPENAME_STRING));
         IndexDefinition defn = new IndexDefinition(root, defnb.getNodeState(), "/foo");
         assertEquals(-IndexDefinition.DEFAULT_MAX_EXTRACT_LENGTH * IndexDefinition.DEFAULT_MAX_FIELD_LENGTH,

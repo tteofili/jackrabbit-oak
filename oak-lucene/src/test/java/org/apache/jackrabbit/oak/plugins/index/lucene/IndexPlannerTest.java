@@ -36,7 +36,6 @@ import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexStatisti
 import static org.apache.jackrabbit.oak.plugins.index.lucene.TestUtil.NT_TEST;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.TestUtil.child;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.TestUtil.registerTestNodeType;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.util.FunctionIndexProcessor.*;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.util.LuceneIndexHelper.newLuceneIndexDefinition;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.util.LuceneIndexHelper.newLucenePropertyIndexDefinition;
 import static org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState.EMPTY_NODE;
@@ -71,6 +70,7 @@ import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.search.spi.query.FulltextIndex;
 import org.apache.jackrabbit.oak.plugins.index.search.spi.query.FulltextIndexPlanner;
 import org.apache.jackrabbit.oak.plugins.index.search.spi.query.FulltextIndexPlanner.PropertyIndexResult;
+import org.apache.jackrabbit.oak.plugins.index.search.util.FunctionIndexProcessor;
 import org.apache.jackrabbit.oak.plugins.memory.PropertyValues;
 import org.apache.jackrabbit.oak.query.NodeStateNodeTypeInfoProvider;
 import org.apache.jackrabbit.oak.query.QueryEngineSettings;
@@ -1535,14 +1535,16 @@ public class IndexPlannerTest {
         NodeState defn = idxBuilder.build();
 
         Document doc = new Document();
-        doc.add(new StringField(convertToPolishNotation("lower([foo])"), "bar1", Field.Store.NO));
+        doc.add(new StringField(
+                FunctionIndexProcessor.convertToPolishNotation("lower([foo])"), "bar1", Field.Store.NO));
         Directory sampleDirectory = createSampleDirectory(2, doc);
         LuceneIndexDefinition idxDefn = new LuceneIndexDefinition(root, defn, indexPath);
         LuceneIndexNode node = createIndexNode(idxDefn, sampleDirectory);
 
         // Query on and "foo"
         FilterImpl filter = createFilter("nt:base");
-        filter.restrictProperty(convertToPolishNotation("lower([foo])"), Operator.EQUAL,
+        filter.restrictProperty(
+                FunctionIndexProcessor.convertToPolishNotation("lower([foo])"), Operator.EQUAL,
                 PropertyValues.newString("foo1"));
         FulltextIndexPlanner planner = new FulltextIndexPlanner(node, indexPath, filter, Collections.emptyList());
         QueryIndex.IndexPlan plan = planner.getPlan();
@@ -1735,7 +1737,8 @@ public class IndexPlannerTest {
 
         filter = createFilter("nt:base");
         filter.restrictProperty("a/foo", Operator.EQUAL, PropertyValues.newString("bar"));
-        filter.restrictProperty(convertToPolishNotation("lower([foo])"), Operator.EQUAL,
+        filter.restrictProperty(
+                FunctionIndexProcessor.convertToPolishNotation("lower([foo])"), Operator.EQUAL,
                 PropertyValues.newString("foo1"));
         planner = new FulltextIndexPlanner(node, indexPath, filter, Collections.emptyList());
         plan = planner.getPlan();
@@ -1771,7 +1774,7 @@ public class IndexPlannerTest {
     }
 
     private static Directory createSampleDirectory(long numOfDocs) throws IOException {
-        return createSampleDirectory(numOfDocs, Collections.EMPTY_LIST);
+        return createSampleDirectory(numOfDocs, Collections.emptyList());
     }
 
     private static Directory createSampleDirectory(long numOfDocs, @Nonnull Document doc) throws IOException {

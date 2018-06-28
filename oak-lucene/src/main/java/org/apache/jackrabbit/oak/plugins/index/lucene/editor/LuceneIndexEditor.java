@@ -56,8 +56,6 @@ public class LuceneIndexEditor implements IndexEditor, Aggregate.AggregateRoot {
     private static final Logger log =
             LoggerFactory.getLogger(LuceneIndexEditor.class);
 
-    public static final String TEXT_EXTRACTION_ERROR = "TextExtractionError";
-
     private final LuceneIndexEditorContext context;
 
     /** Name of this node, or {@code null} for the root node. */

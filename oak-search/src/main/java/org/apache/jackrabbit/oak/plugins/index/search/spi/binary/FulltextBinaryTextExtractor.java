@@ -38,7 +38,7 @@ import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.commons.io.LazyInputStream;
 import org.apache.jackrabbit.oak.plugins.index.fulltext.ExtractedText;
-import org.apache.jackrabbit.oak.plugins.index.search.ExtractedTextCache;
+import org.apache.jackrabbit.oak.plugins.index.search.TextExtractionCache;
 import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.search.spi.editor.FulltextIndexEditorContext;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
@@ -66,7 +66,7 @@ public class FulltextBinaryTextExtractor {
   private static final Parser defaultParser = createDefaultParser();
   private static final long SMALL_BINARY = Long.getLong("oak.search.smallBinary", 16 * 1024);
   private final TextExtractionStats textExtractionStats = new TextExtractionStats();
-  private final ExtractedTextCache extractedTextCache;
+  private final TextExtractionCache extractedTextCache;
   private final IndexDefinition definition;
   private final boolean reindex;
   private Parser parser;
@@ -77,7 +77,7 @@ public class FulltextBinaryTextExtractor {
   private Set<MediaType> supportedMediaTypes;
   private Set<MediaType> nonIndexedMediaType;
 
-  public FulltextBinaryTextExtractor(ExtractedTextCache extractedTextCache, IndexDefinition definition, boolean reindex) {
+  public FulltextBinaryTextExtractor(TextExtractionCache extractedTextCache, IndexDefinition definition, boolean reindex) {
     this.extractedTextCache = extractedTextCache;
     this.definition = definition;
     this.reindex = reindex;

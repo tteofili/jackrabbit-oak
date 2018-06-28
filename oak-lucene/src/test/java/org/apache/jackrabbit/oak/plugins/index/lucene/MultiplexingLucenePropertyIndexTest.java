@@ -41,7 +41,7 @@ import org.apache.jackrabbit.oak.plugins.index.lucene.writer.LuceneIndexWriterCo
 import org.apache.jackrabbit.oak.plugins.index.lucene.writer.MultiplexersLucene;
 import org.apache.jackrabbit.oak.plugins.index.nodetype.NodeTypeIndexProvider;
 import org.apache.jackrabbit.oak.plugins.index.property.PropertyIndexEditorProvider;
-import org.apache.jackrabbit.oak.plugins.index.search.ExtractedTextCache;
+import org.apache.jackrabbit.oak.plugins.index.search.TextExtractionCache;
 import org.apache.jackrabbit.oak.plugins.index.search.spi.query.FulltextIndexPlanner;
 import org.apache.jackrabbit.oak.plugins.memory.MemoryNodeStore;
 import org.apache.jackrabbit.oak.plugins.memory.PropertyValues;
@@ -115,7 +115,7 @@ public class MultiplexingLucenePropertyIndexTest extends AbstractQueryTest {
             throw new RuntimeException(e);
         }
         LuceneIndexEditorProvider editorProvider = new LuceneIndexEditorProvider(copier,
-                new ExtractedTextCache(10*FileUtils.ONE_MB, 100),
+                new TextExtractionCache(10*FileUtils.ONE_MB, 100),
                 null,
                 mip);
         LuceneIndexProvider provider = new LuceneIndexProvider(new IndexTracker(new DefaultIndexReaderFactory(mip, copier)));

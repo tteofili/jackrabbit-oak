@@ -17,9 +17,9 @@
  * under the License.
  */
 
-package org.apache.jackrabbit.oak.plugins.index.lucene.hybrid;
+package org.apache.jackrabbit.oak.plugins.index.search.update;
 
-interface IndexUpdateListener extends ReaderRefreshPolicy {
+public interface IndexUpdateListener extends ReaderRefreshPolicy {
 
     void updated();
 }

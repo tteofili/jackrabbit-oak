@@ -16,19 +16,19 @@
  */
 package org.apache.jackrabbit.oak.plugins.index.search;
 
-
+/**
+ * Internal constants used in index definition, and index implementations.
+ */
 public interface FulltextIndexConstants {
 
-  enum IndexingMode {
-        SYNC,
-        NRT,
-        ASYNC;
+    enum IndexingMode {
+        SYNC, NRT, ASYNC;
 
-        public String asyncValueName(){
+        public String asyncValueName() {
             return name().toLowerCase();
         }
 
-        public static IndexingMode from(String indexingMode){
+        public static IndexingMode from(String indexingMode) {
             return valueOf(indexingMode.toUpperCase());
         }
     }

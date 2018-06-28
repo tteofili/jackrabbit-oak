@@ -17,15 +17,15 @@
  * under the License.
  */
 
-package org.apache.jackrabbit.oak.plugins.index.lucene;
+package org.apache.jackrabbit.oak.plugins.index;
 
 import org.apache.commons.io.FileUtils;
 import org.apache.jackrabbit.oak.api.Blob;
 import org.apache.jackrabbit.oak.plugins.index.fulltext.ExtractedText;
 import org.apache.jackrabbit.oak.plugins.index.fulltext.ExtractedText.ExtractionResult;
-import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexEditor;
 import org.apache.jackrabbit.oak.plugins.index.fulltext.PreExtractedTextProvider;
-import org.apache.jackrabbit.oak.plugins.index.search.ExtractedTextCache;
+import org.apache.jackrabbit.oak.plugins.index.search.TextExtractionCache;
+import org.apache.jackrabbit.oak.plugins.index.search.spi.editor.FulltextIndexEditor;
 import org.apache.jackrabbit.oak.plugins.memory.ArrayBasedBlob;
 import org.junit.Test;
 
@@ -47,13 +47,13 @@ public class ExtractedTextCacheTest {
 
     @Test
     public void cacheDisabling() throws Exception {
-        ExtractedTextCache cache = new ExtractedTextCache(0, 0);
+        TextExtractionCache cache = new TextExtractionCache(0, 0);
         assertNull(cache.getCacheStats());
     }
 
     @Test
     public void cacheEnabled() throws Exception {
-        ExtractedTextCache cache = new ExtractedTextCache(10 * FileUtils.ONE_MB, 100);
+        TextExtractionCache cache = new TextExtractionCache(10 * FileUtils.ONE_MB, 100);
         assertNotNull(cache.getCacheStats());
 
         Blob b = new IdBlob("hello", "a");
@@ -68,7 +68,7 @@ public class ExtractedTextCacheTest {
 
     @Test
     public void cacheEnabledNonIdBlob() throws Exception {
-        ExtractedTextCache cache = new ExtractedTextCache(10 * FileUtils.ONE_MB, 100);
+        TextExtractionCache cache = new TextExtractionCache(10 * FileUtils.ONE_MB, 100);
 
         Blob b = new ArrayBasedBlob("hello".getBytes());
         String text = cache.get("/a", "foo", b, false);
@@ -82,7 +82,7 @@ public class ExtractedTextCacheTest {
 
     @Test
     public void cacheEnabledErrorInTextExtraction() throws Exception {
-        ExtractedTextCache cache = new ExtractedTextCache(10 * FileUtils.ONE_MB, 100);
+        TextExtractionCache cache = new TextExtractionCache(10 * FileUtils.ONE_MB, 100);
 
         Blob b = new IdBlob("hello", "a");
         String text = cache.get("/a", "foo", b, false);
@@ -91,12 +91,12 @@ public class ExtractedTextCacheTest {
         cache.put(b, new ExtractedText(ExtractionResult.ERROR, "test hello"));
 
         text = cache.get("/a", "foo", b, false);
-        assertEquals(LuceneIndexEditor.TEXT_EXTRACTION_ERROR, text);
+        assertEquals(FulltextIndexEditor.TEXT_EXTRACTION_ERROR, text);
     }
 
     @Test
     public void preExtractionNoReindexNoProvider() throws Exception{
-        ExtractedTextCache cache = new ExtractedTextCache(10 * FileUtils.ONE_MB, 100);
+        TextExtractionCache cache = new TextExtractionCache(10 * FileUtils.ONE_MB, 100);
 
         Blob b = new IdBlob("hello", "a");
         String text = cache.get("/a", "foo", b, true);
@@ -105,7 +105,7 @@ public class ExtractedTextCacheTest {
 
     @Test
     public void preExtractionNoReindex() throws Exception{
-        ExtractedTextCache cache = new ExtractedTextCache(10 * FileUtils.ONE_MB, 100);
+        TextExtractionCache cache = new TextExtractionCache(10 * FileUtils.ONE_MB, 100);
         PreExtractedTextProvider provider = mock(PreExtractedTextProvider.class);
 
         cache.setExtractedTextProvider(provider);
@@ -118,7 +118,7 @@ public class ExtractedTextCacheTest {
 
     @Test
     public void preExtractionReindex() throws Exception{
-        ExtractedTextCache cache = new ExtractedTextCache(10 * FileUtils.ONE_MB, 100);
+        TextExtractionCache cache = new TextExtractionCache(10 * FileUtils.ONE_MB, 100);
         PreExtractedTextProvider provider = mock(PreExtractedTextProvider.class);
 
         cache.setExtractedTextProvider(provider);
@@ -131,7 +131,7 @@ public class ExtractedTextCacheTest {
 
     @Test
     public void preExtractionAlwaysUse() throws Exception{
-        ExtractedTextCache cache = new ExtractedTextCache(10 * FileUtils.ONE_MB, 100, true, null);
+        TextExtractionCache cache = new TextExtractionCache(10 * FileUtils.ONE_MB, 100, true, null);
         PreExtractedTextProvider provider = mock(PreExtractedTextProvider.class);
 
         cache.setExtractedTextProvider(provider);
@@ -144,17 +144,17 @@ public class ExtractedTextCacheTest {
 
     @Test
     public void rememberTimeout() throws Exception{
-        ExtractedTextCache cache = new ExtractedTextCache(0, 0, false, null);
+        TextExtractionCache cache = new TextExtractionCache(0, 0, false, null);
         Blob b = new IdBlob("hello", "a");
         cache.put(b, ExtractedText.ERROR);
         assertNull(cache.get("/a", "foo", b, false));
         cache.putTimeout(b, ExtractedText.ERROR);
-        assertEquals(LuceneIndexEditor.TEXT_EXTRACTION_ERROR, cache.get("/a", "foo", b, false));
+        assertEquals(FulltextIndexEditor.TEXT_EXTRACTION_ERROR, cache.get("/a", "foo", b, false));
     }
 
     @Test
     public void process() throws Throwable {
-        ExtractedTextCache cache = new ExtractedTextCache(0, 0, false, null);
+        TextExtractionCache cache = new TextExtractionCache(0, 0, false, null);
         try {
             cache.process("test", new Callable<Void>() {
                 @Override
@@ -189,7 +189,7 @@ public class ExtractedTextCacheTest {
 
     @Test
     public void nullContentIdentityBlob() throws Exception {
-        ExtractedTextCache cache = new ExtractedTextCache(0, 0);
+        TextExtractionCache cache = new TextExtractionCache(0, 0);
         Blob b = new IdBlob("hello", null);
         cache.put(b, ExtractedText.ERROR);
         assertNull(cache.get("/a", "foo", b, false));
