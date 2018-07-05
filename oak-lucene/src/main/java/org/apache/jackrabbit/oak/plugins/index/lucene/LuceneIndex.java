@@ -591,7 +591,7 @@ public class LuceneIndex extends FulltextIndex {
                     }
                 }
             } catch (Exception e) {
-                LOG.error("postings highlighting failed", e);
+                LOG.debug("postings highlighting failed", e);
             }
         }
 
