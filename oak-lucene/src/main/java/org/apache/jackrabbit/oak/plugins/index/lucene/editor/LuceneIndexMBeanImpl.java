@@ -53,6 +53,7 @@ import org.apache.jackrabbit.oak.plugins.index.IndexPathService;
 import org.apache.jackrabbit.oak.plugins.index.search.BadIndexTracker.BadIndexInfo;
 import org.apache.jackrabbit.oak.plugins.index.search.util.NodeStateCloner;
 import org.apache.jackrabbit.oak.plugins.index.search.FieldNames;
+import org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants;
 import org.apache.jackrabbit.oak.plugins.index.lucene.property.HybridPropertyIndexInfo;
 import org.apache.jackrabbit.oak.plugins.index.lucene.property.PropertyIndexCleaner;
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.PathStoredFieldVisitor;
@@ -201,7 +202,7 @@ public class LuceneIndexMBeanImpl extends AnnotatedStandardMBean implements Luce
                 IndexDefinition defn = indexNode.getDefinition();
                 if (!defn.evaluatePathRestrictions()){
                     String msg = String.format("Index at [%s] does not have [%s] enabled. So paths statistics cannot " +
-                            "be determined for this index", indexPath, LuceneIndexConstants.EVALUATE_PATH_RESTRICTION);
+                            "be determined for this index", indexPath, FulltextIndexConstants.EVALUATE_PATH_RESTRICTION);
                     return createMsg(msg);
                 }
 

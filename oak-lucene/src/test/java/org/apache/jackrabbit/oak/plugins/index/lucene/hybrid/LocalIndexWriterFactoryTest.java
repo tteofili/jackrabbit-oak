@@ -26,7 +26,7 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.plugins.index.IndexUpdateProvider;
-import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.IndexingMode;
+import org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.IndexingMode;
 import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexEditorProvider;
 import org.apache.jackrabbit.oak.plugins.index.lucene.IndexTracker;
 import org.apache.jackrabbit.oak.plugins.index.lucene.TestUtil;

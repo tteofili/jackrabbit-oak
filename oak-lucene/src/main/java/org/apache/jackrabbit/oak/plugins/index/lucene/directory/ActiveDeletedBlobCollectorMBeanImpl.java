@@ -29,6 +29,7 @@ import org.apache.jackrabbit.oak.commons.jmx.ManagementOperation;
 import org.apache.jackrabbit.oak.plugins.index.AsyncIndexInfoService;
 import org.apache.jackrabbit.oak.plugins.index.IndexPathService;
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.ActiveDeletedBlobCollectorFactory.ActiveDeletedBlobCollector;
+import org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants;
 import org.apache.jackrabbit.oak.spi.blob.GarbageCollectableBlobStore;
 import org.apache.jackrabbit.oak.spi.commit.CommitInfo;
 import org.apache.jackrabbit.oak.spi.commit.EmptyHook;
@@ -59,7 +60,6 @@ import static org.apache.jackrabbit.oak.commons.jmx.ManagementOperation.Status.i
 import static org.apache.jackrabbit.oak.commons.jmx.ManagementOperation.done;
 import static org.apache.jackrabbit.oak.commons.jmx.ManagementOperation.newManagementOperation;
 import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.TYPE_PROPERTY_NAME;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.INDEX_DATA_CHILD_NAME;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.TYPE_LUCENE;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.directory.OakDirectory.PROP_UNSAFE_FOR_ACTIVE_DELETION;
 
@@ -280,7 +280,7 @@ public class ActiveDeletedBlobCollectorMBeanImpl implements ActiveDeletedBlobCol
             return;
         }
 
-        NodeBuilder dataNodeBuilder = indexPathBuilder.getChildNode(INDEX_DATA_CHILD_NAME);
+        NodeBuilder dataNodeBuilder = indexPathBuilder.getChildNode(FulltextIndexConstants.INDEX_DATA_CHILD_NAME);
         for (String indexFileName : dataNodeBuilder.getChildNodeNames()) {
             NodeBuilder indexFileBuilder = dataNodeBuilder.getChildNode(indexFileName);
 

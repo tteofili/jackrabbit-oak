@@ -49,6 +49,7 @@ import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.commons.PerfLogger;
 import org.apache.jackrabbit.oak.plugins.index.search.FieldNames;
+import org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants;
 import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition.IndexingRule;
 import org.apache.jackrabbit.oak.plugins.index.lucene.property.HybridPropertyIndexLookup;
@@ -138,7 +139,6 @@ import static org.apache.jackrabbit.oak.commons.PathUtils.getParentPath;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.TYPE_LUCENE;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexLookupUtil.LUCENE_INDEX_DEFINITION_PREDICATE;
 import static org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition.NATIVE_SORT_ORDER;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.EXCERPT_NODE_FIELD_NAME;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.VERSION;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.TermFactory.newAncestorTerm;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.TermFactory.newPathTerm;
@@ -543,12 +543,12 @@ public class LuceneIndex extends FulltextIndex {
         excerptFields.forEach(columnName -> {
             String fieldName;
             if (REP_EXCERPT.equals(columnName)) {
-                fieldName = EXCERPT_NODE_FIELD_NAME;
+                fieldName = FulltextIndexConstants.EXCERPT_NODE_FIELD_NAME;
             } else {
                 fieldName = columnName.substring(REP_EXCERPT.length() + 1, columnName.length() - 1);
             }
 
-            if (!EXCERPT_NODE_FIELD_NAME.equals(fieldName)) {
+            if (!FulltextIndexConstants.EXCERPT_NODE_FIELD_NAME.equals(fieldName)) {
                 excerptFieldNames.add(fieldName);
                 fieldNameToColumnNameMap.put(fieldName, columnName);
             } else {

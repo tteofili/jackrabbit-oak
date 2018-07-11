@@ -19,10 +19,21 @@
 
 package org.apache.jackrabbit.oak.plugins.index.lucene.reader;
 
+import static org.apache.jackrabbit.oak.InitialContent.INITIAL_CONTENT;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.TestUtil.newDoc;
+import static org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState.EMPTY_NODE;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
+
+import java.io.File;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
+
 import org.apache.jackrabbit.oak.plugins.blob.datastore.CachingFileDataStore;
 import org.apache.jackrabbit.oak.plugins.blob.datastore.DataStoreBlobStore;
 import org.apache.jackrabbit.oak.plugins.blob.datastore.DataStoreUtils;
-import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants;
 import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.DefaultDirectoryFactory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.DirectoryFactory;
@@ -30,6 +41,7 @@ import org.apache.jackrabbit.oak.plugins.index.lucene.writer.DefaultIndexWriterF
 import org.apache.jackrabbit.oak.plugins.index.lucene.writer.LuceneIndexWriter;
 import org.apache.jackrabbit.oak.plugins.index.lucene.writer.LuceneIndexWriterConfig;
 import org.apache.jackrabbit.oak.plugins.index.search.FieldNames;
+import org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants;
 import org.apache.jackrabbit.oak.spi.mount.MountInfoProvider;
 import org.apache.jackrabbit.oak.spi.mount.Mounts;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
@@ -40,18 +52,6 @@ import org.apache.lucene.index.IndexReader;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
-
-import java.io.File;
-import java.util.List;
-import java.util.concurrent.atomic.AtomicBoolean;
-
-import static org.apache.jackrabbit.oak.InitialContent.INITIAL_CONTENT;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.TestUtil.newDoc;
-import static org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState.EMPTY_NODE;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
 
 public class DefaultIndexReaderFactoryTest {
     @Rule
@@ -204,7 +204,7 @@ public class DefaultIndexReaderFactoryTest {
     private void enabledSuggestorForSomeProp(){
         NodeBuilder prop = builder.child("indexRules").child("nt:base").child("properties").child("prop1");
         prop.setProperty("name", "foo");
-        prop.setProperty(LuceneIndexConstants.PROP_USE_IN_SUGGEST, true);
+        prop.setProperty(FulltextIndexConstants.PROP_USE_IN_SUGGEST, true);
     }
 
     private DefaultIndexWriterFactory newDirectoryFactory(){

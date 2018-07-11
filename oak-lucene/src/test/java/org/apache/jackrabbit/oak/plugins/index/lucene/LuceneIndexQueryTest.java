@@ -16,28 +16,6 @@
  */
 package org.apache.jackrabbit.oak.plugins.index.lucene;
 
-import com.google.common.collect.ImmutableList;
-
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
-
-import org.apache.jackrabbit.oak.Oak;
-import org.apache.jackrabbit.oak.api.ContentRepository;
-import org.apache.jackrabbit.oak.api.PropertyState;
-import org.apache.jackrabbit.oak.api.Tree;
-import org.apache.jackrabbit.oak.api.Type;
-import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexEditorProvider;
-import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexProvider;
-import org.apache.jackrabbit.oak.InitialContent;
-import org.apache.jackrabbit.oak.query.AbstractQueryTest;
-import org.apache.jackrabbit.oak.spi.commit.Observer;
-import org.apache.jackrabbit.oak.spi.query.QueryIndexProvider;
-import org.apache.jackrabbit.oak.spi.security.OpenSecurityProvider;
-import org.junit.Assert;
-import org.junit.Ignore;
-import org.junit.Test;
-
 import static com.google.common.collect.ImmutableList.of;
 import static java.util.Arrays.asList;
 import static junit.framework.Assert.assertEquals;
@@ -48,6 +26,29 @@ import static org.apache.jackrabbit.oak.api.Type.STRINGS;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.TestUtil.useV2;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+
+import org.apache.jackrabbit.oak.InitialContent;
+import org.apache.jackrabbit.oak.Oak;
+import org.apache.jackrabbit.oak.api.ContentRepository;
+import org.apache.jackrabbit.oak.api.PropertyState;
+import org.apache.jackrabbit.oak.api.Tree;
+import org.apache.jackrabbit.oak.api.Type;
+import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexEditorProvider;
+import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexProvider;
+import org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants;
+import org.apache.jackrabbit.oak.query.AbstractQueryTest;
+import org.apache.jackrabbit.oak.spi.commit.Observer;
+import org.apache.jackrabbit.oak.spi.query.QueryIndexProvider;
+import org.apache.jackrabbit.oak.spi.security.OpenSecurityProvider;
+import org.junit.Assert;
+import org.junit.Ignore;
+import org.junit.Test;
+
+import com.google.common.collect.ImmutableList;
 
 /**
  * Tests the query engine using the default index implementation: the
@@ -61,12 +62,12 @@ public class LuceneIndexQueryTest extends AbstractQueryTest {
         Tree indexDefn = createTestIndexNode(index, LuceneIndexConstants.TYPE_LUCENE);
         useV2(indexDefn);
         indexDefn.setProperty(LuceneIndexConstants.TEST_MODE, true);
-        indexDefn.setProperty(LuceneIndexConstants.EVALUATE_PATH_RESTRICTION, true);
+        indexDefn.setProperty(FulltextIndexConstants.EVALUATE_PATH_RESTRICTION, true);
 
         Tree props = TestUtil.newRulePropTree(indexDefn, "nt:base");
-        props.getParent().setProperty(LuceneIndexConstants.INDEX_NODE_NAME, true);
+        props.getParent().setProperty(FulltextIndexConstants.INDEX_NODE_NAME, true);
         TestUtil.enablePropertyIndex(props, "c1/p", false);
-        TestUtil.enableForFullText(props, LuceneIndexConstants.REGEX_ALL_PROPS, true);
+        TestUtil.enableForFullText(props, FulltextIndexConstants.REGEX_ALL_PROPS, true);
         TestUtil.enablePropertyIndex(props, "a/name", false);
         TestUtil.enablePropertyIndex(props, "b/name", false);
         TestUtil.enableFunctionIndex(props, "length([name])");

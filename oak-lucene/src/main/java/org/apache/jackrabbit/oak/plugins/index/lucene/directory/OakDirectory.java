@@ -27,6 +27,7 @@ import org.apache.jackrabbit.oak.commons.StringUtils;
 import org.apache.jackrabbit.oak.plugins.blob.datastore.InMemoryDataRecord;
 import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.ActiveDeletedBlobCollectorFactory.BlobDeletionCallback;
+import org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants;
 import org.apache.jackrabbit.oak.spi.blob.GarbageCollectableBlobStore;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.lucene.store.Directory;
@@ -53,7 +54,6 @@ import static org.apache.jackrabbit.oak.api.Type.BINARIES;
 import static org.apache.jackrabbit.oak.api.Type.BINARY;
 import static org.apache.jackrabbit.oak.api.Type.BOOLEAN;
 import static org.apache.jackrabbit.oak.api.Type.STRINGS;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.INDEX_DATA_CHILD_NAME;
 import static org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState.EMPTY_NODE;
 import static org.apache.jackrabbit.oak.plugins.memory.PropertyStates.createProperty;
 
@@ -87,7 +87,7 @@ public class OakDirectory extends Directory {
     private volatile boolean dirty;
 
     public OakDirectory(NodeBuilder builder, LuceneIndexDefinition definition, boolean readOnly) {
-        this(builder, INDEX_DATA_CHILD_NAME, definition, readOnly);
+        this(builder, FulltextIndexConstants.INDEX_DATA_CHILD_NAME, definition, readOnly);
     }
 
     public OakDirectory(NodeBuilder builder, String dataNodeName, LuceneIndexDefinition definition, boolean readOnly) {

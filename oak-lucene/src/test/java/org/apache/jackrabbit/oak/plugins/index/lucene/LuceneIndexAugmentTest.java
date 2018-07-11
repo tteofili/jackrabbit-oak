@@ -33,6 +33,7 @@ import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexProvider
 import org.apache.jackrabbit.oak.plugins.index.lucene.score.ScorerProviderFactory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.spi.FulltextQueryTermsProvider;
 import org.apache.jackrabbit.oak.plugins.index.lucene.spi.IndexFieldProvider;
+import org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants;
 import org.apache.jackrabbit.oak.plugins.index.search.TextExtractionCache;
 import org.apache.jackrabbit.oak.plugins.nodetype.write.NodeTypeRegistry;
 import org.apache.jackrabbit.oak.query.AbstractQueryTest;
@@ -351,10 +352,10 @@ public class LuceneIndexAugmentTest extends AbstractQueryTest {
         NodeTypeRegistry.register(root, IOUtils.toInputStream(TestUtil.TEST_NODE_TYPE), "test nodeType");
         Tree props = createIndex(TestUtil.NT_TEST);
         Tree prop = props.addChild("foo1");
-        prop.setProperty(LuceneIndexConstants.PROP_INDEX, true);
+        prop.setProperty(FulltextIndexConstants.PROP_INDEX, true);
         prop = props.addChild("foo2");
-        prop.setProperty(LuceneIndexConstants.PROP_NAME, "subChild/foo2");
-        prop.setProperty(LuceneIndexConstants.PROP_INDEX, true);
+        prop.setProperty(FulltextIndexConstants.PROP_NAME, "subChild/foo2");
+        prop.setProperty(FulltextIndexConstants.PROP_INDEX, true);
         root.commit();
 
         //setup augmentors

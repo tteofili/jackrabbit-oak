@@ -30,7 +30,7 @@ import org.apache.jackrabbit.oak.plugins.index.IndexingContext;
 import org.apache.jackrabbit.oak.plugins.index.lucene.IndexTracker;
 import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.lucene.TestUtil;
-import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.IndexingMode;
+import org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.IndexingMode;
 import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexEditor;
 import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexEditorContext;
 import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexEditorProvider;

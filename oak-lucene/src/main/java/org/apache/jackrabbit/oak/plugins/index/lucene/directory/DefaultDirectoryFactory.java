@@ -20,9 +20,9 @@
 package org.apache.jackrabbit.oak.plugins.index.lucene.directory;
 
 import org.apache.jackrabbit.oak.plugins.index.lucene.IndexCopier;
-import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants;
 import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.ActiveDeletedBlobCollectorFactory.BlobDeletionCallback;
+import org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants;
 import org.apache.jackrabbit.oak.spi.blob.GarbageCollectableBlobStore;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.lucene.store.Directory;
@@ -33,7 +33,6 @@ import javax.annotation.Nullable;
 import java.io.File;
 import java.io.IOException;
 
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.PERSISTENCE_PATH;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.SUGGEST_DATA_CHILD_NAME;
 import static org.apache.lucene.store.NoLockFactory.getNoLockFactory;
 
@@ -71,9 +70,9 @@ public class DefaultDirectoryFactory implements DirectoryFactory {
                                         NodeBuilder definition, String dirName)
             throws IOException {
         String path = null;
-        if (LuceneIndexConstants.PERSISTENCE_FILE.equalsIgnoreCase(
-                definition.getString(LuceneIndexConstants.PERSISTENCE_NAME))) {
-            path = definition.getString(PERSISTENCE_PATH);
+        if (FulltextIndexConstants.PERSISTENCE_FILE.equalsIgnoreCase(
+                definition.getString(FulltextIndexConstants.PERSISTENCE_NAME))) {
+            path = definition.getString(FulltextIndexConstants.PERSISTENCE_PATH);
         }
         if (path == null) {
             if (!remoteDirectory()) {

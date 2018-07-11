@@ -192,6 +192,7 @@ public interface FulltextIndexConstants {
 
     /**
      * Config node which include Tika related configuration
+     * Its value should match {@link FieldNames#NODE_NAME}
      */
     String TIKA = "tika";
 

@@ -19,8 +19,31 @@
 
 package org.apache.jackrabbit.oak.plugins.index.lucene;
 
-import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Lists;
+import static com.google.common.collect.ImmutableList.of;
+import static org.apache.jackrabbit.oak.InitialContent.INITIAL_CONTENT;
+import static org.apache.jackrabbit.oak.api.QueryEngine.NO_BINDINGS;
+import static org.apache.jackrabbit.oak.api.Type.STRINGS;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.LucenePropertyIndexTest.createIndex;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.TestUtil.newDoc;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.util.LuceneIndexHelper.newLucenePropertyIndexDefinition;
+import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.ORDERED_PROP_NAMES;
+import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.PROP_NODE;
+import static org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState.EMPTY_NODE;
+import static org.apache.jackrabbit.oak.plugins.memory.PropertyStates.createProperty;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+
+import java.io.File;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Random;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+import javax.jcr.PropertyType;
+
 import org.apache.commons.io.FileUtils;
 import org.apache.jackrabbit.oak.InitialContent;
 import org.apache.jackrabbit.oak.Oak;
@@ -41,6 +64,7 @@ import org.apache.jackrabbit.oak.plugins.index.lucene.writer.LuceneIndexWriterCo
 import org.apache.jackrabbit.oak.plugins.index.lucene.writer.MultiplexersLucene;
 import org.apache.jackrabbit.oak.plugins.index.nodetype.NodeTypeIndexProvider;
 import org.apache.jackrabbit.oak.plugins.index.property.PropertyIndexEditorProvider;
+import org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants;
 import org.apache.jackrabbit.oak.plugins.index.search.TextExtractionCache;
 import org.apache.jackrabbit.oak.plugins.index.search.spi.query.FulltextIndexPlanner;
 import org.apache.jackrabbit.oak.plugins.memory.MemoryNodeStore;
@@ -70,29 +94,8 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
-import javax.jcr.PropertyType;
-import java.io.File;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Random;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-
-import static com.google.common.collect.ImmutableList.of;
-import static org.apache.jackrabbit.oak.InitialContent.INITIAL_CONTENT;
-import static org.apache.jackrabbit.oak.api.QueryEngine.NO_BINDINGS;
-import static org.apache.jackrabbit.oak.api.Type.STRINGS;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.ORDERED_PROP_NAMES;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.PROP_NODE;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LucenePropertyIndexTest.createIndex;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.TestUtil.newDoc;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.util.LuceneIndexHelper.newLucenePropertyIndexDefinition;
-import static org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState.EMPTY_NODE;
-import static org.apache.jackrabbit.oak.plugins.memory.PropertyStates.createProperty;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
+import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Lists;
 
 public class MultiplexingLucenePropertyIndexTest extends AbstractQueryTest {
     private ExecutorService executorService = Executors.newFixedThreadPool(2);
@@ -213,7 +216,7 @@ public class MultiplexingLucenePropertyIndexTest extends AbstractQueryTest {
         Tree idx = createIndex(root.getTree("/"), "test1", ImmutableSet.of("foo", "bar", "baz"));
         idx.setProperty(createProperty(ORDERED_PROP_NAMES, ImmutableSet.of("foo", "baz"), STRINGS));
         Tree propIdx = idx.addChild(PROP_NODE).addChild("baz");
-        propIdx.setProperty(LuceneIndexConstants.PROP_TYPE, PropertyType.TYPENAME_LONG);
+        propIdx.setProperty(FulltextIndexConstants.PROP_TYPE, PropertyType.TYPENAME_LONG);
         root.commit();
 
         int firstPropSize = 25;

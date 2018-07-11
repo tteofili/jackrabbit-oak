@@ -25,6 +25,7 @@ import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants;
 import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.DirectoryFactory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexWriterFactory;
+import org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants;
 import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
 import org.apache.jackrabbit.oak.spi.mount.MountInfoProvider;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
@@ -57,7 +58,7 @@ public class DefaultIndexWriterFactory implements LuceneIndexWriterFactory {
                 definitionBuilder, reindex, writerConfig);
         }
         return new DefaultIndexWriter(definition, definitionBuilder, directoryFactory,
-            LuceneIndexConstants.INDEX_DATA_CHILD_NAME,
-            LuceneIndexConstants.SUGGEST_DATA_CHILD_NAME, reindex, writerConfig);
+                FulltextIndexConstants.INDEX_DATA_CHILD_NAME,
+                LuceneIndexConstants.SUGGEST_DATA_CHILD_NAME, reindex, writerConfig);
     }
 }

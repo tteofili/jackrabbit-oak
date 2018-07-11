@@ -19,11 +19,21 @@
 
 package org.apache.jackrabbit.oak.plugins.index.lucene.reader;
 
-import com.google.common.collect.ImmutableList;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.SUGGEST_DATA_CHILD_NAME;
+
+import java.io.File;
+import java.io.IOException;
+import java.util.Collections;
+import java.util.List;
+
+import javax.annotation.CheckForNull;
+import javax.annotation.Nullable;
+
 import org.apache.jackrabbit.oak.plugins.index.lucene.IndexCopier;
 import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.OakDirectory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.writer.MultiplexersLucene;
+import org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants;
 import org.apache.jackrabbit.oak.spi.mount.Mount;
 import org.apache.jackrabbit.oak.spi.mount.MountInfoProvider;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
@@ -31,18 +41,7 @@ import org.apache.jackrabbit.oak.spi.state.ReadOnlyBuilder;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
 
-import javax.annotation.CheckForNull;
-import javax.annotation.Nullable;
-import java.io.File;
-import java.io.IOException;
-import java.util.Collections;
-import java.util.List;
-
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.INDEX_DATA_CHILD_NAME;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.PERSISTENCE_FILE;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.PERSISTENCE_NAME;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.PERSISTENCE_PATH;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.SUGGEST_DATA_CHILD_NAME;
+import com.google.common.collect.ImmutableList;
 
 public class DefaultIndexReaderFactory implements LuceneIndexReaderFactory {
     private final IndexCopier cloner;
@@ -58,7 +57,7 @@ public class DefaultIndexReaderFactory implements LuceneIndexReaderFactory {
                                                  String indexPath) throws IOException {
         if (!mountInfoProvider.hasNonDefaultMounts()) {
             LuceneIndexReader reader = createReader(definition, defnState, indexPath,
-                    INDEX_DATA_CHILD_NAME, SUGGEST_DATA_CHILD_NAME);
+                    FulltextIndexConstants.INDEX_DATA_CHILD_NAME, SUGGEST_DATA_CHILD_NAME);
             return reader != null ? ImmutableList.of(reader) : Collections.<LuceneIndexReader>emptyList();
         } else {
             return createMountedReaders(definition, defnState, indexPath);
@@ -100,8 +99,9 @@ public class DefaultIndexReaderFactory implements LuceneIndexReaderFactory {
             if (cloner != null) {
                 directory = cloner.wrapForRead(indexPath, definition, directory, indexDataNodeName);
             }
-        } else if (PERSISTENCE_FILE.equalsIgnoreCase(defnNodeState.getString(PERSISTENCE_NAME))) {
-            String path = defnNodeState.getString(PERSISTENCE_PATH);
+        } else if (FulltextIndexConstants.PERSISTENCE_FILE.equalsIgnoreCase(
+                defnNodeState.getString(FulltextIndexConstants.PERSISTENCE_NAME))) {
+            String path = defnNodeState.getString(FulltextIndexConstants.PERSISTENCE_PATH);
             if (path != null && new File(path).exists()) {
                 directory = FSDirectory.open(new File(path));
             }

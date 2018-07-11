@@ -56,6 +56,7 @@ import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.plugins.index.aggregate.SimpleNodeAggregator;
 import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexEditorProvider;
 import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexProvider;
+import org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants;
 import org.apache.jackrabbit.oak.plugins.memory.MemoryNodeStore;
 import org.apache.jackrabbit.oak.plugins.memory.PropertyStates;
 import org.apache.jackrabbit.oak.plugins.name.NamespaceEditorProvider;
@@ -85,16 +86,16 @@ import com.google.common.collect.Lists;
 
 public class LuceneIndexAggregation2Test extends AbstractQueryTest {
     private static final Logger LOG = LoggerFactory.getLogger(LuceneIndexAggregation2Test.class);
-    
+
     private static final String NT_TEST_PAGE = "test:Page";
     private static final String NT_TEST_PAGECONTENT = "test:PageContent";
     private static final String NT_TEST_ASSET = "test:Asset";
     private static final String NT_TEST_ASSETCONTENT = "test:AssetContent";
-    
+
     @Override
     protected ContentRepository createRepository() {
         LuceneIndexProvider provider = new LuceneIndexProvider();
-        
+
         return new Oak()
             .with(new InitialContent() {
 
@@ -140,10 +141,10 @@ public class LuceneIndexAggregation2Test extends AbstractQueryTest {
             .with((Observer) provider).with(new LuceneIndexEditorProvider())
             .createContentRepository();
     }
-    
+
     /**
      * convenience method for printing on logs the currently registered node types.
-     * 
+     *
      * @param builder
      */
     private static void printNodeTypes(NodeBuilder builder) {
@@ -153,7 +154,7 @@ public class LuceneIndexAggregation2Test extends AbstractQueryTest {
             Collections.sort(nodes);
             for (String node : nodes) {
                 LOG.debug(node);
-            }        
+            }
         }
     }
 
@@ -174,23 +175,23 @@ public class LuceneIndexAggregation2Test extends AbstractQueryTest {
                                 "renditions/original/jcr:content"))
                 .newRuleWithName("rep:User", newArrayList("profile"));
 
-        Tree originalInclude = indexDefn.getChild(LuceneIndexConstants.AGGREGATES)
+        Tree originalInclude = indexDefn.getChild(FulltextIndexConstants.AGGREGATES)
                 .getChild(NT_TEST_ASSET).addChild("includeOriginal");
-        originalInclude.setProperty(LuceneIndexConstants.AGG_RELATIVE_NODE, true);
-        originalInclude.setProperty(LuceneIndexConstants.AGG_PATH, "jcr:content/renditions/original");
+        originalInclude.setProperty(FulltextIndexConstants.AGG_RELATIVE_NODE, true);
+        originalInclude.setProperty(FulltextIndexConstants.AGG_PATH, "jcr:content/renditions/original");
 
-        Tree includeSingleRel = indexDefn.getChild(LuceneIndexConstants.AGGREGATES)
+        Tree includeSingleRel = indexDefn.getChild(FulltextIndexConstants.AGGREGATES)
             .getChild(NT_TEST_ASSET).addChild("includeFirstLevelChild");
-        includeSingleRel.setProperty(LuceneIndexConstants.AGG_RELATIVE_NODE, true);
-        includeSingleRel.setProperty(LuceneIndexConstants.AGG_PATH, "firstLevelChild");
+        includeSingleRel.setProperty(FulltextIndexConstants.AGG_RELATIVE_NODE, true);
+        includeSingleRel.setProperty(FulltextIndexConstants.AGG_PATH, "firstLevelChild");
 
         // Include all properties for both assets and pages
         Tree assetProps = TestUtil.newRulePropTree(indexDefn, NT_TEST_ASSET);
         TestUtil.enableForFullText(assetProps, "jcr:content/metadata/format");
-        TestUtil.enableForFullText(assetProps, LuceneIndexConstants.REGEX_ALL_PROPS, true);
+        TestUtil.enableForFullText(assetProps, FulltextIndexConstants.REGEX_ALL_PROPS, true);
 
         Tree pageProps = TestUtil.newRulePropTree(indexDefn, NT_TEST_PAGE);
-        TestUtil.enableForFullText(pageProps, LuceneIndexConstants.REGEX_ALL_PROPS, true);
+        TestUtil.enableForFullText(pageProps, FulltextIndexConstants.REGEX_ALL_PROPS, true);
 
         root.commit();
     }
@@ -207,7 +208,7 @@ public class LuceneIndexAggregation2Test extends AbstractQueryTest {
                     "renditions/original/jcr:content"))
             .newRuleWithName("rep:User", newArrayList("profile"));
     }
-        
+
     @Test
     public void oak2226() throws Exception {
         setTraversalEnabled(false);
@@ -216,7 +217,7 @@ public class LuceneIndexAggregation2Test extends AbstractQueryTest {
             "and (jcr:contains(jcr:content/metadata/@format, 'image'))]";
         Tree content = root.getTree("/").addChild("content");
         List<String> expected = Lists.newArrayList();
-        
+
         /*
          * creating structure
          *  "/content" : {
@@ -243,8 +244,8 @@ public class LuceneIndexAggregation2Test extends AbstractQueryTest {
          *      }
          *  }
          */
-        
-        
+
+
         // adding a node with 'mountain' property
         Tree node = content.addChild("node");
         node.setProperty(JCR_PRIMARYTYPE, NT_TEST_ASSET, NAME);
@@ -255,7 +256,7 @@ public class LuceneIndexAggregation2Test extends AbstractQueryTest {
         node.setProperty(JCR_PRIMARYTYPE, NT_UNSTRUCTURED, NAME);
         node.setProperty("title", "Lorem mountain ipsum", STRING);
         node.setProperty("format", "image/jpeg", STRING);
-        
+
         // adding a node with 'mountain' name but not property
         node = content.addChild("mountain-node");
         node.setProperty(JCR_PRIMARYTYPE, NT_TEST_ASSET, NAME);
@@ -265,7 +266,7 @@ public class LuceneIndexAggregation2Test extends AbstractQueryTest {
         node = node.addChild("metadata");
         node.setProperty(JCR_PRIMARYTYPE, NT_UNSTRUCTURED, NAME);
         node.setProperty("format", "image/jpeg", STRING);
-        
+
         root.commit();
 
         assertQuery(statement, "xpath", expected);
@@ -278,20 +279,20 @@ public class LuceneIndexAggregation2Test extends AbstractQueryTest {
         final String statement = "//element(*, test:Asset)[ " +
             "( " +
                 "jcr:contains(., 'summer') " +
-                "or " + 
+                "or " +
                 "jcr:content/metadata/@tags = 'namespace:season/summer' " +
             ") and " +
                 "jcr:contains(jcr:content/metadata/@format, 'image') " +
-            "]"; 
-        
+            "]";
+
         Tree content = root.getTree("/").addChild("content");
         List<String> expected = newArrayList();
-        
+
         Tree metadata = createAssetStructure(content, "tagged");
         metadata.setProperty("tags", of("namespace:season/summer"), STRINGS);
         metadata.setProperty("format", "image/jpeg", STRING);
         expected.add("/content/tagged");
-        
+
         metadata = createAssetStructure(content, "titled");
         metadata.setProperty("title", "Lorem summer ipsum", STRING);
         metadata.setProperty("format", "image/jpeg", STRING);
@@ -300,7 +301,7 @@ public class LuceneIndexAggregation2Test extends AbstractQueryTest {
         metadata = createAssetStructure(content, "summer-node");
         metadata.setProperty("format", "image/jpeg", STRING);
         expected.add("/content/summer-node");
-        
+
         // the following is NOT expected
         metadata = createAssetStructure(content, "winter-node");
         metadata.setProperty("tags", of("namespace:season/winter"), STRINGS);
@@ -308,7 +309,7 @@ public class LuceneIndexAggregation2Test extends AbstractQueryTest {
         metadata.setProperty("format", "image/jpeg", STRING);
 
         root.commit();
-        
+
         assertQuery(statement, "xpath", expected);
         setTraversalEnabled(true);
     }
@@ -402,7 +403,7 @@ public class LuceneIndexAggregation2Test extends AbstractQueryTest {
      * <p>
      * convenience method that create an "asset" structure like
      * </p>
-     * 
+     *
      * <pre>
      *  "parent" : {
      *      "nodeName" : {
@@ -416,20 +417,20 @@ public class LuceneIndexAggregation2Test extends AbstractQueryTest {
      *      }
      *  }
      * </pre>
-     * 
+     *
      * <p>
      *  and returns the {@code metadata} node
      * </p>
-     * 
+     *
      * @param parent the parent under which creating the node
      * @param nodeName the node name to be used
      * @return the {@code metadata} node. See above for details
      */
-    private static Tree createAssetStructure(@Nonnull final Tree parent, 
+    private static Tree createAssetStructure(@Nonnull final Tree parent,
                                              @Nonnull final String nodeName) {
         checkNotNull(parent);
         checkArgument(!Strings.isNullOrEmpty(nodeName), "nodeName cannot be null or empty");
-        
+
         Tree node = parent.addChild(nodeName);
         node.setProperty(JCR_PRIMARYTYPE, NT_TEST_ASSET, NAME);
         node = node.addChild(JCR_CONTENT);

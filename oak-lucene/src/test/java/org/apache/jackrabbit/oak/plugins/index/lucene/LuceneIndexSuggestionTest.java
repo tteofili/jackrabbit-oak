@@ -16,20 +16,18 @@
  */
 package org.apache.jackrabbit.oak.plugins.index.lucene;
 
-import org.apache.jackrabbit.JcrConstants;
-import org.apache.jackrabbit.api.JackrabbitSession;
-import org.apache.jackrabbit.commons.jackrabbit.authorization.AccessControlUtils;
-import org.apache.jackrabbit.oak.jcr.Jcr;
-import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexEditorProvider;
-import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexProvider;
-import org.apache.jackrabbit.oak.plugins.index.search.IndexFormatVersion;
-import org.apache.jackrabbit.oak.spi.commit.Observer;
-import org.apache.jackrabbit.oak.spi.query.QueryIndexProvider;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.rules.TemporaryFolder;
+import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.INDEX_DEFINITIONS_NAME;
+import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.INDEX_DEFINITIONS_NODE_TYPE;
+import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.REINDEX_PROPERTY_NAME;
+import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.TYPE_PROPERTY_NAME;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.TestUtil.shutdown;
+import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.INDEX_RULES;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
+
+import java.io.File;
 
 import javax.jcr.Node;
 import javax.jcr.Repository;
@@ -41,18 +39,22 @@ import javax.jcr.query.QueryResult;
 import javax.jcr.query.Row;
 import javax.jcr.query.RowIterator;
 import javax.jcr.security.Privilege;
-import java.io.File;
 
-import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.INDEX_DEFINITIONS_NAME;
-import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.INDEX_DEFINITIONS_NODE_TYPE;
-import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.REINDEX_PROPERTY_NAME;
-import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.TYPE_PROPERTY_NAME;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.INDEX_RULES;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.TestUtil.shutdown;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
+import org.apache.jackrabbit.JcrConstants;
+import org.apache.jackrabbit.api.JackrabbitSession;
+import org.apache.jackrabbit.commons.jackrabbit.authorization.AccessControlUtils;
+import org.apache.jackrabbit.oak.jcr.Jcr;
+import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexEditorProvider;
+import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexProvider;
+import org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants;
+import org.apache.jackrabbit.oak.plugins.index.search.IndexFormatVersion;
+import org.apache.jackrabbit.oak.spi.commit.Observer;
+import org.apache.jackrabbit.oak.spi.query.QueryIndexProvider;
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 
 @SuppressWarnings("ConstantConditions")
 public class LuceneIndexSuggestionTest {
@@ -97,15 +99,15 @@ public class LuceneIndexSuggestionTest {
         def.setProperty(TYPE_PROPERTY_NAME, LuceneIndexConstants.TYPE_LUCENE);
         def.setProperty(REINDEX_PROPERTY_NAME, true);
         def.setProperty("name", name);
-        def.setProperty(LuceneIndexConstants.COMPAT_MODE, IndexFormatVersion.V2.getVersion());
+        def.setProperty(FulltextIndexConstants.COMPAT_MODE, IndexFormatVersion.V2.getVersion());
         if (suggestAnalyzed) {
-            def.addNode(LuceneIndexConstants.SUGGESTION_CONFIG).setProperty("suggestAnalyzed", suggestAnalyzed);
+            def.addNode(FulltextIndexConstants.SUGGESTION_CONFIG).setProperty("suggestAnalyzed", suggestAnalyzed);
         }
 
 
         Node propertyIdxDef = def.addNode(INDEX_RULES, JcrConstants.NT_UNSTRUCTURED)
                 .addNode(indexedNodeType, JcrConstants.NT_UNSTRUCTURED)
-                .addNode(LuceneIndexConstants.PROP_NODE, JcrConstants.NT_UNSTRUCTURED)
+                .addNode(FulltextIndexConstants.PROP_NODE, JcrConstants.NT_UNSTRUCTURED)
                 .addNode("indexedProperty", JcrConstants.NT_UNSTRUCTURED);
         propertyIdxDef.setProperty("propertyIndex", true);
         propertyIdxDef.setProperty("analyzed", true);
@@ -193,7 +195,7 @@ public class LuceneIndexSuggestionTest {
     public void suggestNodeName() throws Exception {
         final String nodeType = "nt:unstructured";
 
-        createSuggestIndex("lucene-suggest", nodeType, LuceneIndexConstants.PROPDEF_PROP_NODE_NAME);
+        createSuggestIndex("lucene-suggest", nodeType, FulltextIndexConstants.PROPDEF_PROP_NODE_NAME);
 
         root.addNode("indexedNode", nodeType);
         session.save();

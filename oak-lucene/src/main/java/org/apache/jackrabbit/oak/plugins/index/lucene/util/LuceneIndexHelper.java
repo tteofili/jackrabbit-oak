@@ -24,13 +24,6 @@ import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.ASYNC_PROPE
 import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.INDEX_DEFINITIONS_NODE_TYPE;
 import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.REINDEX_PROPERTY_NAME;
 import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.TYPE_PROPERTY_NAME;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.EXCLUDE_PROPERTY_NAMES;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.EXPERIMENTAL_STORAGE;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.INCLUDE_PROPERTY_NAMES;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.INCLUDE_PROPERTY_TYPES;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.PERSISTENCE_FILE;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.PERSISTENCE_NAME;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.PERSISTENCE_PATH;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.TYPE_LUCENE;
 import static org.apache.jackrabbit.oak.plugins.memory.PropertyStates.createProperty;
 
@@ -39,7 +32,7 @@ import java.util.Set;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
-import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants;
+import org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants;
 import org.apache.jackrabbit.oak.plugins.index.search.util.IndexHelper;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
@@ -79,15 +72,15 @@ public class LuceneIndexHelper {
             index.setProperty(ASYNC_PROPERTY_NAME, async);
         }
         if (propertyTypes != null && !propertyTypes.isEmpty()) {
-            index.setProperty(createProperty(INCLUDE_PROPERTY_TYPES,
+            index.setProperty(createProperty(FulltextIndexConstants.INCLUDE_PROPERTY_TYPES,
                     propertyTypes, STRINGS));
         }
         if (excludes != null && !excludes.isEmpty()) {
-            index.setProperty(createProperty(EXCLUDE_PROPERTY_NAMES, excludes,
+            index.setProperty(createProperty(FulltextIndexConstants.EXCLUDE_PROPERTY_NAMES, excludes,
                     STRINGS));
         }
         if (stored != null) {
-            index.setProperty(createProperty(EXPERIMENTAL_STORAGE, stored));
+            index.setProperty(createProperty(FulltextIndexConstants.EXPERIMENTAL_STORAGE, stored));
         }
         return index;
     }
@@ -110,18 +103,18 @@ public class LuceneIndexHelper {
         index = index.child(name);
         index.setProperty(JCR_PRIMARYTYPE, INDEX_DEFINITIONS_NODE_TYPE, NAME)
                 .setProperty(TYPE_PROPERTY_NAME, TYPE_LUCENE)
-                .setProperty(PERSISTENCE_NAME, PERSISTENCE_FILE)
-                .setProperty(PERSISTENCE_PATH, path)
+                .setProperty(FulltextIndexConstants.PERSISTENCE_NAME, FulltextIndexConstants.PERSISTENCE_FILE)
+                .setProperty(FulltextIndexConstants.PERSISTENCE_PATH, path)
                 .setProperty(REINDEX_PROPERTY_NAME, true);
         if (async != null) {
             index.setProperty(ASYNC_PROPERTY_NAME, async);
         }
         if (propertyTypes != null && !propertyTypes.isEmpty()) {
-            index.setProperty(createProperty(INCLUDE_PROPERTY_TYPES,
+            index.setProperty(createProperty(FulltextIndexConstants.INCLUDE_PROPERTY_TYPES,
                     propertyTypes, STRINGS));
         }
         if (excludes != null && !excludes.isEmpty()) {
-            index.setProperty(createProperty(EXCLUDE_PROPERTY_NAMES, excludes,
+            index.setProperty(createProperty(FulltextIndexConstants.EXCLUDE_PROPERTY_NAMES, excludes,
                     STRINGS));
         }
         return index;
@@ -138,8 +131,8 @@ public class LuceneIndexHelper {
         index.setProperty(JCR_PRIMARYTYPE, INDEX_DEFINITIONS_NODE_TYPE, NAME)
                 .setProperty(TYPE_PROPERTY_NAME, TYPE_LUCENE)
                 .setProperty(REINDEX_PROPERTY_NAME, true);
-        index.setProperty(LuceneIndexConstants.FULL_TEXT_ENABLED, false);
-        index.setProperty(createProperty(INCLUDE_PROPERTY_NAMES, includes, STRINGS));
+        index.setProperty(FulltextIndexConstants.FULL_TEXT_ENABLED, false);
+        index.setProperty(createProperty(FulltextIndexConstants.INCLUDE_PROPERTY_NAMES, includes, STRINGS));
 
         if (async != null) {
             index.setProperty(ASYNC_PROPERTY_NAME, async);

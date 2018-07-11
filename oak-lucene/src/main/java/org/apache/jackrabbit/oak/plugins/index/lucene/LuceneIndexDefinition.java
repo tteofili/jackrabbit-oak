@@ -23,6 +23,7 @@ import com.google.common.collect.ImmutableMap;
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.TokenizerChain;
 import org.apache.jackrabbit.oak.plugins.index.lucene.writer.CommitMitigatingTieredMergePolicy;
 import org.apache.jackrabbit.oak.plugins.index.search.FieldNames;
+import org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants;
 import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.search.IndexFormatVersion;
 import org.apache.jackrabbit.oak.spi.state.ChildNodeEntry;
@@ -76,7 +77,7 @@ public class LuceneIndexDefinition extends IndexDefinition {
         super(root, defn, version, uid, indexPath);
 
         this.saveDirListing = getOptionalValue(defn, LuceneIndexConstants.SAVE_DIR_LISTING, true);
-        this.maxFieldLength = getOptionalValue(defn, LuceneIndexConstants.MAX_FIELD_LENGTH, DEFAULT_MAX_FIELD_LENGTH);
+        this.maxFieldLength = getOptionalValue(defn, FulltextIndexConstants.MAX_FIELD_LENGTH, DEFAULT_MAX_FIELD_LENGTH);
         this.analyzers = collectAnalyzers(defn);
         this.analyzer = createAnalyzer();
         this.codec = createCodec();

@@ -47,6 +47,7 @@ import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexProvider
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.IndexDefinitionBuilder;
 import org.apache.jackrabbit.oak.plugins.index.nodetype.NodeTypeIndexProvider;
 import org.apache.jackrabbit.oak.plugins.index.property.PropertyIndexEditorProvider;
+import org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants;
 import org.apache.jackrabbit.oak.plugins.memory.MemoryNodeStore;
 import org.apache.jackrabbit.oak.plugins.memory.PropertyStates;
 import org.apache.jackrabbit.oak.InitialContent;
@@ -65,7 +66,7 @@ public class FunctionIndexTest extends AbstractQueryTest {
     private LuceneIndexEditorProvider editorProvider;
 
     private NodeStore nodeStore;
-    
+
     @Override
     protected ContentRepository createRepository() {
         editorProvider = new LuceneIndexEditorProvider();
@@ -81,7 +82,7 @@ public class FunctionIndexTest extends AbstractQueryTest {
                 .with(new NodeTypeIndexProvider())
                 .createContentRepository();
     }
-    
+
     @Test
     public void noIndexTest() throws Exception {
         Tree test = root.getTree("/").addChild("test");
@@ -92,11 +93,11 @@ public class FunctionIndexTest extends AbstractQueryTest {
             up.setProperty("jcr:primaryType", "nt:unstructured", Type.NAME);
         }
         root.commit();
-        
+
         String query = "select [jcr:path] from [nt:base] where lower(localname()) = 'b'";
         assertThat(explain(query), containsString("traverse"));
         assertQuery(query, Lists.newArrayList("/test/b", "/test/B"));
-        
+
         String queryXPath = "/jcr:root/test//*[fn:lower-case(fn:local-name()) = 'b']";
         assertThat(explainXpath(queryXPath), containsString("traverse"));
         assertQuery(queryXPath, "xpath", Lists.newArrayList("/test/b", "/test/B"));
@@ -109,17 +110,17 @@ public class FunctionIndexTest extends AbstractQueryTest {
         assertThat(explain(query), containsString("traverse"));
         assertQuery(query, Lists.<String>newArrayList());
     }
-    
+
     @Test
     public void lowerCaseLocalName() throws Exception {
         Tree luceneIndex = createIndex("lowerLocalName", Collections.<String>emptySet());
-        luceneIndex.setProperty("excludedPaths", 
+        luceneIndex.setProperty("excludedPaths",
                 Lists.newArrayList("/jcr:system", "/oak:index"), Type.STRINGS);
-        Tree func = luceneIndex.addChild(LuceneIndexConstants.INDEX_RULES)
+        Tree func = luceneIndex.addChild(FulltextIndexConstants.INDEX_RULES)
                 .addChild("nt:base")
-                .addChild(LuceneIndexConstants.PROP_NODE)
+                .addChild(FulltextIndexConstants.PROP_NODE)
                 .addChild("lowerLocalName");
-        func.setProperty(LuceneIndexConstants.PROP_FUNCTION, "lower(localname())");
+        func.setProperty(FulltextIndexConstants.PROP_FUNCTION, "lower(localname())");
 
         Tree test = root.getTree("/").addChild("test");
         for (int idx = 0; idx < 3; idx++) {
@@ -133,7 +134,7 @@ public class FunctionIndexTest extends AbstractQueryTest {
         String query = "select [jcr:path] from [nt:base] where lower(localname()) = 'b'";
         assertThat(explain(query), containsString("lucene:lowerLocalName"));
         assertQuery(query, Lists.newArrayList("/test/b", "/test/B"));
-        
+
         String queryXPath = "/jcr:root//*[fn:lower-case(fn:local-name()) = 'b']";
         assertThat(explainXpath(queryXPath), containsString("lucene:lowerLocalName"));
         assertQuery(queryXPath, "xpath", Lists.newArrayList("/test/b", "/test/B"));
@@ -146,19 +147,19 @@ public class FunctionIndexTest extends AbstractQueryTest {
         assertThat(explain(query), containsString("lucene:lowerLocalName"));
         assertQuery(query, Lists.<String>newArrayList());
     }
-    
+
     @Test
     public void lengthName() throws Exception {
         Tree luceneIndex = createIndex("lengthName", Collections.<String>emptySet());
-        luceneIndex.setProperty("excludedPaths", 
+        luceneIndex.setProperty("excludedPaths",
                 Lists.newArrayList("/jcr:system", "/oak:index"), Type.STRINGS);
-        Tree func = luceneIndex.addChild(LuceneIndexConstants.INDEX_RULES)
+        Tree func = luceneIndex.addChild(FulltextIndexConstants.INDEX_RULES)
                 .addChild("nt:base")
-                .addChild(LuceneIndexConstants.PROP_NODE)
+                .addChild(FulltextIndexConstants.PROP_NODE)
                 .addChild("lengthName");
-        func.setProperty(LuceneIndexConstants.PROP_ORDERED, true);
-        func.setProperty(LuceneIndexConstants.PROP_TYPE, PropertyType.TYPENAME_LONG);
-        func.setProperty(LuceneIndexConstants.PROP_FUNCTION, "fn:string-length(fn:name())");
+        func.setProperty(FulltextIndexConstants.PROP_ORDERED, true);
+        func.setProperty(FulltextIndexConstants.PROP_TYPE, PropertyType.TYPENAME_LONG);
+        func.setProperty(FulltextIndexConstants.PROP_FUNCTION, "fn:string-length(fn:name())");
 
         Tree test = root.getTree("/").addChild("test");
         for (int idx = 1; idx < 1000; idx *= 10) {
@@ -170,7 +171,7 @@ public class FunctionIndexTest extends AbstractQueryTest {
         String query = "select [jcr:path] from [nt:base] where length(name()) = 6";
         assertThat(explain(query), containsString("lucene:lengthName"));
         assertQuery(query, Lists.newArrayList("/test/test10"));
-        
+
         String queryXPath = "/jcr:root//*[fn:string-length(fn:name()) = 7]";
         assertThat(explainXpath(queryXPath), containsString("lucene:lengthName"));
         assertQuery(queryXPath, "xpath", Lists.newArrayList("/test/test100"));
@@ -180,17 +181,17 @@ public class FunctionIndexTest extends AbstractQueryTest {
         assertQuery(queryXPath, "xpath", Lists.newArrayList(
                 "/test", "/test/test1", "/test/test10", "/test/test100"));
     }
-    
+
     @Test
     public void length() throws Exception {
         Tree luceneIndex = createIndex("length", Collections.<String>emptySet());
-        luceneIndex.setProperty("excludedPaths", 
+        luceneIndex.setProperty("excludedPaths",
                 Lists.newArrayList("/jcr:system", "/oak:index"), Type.STRINGS);
-        Tree func = luceneIndex.addChild(LuceneIndexConstants.INDEX_RULES)
+        Tree func = luceneIndex.addChild(FulltextIndexConstants.INDEX_RULES)
                 .addChild("nt:base")
-                .addChild(LuceneIndexConstants.PROP_NODE)
+                .addChild(FulltextIndexConstants.PROP_NODE)
                 .addChild("lengthName");
-        func.setProperty(LuceneIndexConstants.PROP_FUNCTION, "fn:string-length(@value)");
+        func.setProperty(FulltextIndexConstants.PROP_FUNCTION, "fn:string-length(@value)");
 
         Tree test = root.getTree("/").addChild("test");
         for (int idx = 1; idx <= 1000; idx *= 10) {
@@ -203,20 +204,20 @@ public class FunctionIndexTest extends AbstractQueryTest {
         String query = "select [jcr:path] from [nt:base] where length([value]) = 100";
         assertThat(explain(query), containsString("lucene:length"));
         assertQuery(query, Lists.newArrayList("/test/test100"));
-        
+
         String queryXPath = "/jcr:root//*[fn:string-length(@value) = 10]";
         assertThat(explainXpath(queryXPath), containsString("lucene:length"));
         assertQuery(queryXPath, "xpath", Lists.newArrayList("/test/test10"));
     }
-    
+
     @Test
     public void upperCase() throws Exception {
         Tree luceneIndex = createIndex("upper", Collections.<String>emptySet());
-        Tree func = luceneIndex.addChild(LuceneIndexConstants.INDEX_RULES)
+        Tree func = luceneIndex.addChild(FulltextIndexConstants.INDEX_RULES)
                 .addChild("nt:base")
-                .addChild(LuceneIndexConstants.PROP_NODE)
+                .addChild(FulltextIndexConstants.PROP_NODE)
                 .addChild("upperName");
-        func.setProperty(LuceneIndexConstants.PROP_FUNCTION, "fn:upper-case(@name)");
+        func.setProperty(FulltextIndexConstants.PROP_FUNCTION, "fn:upper-case(@name)");
 
         Tree test = root.getTree("/").addChild("test");
         test.setProperty("jcr:primaryType", "nt:unstructured", Type.NAME);
@@ -233,20 +234,20 @@ public class FunctionIndexTest extends AbstractQueryTest {
         String query = "select [jcr:path] from [nt:unstructured] where upper([name]) = '10% FOO'";
         assertThat(explain(query), containsString("lucene:upper"));
         assertQuery(query, paths);
-        
+
         query = "select [jcr:path] from [nt:unstructured] where upper([name]) like '10\\% FOO'";
         assertThat(explain(query), containsString("lucene:upper"));
-        assertQuery(query, paths);        
+        assertQuery(query, paths);
     }
 
     @Test
     public void upperCaseRelative() throws Exception {
         Tree luceneIndex = createIndex("upper", Collections.<String>emptySet());
-        Tree func = luceneIndex.addChild(LuceneIndexConstants.INDEX_RULES)
+        Tree func = luceneIndex.addChild(FulltextIndexConstants.INDEX_RULES)
                 .addChild("nt:base")
-                .addChild(LuceneIndexConstants.PROP_NODE)
+                .addChild(FulltextIndexConstants.PROP_NODE)
                 .addChild("upperName");
-        func.setProperty(LuceneIndexConstants.PROP_FUNCTION, "upper([data/name])");
+        func.setProperty(FulltextIndexConstants.PROP_FUNCTION, "upper([data/name])");
 
         Tree test = root.getTree("/").addChild("test");
         test.setProperty("jcr:primaryType", "nt:unstructured", Type.NAME);
@@ -265,22 +266,22 @@ public class FunctionIndexTest extends AbstractQueryTest {
         String query = "select [jcr:path] from [nt:unstructured] where upper([data/name]) = 'FOO'";
         assertThat(explain(query), containsString("lucene:upper"));
         assertQuery(query, paths);
-        
+
         String queryXPath = "/jcr:root//element(*, nt:unstructured)[fn:upper-case(data/@name) = 'FOO']";
         assertThat(explainXpath(queryXPath), containsString("lucene:upper"));
         assertQuery(queryXPath, "xpath", paths);
-        
+
         for (int idx = 0; idx < 15; idx++) {
             Tree a = test.getChild("n"+idx);
             Tree b = a.getChild("data");
             b.setProperty("name", "bar");
         }
         root.commit();
-        
+
         query = "select [jcr:path] from [nt:unstructured] where upper([data/name]) = 'BAR'";
         assertThat(explain(query), containsString("lucene:upper"));
         assertQuery(query, paths);
-        
+
         queryXPath = "/jcr:root//element(*, nt:unstructured)[fn:upper-case(data/@name) = 'BAR']";
         assertThat(explainXpath(queryXPath), containsString("lucene:upper"));
         assertQuery(queryXPath, "xpath", paths);
@@ -369,17 +370,17 @@ public class FunctionIndexTest extends AbstractQueryTest {
         Tree index = root.getTree("/");
         return createIndex(index, name, propNames);
     }
-    
+
     static Tree createIndex(Tree index, String name, Set<String> propNames) {
         Tree def = index.addChild(INDEX_DEFINITIONS_NAME).addChild(name);
         def.setProperty(JcrConstants.JCR_PRIMARYTYPE,
                 INDEX_DEFINITIONS_NODE_TYPE, Type.NAME);
         def.setProperty(TYPE_PROPERTY_NAME, LuceneIndexConstants.TYPE_LUCENE);
         def.setProperty(REINDEX_PROPERTY_NAME, true);
-        def.setProperty(LuceneIndexConstants.FULL_TEXT_ENABLED, false);
-        def.setProperty(PropertyStates.createProperty(LuceneIndexConstants.INCLUDE_PROPERTY_NAMES, propNames, Type.STRINGS));
+        def.setProperty(FulltextIndexConstants.FULL_TEXT_ENABLED, false);
+        def.setProperty(PropertyStates.createProperty(FulltextIndexConstants.INCLUDE_PROPERTY_NAMES, propNames, Type.STRINGS));
         def.setProperty(LuceneIndexConstants.SAVE_DIR_LISTING, true);
         return index.getChild(INDEX_DEFINITIONS_NAME).getChild(name);
-    }    
+    }
 
 }

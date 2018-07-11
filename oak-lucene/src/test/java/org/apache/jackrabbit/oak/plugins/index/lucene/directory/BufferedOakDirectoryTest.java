@@ -16,8 +16,21 @@
  */
 package org.apache.jackrabbit.oak.plugins.index.lucene.directory;
 
-import ch.qos.logback.classic.Level;
-import com.google.common.collect.Sets;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.directory.BufferedOakDirectory.DELETE_THRESHOLD_UNTIL_REOPEN;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.directory.BufferedOakDirectory.ENABLE_WRITING_SINGLE_BLOB_INDEX_FILE_PARAM;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.directory.BufferedOakDirectory.reReadCommandLineParam;
+import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.INDEX_DATA_CHILD_NAME;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.util.Arrays;
+import java.util.Random;
+import java.util.Set;
+
 import org.apache.commons.io.FileUtils;
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.commons.junit.LogCustomizer;
@@ -31,20 +44,9 @@ import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.store.IndexOutput;
 import org.junit.Test;
 
-import java.io.FileNotFoundException;
-import java.io.IOException;
-import java.util.Arrays;
-import java.util.Random;
-import java.util.Set;
+import com.google.common.collect.Sets;
 
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.INDEX_DATA_CHILD_NAME;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.directory.BufferedOakDirectory.DELETE_THRESHOLD_UNTIL_REOPEN;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.directory.BufferedOakDirectory.ENABLE_WRITING_SINGLE_BLOB_INDEX_FILE_PARAM;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.directory.BufferedOakDirectory.reReadCommandLineParam;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
+import ch.qos.logback.classic.Level;
 
 public class BufferedOakDirectoryTest {
 

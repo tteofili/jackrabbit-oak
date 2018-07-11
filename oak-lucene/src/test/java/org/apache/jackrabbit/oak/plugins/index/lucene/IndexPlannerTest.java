@@ -26,11 +26,11 @@ import static org.apache.jackrabbit.oak.api.Type.NAMES;
 import static org.apache.jackrabbit.oak.api.Type.STRINGS;
 import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.DECLARING_NODE_TYPES;
 import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.INDEX_DEFINITIONS_NAME;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.EVALUATE_PATH_RESTRICTION;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.INDEX_DATA_CHILD_NAME;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.INDEX_RULES;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.ORDERED_PROP_NAMES;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.PROP_FUNCTION;
+import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.EVALUATE_PATH_RESTRICTION;
+import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.INDEX_DATA_CHILD_NAME;
+import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.INDEX_RULES;
+import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.ORDERED_PROP_NAMES;
+import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.PROP_FUNCTION;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.VERSION;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexStatistics.SYNTHETICALLY_FALLIABLE_FIELD;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.TestUtil.NT_TEST;
@@ -66,6 +66,7 @@ import org.apache.jackrabbit.oak.plugins.index.lucene.reader.DefaultIndexReader;
 import org.apache.jackrabbit.oak.plugins.index.lucene.reader.LuceneIndexReader;
 import org.apache.jackrabbit.oak.plugins.index.lucene.reader.LuceneIndexReaderFactory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.IndexDefinitionBuilder;
+import org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants;
 import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.search.spi.query.FulltextIndex;
 import org.apache.jackrabbit.oak.plugins.index.search.spi.query.FulltextIndexPlanner;
@@ -194,7 +195,7 @@ public class IndexPlannerTest {
     @Test
     public void purePropertyIndexAndPathRestriction() throws Exception{
         NodeBuilder defn = newLucenePropertyIndexDefinition(builder, "test", of("foo"), "async");
-        defn.setProperty(LuceneIndexConstants.EVALUATE_PATH_RESTRICTION, true);
+        defn.setProperty(FulltextIndexConstants.EVALUATE_PATH_RESTRICTION, true);
         LuceneIndexNode node = createIndexNode(new LuceneIndexDefinition(root, defn.getNodeState(), "/foo"));
         FilterImpl filter = createFilter("nt:base");
         filter.restrictPath("/content", Filter.PathRestriction.ALL_CHILDREN);
@@ -205,11 +206,11 @@ public class IndexPlannerTest {
     @Test
     public void fulltextIndexAndPathRestriction() throws Exception{
         NodeBuilder defn = newLucenePropertyIndexDefinition(builder, "test", of("foo"), "async");
-        defn.setProperty(LuceneIndexConstants.EVALUATE_PATH_RESTRICTION, true);
+        defn.setProperty(FulltextIndexConstants.EVALUATE_PATH_RESTRICTION, true);
 
         defn = LuceneIndexDefinition.updateDefinition(defn.getNodeState().builder());
         NodeBuilder foob = getNode(defn, "indexRules/nt:base/properties/foo");
-        foob.setProperty(LuceneIndexConstants.PROP_NODE_SCOPE_INDEX, true);
+        foob.setProperty(FulltextIndexConstants.PROP_NODE_SCOPE_INDEX, true);
 
         LuceneIndexNode node = createIndexNode(new LuceneIndexDefinition(root, defn.getNodeState(), "/foo"));
         FilterImpl filter = createFilter("nt:base");
@@ -224,12 +225,12 @@ public class IndexPlannerTest {
     @Test
     public void fulltextIndexAndNodeTypeRestriction() throws Exception{
         NodeBuilder defn = newLucenePropertyIndexDefinition(builder, "test", of("foo"), "async");
-        defn.setProperty(LuceneIndexConstants.EVALUATE_PATH_RESTRICTION, true);
+        defn.setProperty(FulltextIndexConstants.EVALUATE_PATH_RESTRICTION, true);
         defn.setProperty(IndexConstants.DECLARING_NODE_TYPES, of("nt:file"), NAMES);
 
         defn = LuceneIndexDefinition.updateDefinition(defn.getNodeState().builder());
         NodeBuilder foob = getNode(defn, "indexRules/nt:file/properties/foo");
-        foob.setProperty(LuceneIndexConstants.PROP_NODE_SCOPE_INDEX, true);
+        foob.setProperty(FulltextIndexConstants.PROP_NODE_SCOPE_INDEX, true);
 
         LuceneIndexNode node = createIndexNode(new LuceneIndexDefinition(root, defn.getNodeState(),"/foo"));
         FilterImpl filter = createFilter("nt:file");
@@ -245,7 +246,7 @@ public class IndexPlannerTest {
         NodeBuilder index = builder.child(INDEX_DEFINITIONS_NAME);
         NodeBuilder defn = newLuceneIndexDefinition(index, "lucene",
                 of(TYPENAME_STRING));
-        defn.setProperty(LuceneIndexConstants.EVALUATE_PATH_RESTRICTION, true);
+        defn.setProperty(FulltextIndexConstants.EVALUATE_PATH_RESTRICTION, true);
         TestUtil.useV2(defn);
 
         FilterImpl filter = createFilter("nt:file");
@@ -262,7 +263,7 @@ public class IndexPlannerTest {
     @Test
     public void purePropertyIndexAndNodeTypeRestriction() throws Exception{
         NodeBuilder defn = newLucenePropertyIndexDefinition(builder, "test", of("foo"), "async");
-        defn.setProperty(LuceneIndexConstants.EVALUATE_PATH_RESTRICTION, true);
+        defn.setProperty(FulltextIndexConstants.EVALUATE_PATH_RESTRICTION, true);
         defn.setProperty(IndexConstants.DECLARING_NODE_TYPES, of("nt:file"), NAMES);
 
         LuceneIndexNode node = createIndexNode(new LuceneIndexDefinition(root, defn.getNodeState(), "/foo"));
@@ -275,11 +276,11 @@ public class IndexPlannerTest {
     @Test
     public void purePropertyIndexAndNodeTypeRestriction2() throws Exception{
         NodeBuilder defn = newLucenePropertyIndexDefinition(builder, "test", of("foo"), "async");
-        defn.setProperty(LuceneIndexConstants.EVALUATE_PATH_RESTRICTION, true);
+        defn.setProperty(FulltextIndexConstants.EVALUATE_PATH_RESTRICTION, true);
 
         defn = LuceneIndexDefinition.updateDefinition(defn.getNodeState().builder());
         NodeBuilder foob = getNode(defn, "indexRules/nt:base/properties/foo");
-        foob.setProperty(LuceneIndexConstants.PROP_NODE_SCOPE_INDEX, true);
+        foob.setProperty(FulltextIndexConstants.PROP_NODE_SCOPE_INDEX, true);
 
         LuceneIndexNode node = createIndexNode(new LuceneIndexDefinition(root, defn.getNodeState(), "/foo"));
         FilterImpl filter = createFilter("nt:file");
@@ -292,12 +293,12 @@ public class IndexPlannerTest {
     @Test
     public void purePropertyIndexAndNodeTypeRestriction3() throws Exception{
         NodeBuilder defn = newLucenePropertyIndexDefinition(builder, "test", of("foo"), "async");
-        defn.setProperty(LuceneIndexConstants.EVALUATE_PATH_RESTRICTION, true);
+        defn.setProperty(FulltextIndexConstants.EVALUATE_PATH_RESTRICTION, true);
         defn.setProperty(IndexConstants.DECLARING_NODE_TYPES, of("nt:file"), NAMES);
 
         defn = LuceneIndexDefinition.updateDefinition(defn.getNodeState().builder());
         NodeBuilder foob = getNode(defn, "indexRules/nt:file/properties/foo");
-        foob.setProperty(LuceneIndexConstants.PROP_NODE_SCOPE_INDEX, true);
+        foob.setProperty(FulltextIndexConstants.PROP_NODE_SCOPE_INDEX, true);
 
         LuceneIndexNode node = createIndexNode(new LuceneIndexDefinition(root, defn.getNodeState(), "/foo"));
         FilterImpl filter = createFilter("nt:file");
@@ -348,8 +349,8 @@ public class IndexPlannerTest {
     @Test
     public void propertyIndexCost2() throws Exception{
         NodeBuilder defn = newLucenePropertyIndexDefinition(builder, "test", of("foo"), "async");
-        defn.setProperty(LuceneIndexConstants.COST_PER_ENTRY, 2.0);
-        defn.setProperty(LuceneIndexConstants.COST_PER_EXECUTION, 3.0);
+        defn.setProperty(FulltextIndexConstants.COST_PER_ENTRY, 2.0);
+        defn.setProperty(FulltextIndexConstants.COST_PER_EXECUTION, 3.0);
 
         long numofDocs = IndexDefinition.DEFAULT_ENTRY_COUNT - 100;
         LuceneIndexNode node = createIndexNode(new LuceneIndexDefinition(root, defn.getNodeState(), "/foo"), numofDocs);
@@ -432,9 +433,9 @@ public class IndexPlannerTest {
         NodeBuilder defn = newLucenePropertyIndexDefinition(builder, "test", of("foo"), "async");
         NodeBuilder rules = defn.child(INDEX_RULES);
         TestUtil.child(rules, "oak:TestNode/properties/prop2")
-                .setProperty(LuceneIndexConstants.PROP_NAME, "foo")
-                .setProperty(LuceneIndexConstants.PROP_NULL_CHECK_ENABLED, true)
-                .setProperty(LuceneIndexConstants.PROP_PROPERTY_INDEX, true);
+                .setProperty(FulltextIndexConstants.PROP_NAME, "foo")
+                .setProperty(FulltextIndexConstants.PROP_NULL_CHECK_ENABLED, true)
+                .setProperty(FulltextIndexConstants.PROP_PROPERTY_INDEX, true);
 
         LuceneIndexDefinition idxDefn = new LuceneIndexDefinition(root, builder.getNodeState().getChildNode("test"), "/foo");
         LuceneIndexNode node = createIndexNode(idxDefn);
@@ -491,11 +492,11 @@ public class IndexPlannerTest {
     @Test
     public void noPlanForFulltextQueryAndOnlyAnalyzedProperties() throws Exception{
         NodeBuilder defn = newLucenePropertyIndexDefinition(builder, "test", of("foo"), "async");
-        defn.setProperty(LuceneIndexConstants.EVALUATE_PATH_RESTRICTION, true);
+        defn.setProperty(FulltextIndexConstants.EVALUATE_PATH_RESTRICTION, true);
 
         defn = LuceneIndexDefinition.updateDefinition(defn.getNodeState().builder());
         NodeBuilder foob = getNode(defn, "indexRules/nt:base/properties/foo");
-        foob.setProperty(LuceneIndexConstants.PROP_ANALYZED, true);
+        foob.setProperty(FulltextIndexConstants.PROP_ANALYZED, true);
 
         LuceneIndexNode node = createIndexNode(new LuceneIndexDefinition(root, defn.getNodeState(), "/foo"));
         FilterImpl filter = createFilter("nt:base");
@@ -509,12 +510,12 @@ public class IndexPlannerTest {
     @Test
     public void noPlanForNodeTypeQueryAndOnlyAnalyzedProperties() throws Exception{
         NodeBuilder defn = newLucenePropertyIndexDefinition(builder, "test", of("foo"), "async");
-        defn.setProperty(LuceneIndexConstants.EVALUATE_PATH_RESTRICTION, true);
+        defn.setProperty(FulltextIndexConstants.EVALUATE_PATH_RESTRICTION, true);
         defn.setProperty(IndexConstants.DECLARING_NODE_TYPES, of("nt:file"), NAMES);
 
         defn = LuceneIndexDefinition.updateDefinition(defn.getNodeState().builder());
         NodeBuilder foob = getNode(defn, "indexRules/nt:file/properties/foo");
-        foob.setProperty(LuceneIndexConstants.PROP_ANALYZED, true);
+        foob.setProperty(FulltextIndexConstants.PROP_ANALYZED, true);
 
         LuceneIndexNode node = createIndexNode(new LuceneIndexDefinition(root, defn.getNodeState(), "/foo"));
         FilterImpl filter = createFilter("nt:file");
@@ -662,7 +663,7 @@ public class IndexPlannerTest {
 
         defn = LuceneIndexDefinition.updateDefinition(defn.getNodeState().builder());
         NodeBuilder foob = getNode(defn, "indexRules/nt:base/properties/foo");
-        foob.setProperty(LuceneIndexConstants.PROP_ANALYZED, true);
+        foob.setProperty(FulltextIndexConstants.PROP_ANALYZED, true);
 
         FulltextIndexPlanner planner = createPlannerForFulltext(defn.getNodeState(), FullTextParser.parse("bar", "mountain"));
 
@@ -677,9 +678,9 @@ public class IndexPlannerTest {
         //Index all props and then perform fulltext
         defn = LuceneIndexDefinition.updateDefinition(defn.getNodeState().builder());
         NodeBuilder foob = getNode(defn, "indexRules/nt:base/properties/allProps");
-        foob.setProperty(LuceneIndexConstants.PROP_NAME, LuceneIndexConstants.REGEX_ALL_PROPS);
-        foob.setProperty(LuceneIndexConstants.PROP_ANALYZED, true);
-        foob.setProperty(LuceneIndexConstants.PROP_IS_REGEX, true);
+        foob.setProperty(FulltextIndexConstants.PROP_NAME, FulltextIndexConstants.REGEX_ALL_PROPS);
+        foob.setProperty(FulltextIndexConstants.PROP_ANALYZED, true);
+        foob.setProperty(FulltextIndexConstants.PROP_IS_REGEX, true);
 
         FullTextExpression exp = FullTextParser.parse("bar", "mountain OR valley");
         exp = new FullTextContains("bar", "mountain OR valley", exp);
@@ -696,10 +697,10 @@ public class IndexPlannerTest {
         //Index all props and then perform fulltext
         defn = LuceneIndexDefinition.updateDefinition(defn.getNodeState().builder());
         NodeBuilder foob = getNode(defn, "indexRules/nt:base/properties/allProps");
-        foob.setProperty(LuceneIndexConstants.PROP_NAME, LuceneIndexConstants.REGEX_ALL_PROPS);
-        foob.setProperty(LuceneIndexConstants.PROP_ANALYZED, true);
-        foob.setProperty(LuceneIndexConstants.PROP_NODE_SCOPE_INDEX, true);
-        foob.setProperty(LuceneIndexConstants.PROP_IS_REGEX, true);
+        foob.setProperty(FulltextIndexConstants.PROP_NAME, FulltextIndexConstants.REGEX_ALL_PROPS);
+        foob.setProperty(FulltextIndexConstants.PROP_ANALYZED, true);
+        foob.setProperty(FulltextIndexConstants.PROP_NODE_SCOPE_INDEX, true);
+        foob.setProperty(FulltextIndexConstants.PROP_IS_REGEX, true);
 
         //where contains('jcr:content/*', 'mountain OR valley') can be evaluated by index
         //on nt:base by evaluating on '.' and then checking if node name is 'jcr:content'
@@ -716,9 +717,9 @@ public class IndexPlannerTest {
 
         //Index all props and then perform fulltext
         defn = LuceneIndexDefinition.updateDefinition(defn.getNodeState().builder());
-        NodeBuilder agg = defn.child(LuceneIndexConstants.AGGREGATES).child("nt:base").child("include0");
-        agg.setProperty(LuceneIndexConstants.AGG_PATH, "jcr:content");
-        agg.setProperty(LuceneIndexConstants.AGG_RELATIVE_NODE, true);
+        NodeBuilder agg = defn.child(FulltextIndexConstants.AGGREGATES).child("nt:base").child("include0");
+        agg.setProperty(FulltextIndexConstants.AGG_PATH, "jcr:content");
+        agg.setProperty(FulltextIndexConstants.AGG_RELATIVE_NODE, true);
 
         //where contains('jcr:content/*', 'mountain OR valley') can be evaluated by index
         //on nt:base by evaluating on '.' and then checking if node name is 'jcr:content'
@@ -736,8 +737,8 @@ public class IndexPlannerTest {
         //Index all props and then perform fulltext
         defn = LuceneIndexDefinition.updateDefinition(defn.getNodeState().builder());
         NodeBuilder foob = getNode(defn, "indexRules/nt:base/properties/foo");
-        foob.setProperty(LuceneIndexConstants.PROP_NAME, "foo");
-        foob.setProperty(LuceneIndexConstants.PROP_ANALYZED, true);
+        foob.setProperty(FulltextIndexConstants.PROP_NAME, "foo");
+        foob.setProperty(FulltextIndexConstants.PROP_ANALYZED, true);
 
         //where contains('jcr:content/*', 'mountain OR valley') can be evaluated by index
         //on nt:base by evaluating on '.' and then checking if node name is 'jcr:content'
@@ -755,11 +756,11 @@ public class IndexPlannerTest {
         //Index all props and then perform fulltext
         defn = LuceneIndexDefinition.updateDefinition(defn.getNodeState().builder());
         NodeBuilder foob = getNode(defn, "indexRules/nt:base/properties/foo");
-        foob.setProperty(LuceneIndexConstants.PROP_NAME, "foo");
+        foob.setProperty(FulltextIndexConstants.PROP_NAME, "foo");
 
         NodeBuilder barb = getNode(defn, "indexRules/nt:base/properties/bar");
-        barb.setProperty(LuceneIndexConstants.PROP_NAME, "bar");
-        barb.setProperty(LuceneIndexConstants.PROP_ANALYZED, true);
+        barb.setProperty(FulltextIndexConstants.PROP_NAME, "bar");
+        barb.setProperty(FulltextIndexConstants.PROP_ANALYZED, true);
 
         //where contains('jcr:content/*', 'mountain OR valley') can be evaluated by index
         //on nt:base by evaluating on '.' and then checking if node name is 'jcr:content'
@@ -777,12 +778,12 @@ public class IndexPlannerTest {
         //Index all props and then perform fulltext
         defn = LuceneIndexDefinition.updateDefinition(defn.getNodeState().builder());
         NodeBuilder foob = getNode(defn, "indexRules/nt:base/properties/foo");
-        foob.setProperty(LuceneIndexConstants.PROP_NAME, "foo");
-        foob.setProperty(LuceneIndexConstants.PROP_ANALYZED, true);
+        foob.setProperty(FulltextIndexConstants.PROP_NAME, "foo");
+        foob.setProperty(FulltextIndexConstants.PROP_ANALYZED, true);
 
         NodeBuilder barb = getNode(defn, "indexRules/nt:base/properties/bar");
-        barb.setProperty(LuceneIndexConstants.PROP_NAME, "bar");
-        barb.setProperty(LuceneIndexConstants.PROP_ANALYZED, true);
+        barb.setProperty(FulltextIndexConstants.PROP_NAME, "bar");
+        barb.setProperty(FulltextIndexConstants.PROP_ANALYZED, true);
 
 
         //where contains('jcr:content/bar', 'mountain OR valley') and contains('jcr:content/foo', 'mountain OR valley')
@@ -805,12 +806,12 @@ public class IndexPlannerTest {
         //Index all props and then perform fulltext
         defn = LuceneIndexDefinition.updateDefinition(defn.getNodeState().builder());
         NodeBuilder foob = getNode(defn, "indexRules/nt:base/properties/foo");
-        foob.setProperty(LuceneIndexConstants.PROP_NAME, "foo");
-        foob.setProperty(LuceneIndexConstants.PROP_ANALYZED, true);
+        foob.setProperty(FulltextIndexConstants.PROP_NAME, "foo");
+        foob.setProperty(FulltextIndexConstants.PROP_ANALYZED, true);
 
         NodeBuilder barb = getNode(defn, "indexRules/nt:base/properties/bar");
-        barb.setProperty(LuceneIndexConstants.PROP_NAME, "bar");
-        barb.setProperty(LuceneIndexConstants.PROP_ANALYZED, true);
+        barb.setProperty(FulltextIndexConstants.PROP_NAME, "bar");
+        barb.setProperty(FulltextIndexConstants.PROP_ANALYZED, true);
 
         FullTextExpression fooExp = FullTextParser.parse("metadata/bar", "mountain OR valley");
         FullTextExpression barExp = FullTextParser.parse("jcr:content/foo", "mountain OR valley");
@@ -1238,11 +1239,11 @@ public class IndexPlannerTest {
 
         defn = LuceneIndexDefinition.updateDefinition(defn.getNodeState().builder());
         NodeBuilder foob = getNode(defn, "indexRules/" + nodeType + "/properties/foo");
-        foob.setProperty(LuceneIndexConstants.PROP_ANALYZED, true);
+        foob.setProperty(FulltextIndexConstants.PROP_ANALYZED, true);
         if (enableSuggestion) {
-            foob.setProperty(LuceneIndexConstants.PROP_USE_IN_SUGGEST, true);
+            foob.setProperty(FulltextIndexConstants.PROP_USE_IN_SUGGEST, true);
         } if (enableSpellcheck) {
-            foob.setProperty(LuceneIndexConstants.PROP_USE_IN_SPELLCHECK, true);
+            foob.setProperty(FulltextIndexConstants.PROP_USE_IN_SPELLCHECK, true);
         }
 
         LuceneIndexDefinition indexDefinition = new LuceneIndexDefinition(root, defn.getNodeState(), "/foo");

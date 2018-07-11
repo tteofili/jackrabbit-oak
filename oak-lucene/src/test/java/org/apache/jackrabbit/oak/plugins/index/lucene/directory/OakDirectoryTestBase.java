@@ -19,8 +19,37 @@
 
 package org.apache.jackrabbit.oak.plugins.index.lucene.directory;
 
-import com.google.common.collect.Iterables;
-import com.google.common.collect.Sets;
+import static com.google.common.collect.Sets.newHashSet;
+import static org.apache.commons.io.FileUtils.ONE_GB;
+import static org.apache.commons.io.FileUtils.ONE_MB;
+import static org.apache.jackrabbit.JcrConstants.JCR_DATA;
+import static org.apache.jackrabbit.oak.InitialContent.INITIAL_CONTENT;
+import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.INDEX_DATA_CHILD_NAME;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.directory.OakDirectory.PROP_BLOB_SIZE;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.directory.OakDirectory.PROP_UNIQUE_KEY;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.directory.OakDirectory.PROP_UNSAFE_FOR_ACTIVE_DELETION;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.directory.OakDirectory.UNIQUE_KEY_SIZE;
+import static org.hamcrest.CoreMatchers.containsString;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertThat;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Random;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.io.input.NullInputStream;
 import org.apache.jackrabbit.core.data.FileDataStore;
@@ -31,6 +60,7 @@ import org.apache.jackrabbit.oak.plugins.blob.BlobStoreBlob;
 import org.apache.jackrabbit.oak.plugins.blob.datastore.DataStoreBlobStore;
 import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants;
 import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexDefinition;
+import org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants;
 import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
 import org.apache.jackrabbit.oak.plugins.memory.ArrayBasedBlob;
 import org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState;
@@ -55,36 +85,8 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
-import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.IOException;
-import java.io.InputStream;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Random;
-import java.util.Set;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
-
-import static com.google.common.collect.Sets.newHashSet;
-import static org.apache.commons.io.FileUtils.ONE_GB;
-import static org.apache.commons.io.FileUtils.ONE_MB;
-import static org.apache.jackrabbit.JcrConstants.JCR_DATA;
-import static org.apache.jackrabbit.oak.InitialContent.INITIAL_CONTENT;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.INDEX_DATA_CHILD_NAME;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.directory.OakDirectory.PROP_BLOB_SIZE;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.directory.OakDirectory.PROP_UNIQUE_KEY;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.directory.OakDirectory.PROP_UNSAFE_FOR_ACTIVE_DELETION;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.directory.OakDirectory.UNIQUE_KEY_SIZE;
-import static org.hamcrest.CoreMatchers.containsString;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertThat;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
+import com.google.common.collect.Iterables;
+import com.google.common.collect.Sets;
 
 abstract public class OakDirectoryTestBase {
     @Rule
@@ -106,7 +108,7 @@ abstract public class OakDirectoryTestBase {
 
     @Test
     public void testCompatibility() throws Exception{
-        builder.setProperty(LuceneIndexConstants.BLOB_SIZE, OakBufferedIndexFile.DEFAULT_BLOB_SIZE);
+        builder.setProperty(FulltextIndexConstants.BLOB_SIZE, OakBufferedIndexFile.DEFAULT_BLOB_SIZE);
         Directory dir = createDir(builder, false, "/foo");
         byte[] data = assertWrites(dir, OakBufferedIndexFile.DEFAULT_BLOB_SIZE);
 
@@ -431,7 +433,7 @@ abstract public class OakDirectoryTestBase {
         int blobSize = minFileSize + 1000;
 
         builder = nodeStore.getRoot().builder();
-        builder.setProperty(LuceneIndexConstants.BLOB_SIZE, blobSize);
+        builder.setProperty(FulltextIndexConstants.BLOB_SIZE, blobSize);
         Directory dir = createDir(builder, false, indexPath);
 
         blobStore.startFailing();

@@ -20,7 +20,7 @@
 package org.apache.jackrabbit.oak.plugins.index.lucene.hybrid;
 
 import org.apache.jackrabbit.oak.plugins.index.lucene.IndexCopier;
-import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.IndexingMode;
+import org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.IndexingMode;
 import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexEditorContext;
 import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.lucene.TestUtil;

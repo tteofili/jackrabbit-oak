@@ -18,6 +18,12 @@
  */
 package org.apache.jackrabbit.oak.jcr.query;
 
+import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.REINDEX_PROPERTY_NAME;
+import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.SUGGESTION_CONFIG;
+import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.SUGGEST_UPDATE_FREQUENCY_MINUTES;
+
+import java.util.List;
+
 import javax.jcr.Node;
 import javax.jcr.RepositoryException;
 import javax.jcr.Session;
@@ -26,16 +32,12 @@ import javax.jcr.query.QueryManager;
 import javax.jcr.query.QueryResult;
 import javax.jcr.query.Row;
 import javax.jcr.query.RowIterator;
-import java.util.List;
 
-import com.google.common.collect.Lists;
 import org.apache.jackrabbit.core.query.AbstractQueryTest;
 import org.junit.After;
 import org.junit.Before;
 
-import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.REINDEX_PROPERTY_NAME;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.SUGGESTION_CONFIG;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.SUGGEST_UPDATE_FREQUENCY_MINUTES;
+import com.google.common.collect.Lists;
 
 /**
  * Tests the suggest support.

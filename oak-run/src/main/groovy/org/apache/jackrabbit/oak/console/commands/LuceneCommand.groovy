@@ -41,7 +41,7 @@ import org.apache.jackrabbit.oak.spi.state.NodeBuilder as OakNodeBuilder
 import javax.annotation.Nonnull
 
 import static com.google.common.base.Preconditions.checkNotNull
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.INDEX_DATA_CHILD_NAME
+import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.INDEX_DATA_CHILD_NAME
 
 class LuceneCommand extends ComplexCommandSupport {
     public static final String COMMAND_NAME = 'lucene'
