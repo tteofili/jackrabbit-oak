@@ -28,12 +28,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import javax.jcr.PropertyType;
 
 import com.google.common.collect.Iterables;
+import org.apache.jackrabbit.oak.api.Blob;
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.commons.PathUtils;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
-
 import org.apache.jackrabbit.oak.plugins.index.search.Aggregate;
 import org.apache.jackrabbit.oak.plugins.index.search.FieldNames;
 import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
@@ -42,12 +40,13 @@ import org.apache.jackrabbit.oak.plugins.index.search.spi.binary.FulltextBinaryT
 import org.apache.jackrabbit.oak.plugins.index.search.util.FunctionIndexProcessor;
 import org.apache.jackrabbit.oak.plugins.memory.StringPropertyState;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 import static org.apache.jackrabbit.oak.commons.PathUtils.getName;
-
 import static org.apache.jackrabbit.oak.plugins.index.search.util.ConfigUtil.getPrimaryTypeName;
 
 /**
@@ -211,7 +210,15 @@ public abstract class FulltextDocumentMaker<D> implements DocumentMaker<D> {
         boolean includeTypeForFullText = indexingRule.includePropertyType(property.getType().tag());
 
         boolean dirty = false;
-        if (Type.BINARY.tag() == property.getType().tag()
+        if (Type.BINARY.tag() == property.getType().tag() && pd.useInSimilarity) {
+            try {
+                log.trace("indexing similarity binaries for {}", pd.name);
+                indexSimilarityBinaries(doc, pd, property.getValue(Type.BINARY));
+                dirty = true;
+            } catch (Exception e) {
+                log.error("could not index similarity field for property {} and definition {}", property, pd);
+            }
+        } else if (Type.BINARY.tag() == property.getType().tag()
                 && includeTypeForFullText) {
             List<String> binaryValues = newBinary(property, state, path + "@" + pname);
             addBinary(doc, null, binaryValues);
@@ -242,6 +249,15 @@ public abstract class FulltextDocumentMaker<D> implements DocumentMaker<D> {
 
                     if (pd.nodeScopeIndex) {
                         indexFulltextValue(doc, value);
+                        if (pd.useInSimilarity) {
+                            log.trace("indexing similarity strings for {}", pd.name);
+                            try {
+                                // fallback for when feature vectors are written in string typed properties
+                                indexSimilarityStrings(doc, pd, value);
+                            } catch (Exception e) {
+                                log.error("could not index similarity field for property {} and definition {}", property, pd);
+                            }
+                        }
                     }
                     dirty = true;
                 }
@@ -254,6 +270,10 @@ public abstract class FulltextDocumentMaker<D> implements DocumentMaker<D> {
 
         return dirty;
     }
+
+    protected abstract void indexSimilarityBinaries(D doc, PropertyDefinition pd, Blob blob) throws IOException;
+
+    protected abstract void indexSimilarityStrings(D doc, PropertyDefinition pd, String value) throws IOException;
 
     private boolean addTypedFields(D doc, PropertyState property, String pname, PropertyDefinition pd) {
         return indexTypedProperty(doc, property, pname, pd);

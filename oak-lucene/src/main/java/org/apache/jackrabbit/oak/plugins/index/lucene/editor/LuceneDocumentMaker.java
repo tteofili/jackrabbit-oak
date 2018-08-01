@@ -22,6 +22,7 @@ package org.apache.jackrabbit.oak.plugins.index.lucene.editor;
 import java.io.IOException;
 import java.util.List;
 
+import org.apache.jackrabbit.oak.api.Blob;
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.commons.PathUtils;
@@ -59,6 +60,7 @@ import static org.apache.jackrabbit.oak.plugins.index.lucene.FieldFactory.newDep
 import static org.apache.jackrabbit.oak.plugins.index.lucene.FieldFactory.newFulltextField;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.FieldFactory.newPathField;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.FieldFactory.newPropertyField;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.FieldFactory.newSimilarityFields;
 
 public class LuceneDocumentMaker extends FulltextDocumentMaker<Document> {
     private static final Logger log = LoggerFactory.getLogger(LuceneDocumentMaker.class);
@@ -315,5 +317,19 @@ public class LuceneDocumentMaker extends FulltextDocumentMaker<Document> {
     @Override
     protected void indexNodeName(Document doc, String value) {
         doc.add(new StringField(FieldNames.NODE_NAME, value, Field.Store.NO));
+    }
+
+    @Override
+    protected void indexSimilarityStrings(Document doc, PropertyDefinition pd, String value) throws IOException {
+        for (Field f : FieldFactory.newSimilarityFields(pd.name, value)) {
+            doc.add(f);
+        }
+    }
+
+    @Override
+    protected void indexSimilarityBinaries(Document doc, PropertyDefinition pd, Blob blob) throws IOException {
+        for (Field f : FieldFactory.newSimilarityFields(pd.name, blob)) {
+            doc.add(f);
+        }
     }
 }

@@ -107,7 +107,7 @@ public final class FieldFactory {
         return new StringField(name, value, NO);
     }
 
-    static Collection<Field> newSimilarityFields(String name, Blob value) throws IOException {
+    public static Collection<Field> newSimilarityFields(String name, Blob value) throws IOException {
         Collection<Field> fields = new ArrayList<>(1);
         byte[] bytes = new BlobByteSource(value).read();
 //        fields.add(newBinarySimilarityField(name, bytes));
@@ -115,7 +115,7 @@ public final class FieldFactory {
         return fields;
     }
 
-    static Collection<Field> newSimilarityFields(String name, String value) {
+    public static Collection<Field> newSimilarityFields(String name, String value) {
         Collection<Field> fields = new ArrayList<>(1);
 //        byte[] bytes = SimSearchUtils.toByteArray(value);
 //        fields.add(newBinarySimilarityField(name, bytes));

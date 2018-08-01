@@ -45,6 +45,7 @@ import org.apache.jackrabbit.oak.api.PropertyValue;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.commons.PerfLogger;
+import org.apache.jackrabbit.oak.plugins.index.lucene.util.fv.SimSearchUtils;
 import org.apache.jackrabbit.oak.plugins.index.search.FieldNames;
 import org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants;
 import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
@@ -773,7 +774,7 @@ public class LuceneIndex extends FulltextIndex {
      * @param reader the Lucene reader
      * @return the Lucene query
      */
-    protected LuceneRequestFacade getLuceneRequest(IndexPlan plan, IndexAugmentorFactory augmentorFactory, IndexReader reader) {
+    private static LuceneRequestFacade getLuceneRequest(IndexPlan plan, IndexAugmentorFactory augmentorFactory, IndexReader reader) {
         FulltextQueryTermsProvider augmentor = getIndexAgumentor(plan, augmentorFactory);
         List<Query> qs = new ArrayList<Query>();
         Filter filter = plan.getFilter();
@@ -802,9 +803,20 @@ public class LuceneIndex extends FulltextIndex {
             if (query.startsWith("mlt?")) {
                 String mltQueryString = query.replace("mlt?", "");
                 if (reader != null) {
-                    Query moreLikeThis = MoreLikeThisHelper.getMoreLikeThis(reader, analyzer, mltQueryString);
-                    if (moreLikeThis != null) {
-                        qs.add(moreLikeThis);
+                    List<PropertyDefinition> sp = new LinkedList<>();
+                    for (IndexingRule r : defn.getDefinedRules()) {
+                        sp.addAll(r.getSimilarityProperties());
+                    }
+                    if (sp.isEmpty()) {
+                        Query moreLikeThis = MoreLikeThisHelper.getMoreLikeThis(reader, analyzer, mltQueryString);
+                        if (moreLikeThis != null) {
+                            qs.add(moreLikeThis);
+                        }
+                    } else {
+                        Query similarityQuery = SimSearchUtils.getSimilarityQuery(sp, reader, mltQueryString);
+                        if (similarityQuery != null) {
+                            qs.add(similarityQuery);
+                        }
                     }
                 }
             } else if (query.startsWith("spellcheck?")) {
@@ -829,7 +841,7 @@ public class LuceneIndex extends FulltextIndex {
         }
 
         if (qs.size() == 0
-                && plan.getSortOrder() != null) {
+            && plan.getSortOrder() != null) {
             //This case indicates that query just had order by and no
             //property restriction defined. In this case property
             //existence queries for each sort entry

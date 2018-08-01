@@ -142,6 +142,8 @@ import com.google.common.collect.Sets;
  * </ul>
  * <p>
  * <pre>{@code
+ * <pre>{@code
+ * {
  * {
  *     NodeBuilder index = root.child("oak:index");
  *     index.child("lucene")
