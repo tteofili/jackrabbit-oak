@@ -28,9 +28,13 @@ import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.commons.CIHelper;
 import org.apache.jackrabbit.oak.plugins.index.IndexConstants;
+import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexEditorProvider;
+import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexProvider;
 import org.apache.jackrabbit.oak.plugins.index.lucene.score.ScorerProviderFactory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.spi.FulltextQueryTermsProvider;
 import org.apache.jackrabbit.oak.plugins.index.lucene.spi.IndexFieldProvider;
+import org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants;
+import org.apache.jackrabbit.oak.plugins.index.search.ExtractedTextCache;
 import org.apache.jackrabbit.oak.plugins.nodetype.write.NodeTypeRegistry;
 import org.apache.jackrabbit.oak.query.AbstractQueryTest;
 import org.apache.jackrabbit.oak.spi.commit.Observer;
@@ -64,7 +68,7 @@ public class LuceneIndexAugmentTest extends AbstractQueryTest {
 
     private IndexTracker tracker = new IndexTracker();
 
-    private IndexNode indexNode;
+    private LuceneIndexNode indexNode;
 
     @Override
     protected void createTestIndexNode() throws Exception {
@@ -347,10 +351,10 @@ public class LuceneIndexAugmentTest extends AbstractQueryTest {
         NodeTypeRegistry.register(root, IOUtils.toInputStream(TestUtil.TEST_NODE_TYPE), "test nodeType");
         Tree props = createIndex(TestUtil.NT_TEST);
         Tree prop = props.addChild("foo1");
-        prop.setProperty(LuceneIndexConstants.PROP_INDEX, true);
+        prop.setProperty(FulltextIndexConstants.PROP_INDEX, true);
         prop = props.addChild("foo2");
-        prop.setProperty(LuceneIndexConstants.PROP_NAME, "subChild/foo2");
-        prop.setProperty(LuceneIndexConstants.PROP_INDEX, true);
+        prop.setProperty(FulltextIndexConstants.PROP_NAME, "subChild/foo2");
+        prop.setProperty(FulltextIndexConstants.PROP_INDEX, true);
         root.commit();
 
         //setup augmentors

@@ -24,7 +24,6 @@ import static org.apache.commons.io.FileUtils.ONE_GB;
 import static org.apache.commons.io.FileUtils.ONE_MB;
 import static org.apache.jackrabbit.JcrConstants.JCR_DATA;
 import static org.apache.jackrabbit.oak.InitialContentHelper.INITIAL_CONTENT;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.INDEX_DATA_CHILD_NAME;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.directory.OakDirectory.PROP_BLOB_SIZE;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.directory.OakDirectory.PROP_UNIQUE_KEY;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.directory.OakDirectory.PROP_UNSAFE_FOR_ACTIVE_DELETION;
@@ -51,8 +50,36 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import com.google.common.collect.Iterables;
-import com.google.common.collect.Sets;
+import static com.google.common.collect.Sets.newHashSet;
+import static org.apache.commons.io.FileUtils.ONE_GB;
+import static org.apache.commons.io.FileUtils.ONE_MB;
+import static org.apache.jackrabbit.JcrConstants.JCR_DATA;
+import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.INDEX_DATA_CHILD_NAME;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.directory.OakDirectory.PROP_BLOB_SIZE;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.directory.OakDirectory.PROP_UNIQUE_KEY;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.directory.OakDirectory.PROP_UNSAFE_FOR_ACTIVE_DELETION;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.directory.OakDirectory.UNIQUE_KEY_SIZE;
+import static org.hamcrest.CoreMatchers.containsString;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertThat;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Random;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.io.input.NullInputStream;
 import org.apache.jackrabbit.core.data.FileDataStore;
@@ -61,8 +88,10 @@ import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.plugins.blob.BlobStoreBlob;
 import org.apache.jackrabbit.oak.plugins.blob.datastore.DataStoreBlobStore;
-import org.apache.jackrabbit.oak.plugins.index.lucene.IndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants;
+import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexDefinition;
+import org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants;
+import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
 import org.apache.jackrabbit.oak.plugins.memory.ArrayBasedBlob;
 import org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState;
 import org.apache.jackrabbit.oak.plugins.memory.PropertyStates;
@@ -86,6 +115,9 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
+import com.google.common.collect.Iterables;
+import com.google.common.collect.Sets;
+
 abstract public class OakDirectoryTestBase {
     @Rule
     public TemporaryFolder tempFolder = new TemporaryFolder(new File("target"));
@@ -106,7 +138,7 @@ abstract public class OakDirectoryTestBase {
 
     @Test
     public void testCompatibility() throws Exception{
-        builder.setProperty(LuceneIndexConstants.BLOB_SIZE, OakBufferedIndexFile.DEFAULT_BLOB_SIZE);
+        builder.setProperty(FulltextIndexConstants.BLOB_SIZE, OakBufferedIndexFile.DEFAULT_BLOB_SIZE);
         Directory dir = createDir(builder, false, "/foo");
         byte[] data = assertWrites(dir, OakBufferedIndexFile.DEFAULT_BLOB_SIZE);
 
@@ -370,7 +402,7 @@ abstract public class OakDirectoryTestBase {
                 .withBlobStore(getBlackHoleBlobStore())
                 .build();
         SegmentNodeStore nodeStore = SegmentNodeStoreBuilders.builder(store).build();
-        IndexDefinition defn = new IndexDefinition(INITIAL_CONTENT, EmptyNodeState.EMPTY_NODE, "/foo");
+        LuceneIndexDefinition defn = new LuceneIndexDefinition(INITIAL_CONTENT, EmptyNodeState.EMPTY_NODE, "/foo");
         Directory directory = getOakDirectoryBuilder(nodeStore.getRoot().builder(), defn).setReadOnly(false).build();
 
         long expectedSize = ONE_GB * 2 + ONE_MB;
@@ -431,7 +463,7 @@ abstract public class OakDirectoryTestBase {
         int blobSize = minFileSize + 1000;
 
         builder = nodeStore.getRoot().builder();
-        builder.setProperty(LuceneIndexConstants.BLOB_SIZE, blobSize);
+        builder.setProperty(FulltextIndexConstants.BLOB_SIZE, blobSize);
         Directory dir = createDir(builder, false, indexPath);
 
         blobStore.startFailing();
@@ -480,7 +512,7 @@ abstract public class OakDirectoryTestBase {
 
         final AtomicBoolean identifiableBlob = new AtomicBoolean(false);
 
-        IndexDefinition def = new IndexDefinition(root, builder.getNodeState(), "/foo");
+        LuceneIndexDefinition def = new LuceneIndexDefinition(root, builder.getNodeState(), "/foo");
         BlobFactory factory = new BlobFactory() {
             @Override
             public Blob createBlob(InputStream in) throws IOException {
@@ -535,7 +567,7 @@ abstract public class OakDirectoryTestBase {
     // OAK-7066
     @Test
     public void dontMarkInlinedBlobsFromDataStoreAsDeleted() throws Exception {
-        IndexDefinition def = new IndexDefinition(root, builder.getNodeState(), "/foo");
+        LuceneIndexDefinition def = new LuceneIndexDefinition(root, builder.getNodeState(), "/foo");
 
         final Set<String> deletedFiles = newHashSet();
 
@@ -581,7 +613,7 @@ abstract public class OakDirectoryTestBase {
     // OAK-7066
     @Test
     public void markAllBlobsFromBlobStoreAsDeleted() throws Exception {
-        IndexDefinition def = new IndexDefinition(root, builder.getNodeState(), "/foo");
+        LuceneIndexDefinition def = new LuceneIndexDefinition(root, builder.getNodeState(), "/foo");
 
         final Set<String> deletedFiles = newHashSet();
 
@@ -627,7 +659,7 @@ abstract public class OakDirectoryTestBase {
     public void blobsCreatedWhenActiveDeletionIsUnsafe() throws Exception {
         final int fileSize = 1;
 
-        IndexDefinition def = new IndexDefinition(root, builder.getNodeState(), "/foo");
+        LuceneIndexDefinition def = new LuceneIndexDefinition(root, builder.getNodeState(), "/foo");
         BlobFactory factory = in -> {
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             IOUtils.copy(in, out);
@@ -676,7 +708,7 @@ abstract public class OakDirectoryTestBase {
     @Test
     public void dontReportFilesMarkedUnsafeForActiveDeletion() throws Exception {
         AtomicInteger blobIdSuffix = new AtomicInteger();
-        IndexDefinition def = new IndexDefinition(root, builder.getNodeState(), "/foo");
+        LuceneIndexDefinition def = new LuceneIndexDefinition(root, builder.getNodeState(), "/foo");
         BlobFactory factory = in -> {
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             IOUtils.copy(in, out);
@@ -736,7 +768,7 @@ abstract public class OakDirectoryTestBase {
     public void blobFactory() throws Exception {
         final AtomicInteger numBlobs = new AtomicInteger();
         final int fileSize = 1024;
-        IndexDefinition def = new IndexDefinition(root, builder.getNodeState(), "/foo");
+        LuceneIndexDefinition def = new LuceneIndexDefinition(root, builder.getNodeState(), "/foo");
         BlobFactory factory = new BlobFactory() {
             @Override
             public Blob createBlob(InputStream in) throws IOException {
@@ -794,10 +826,10 @@ abstract public class OakDirectoryTestBase {
     }
 
     OakDirectoryBuilder getOakDirectoryBuilder(NodeBuilder builder, String indexPath) {
-        return getOakDirectoryBuilder(builder, new IndexDefinition(root, builder.getNodeState(), indexPath));
+        return getOakDirectoryBuilder(builder, new LuceneIndexDefinition(root, builder.getNodeState(), indexPath));
     }
 
-    abstract OakDirectoryBuilder getOakDirectoryBuilder(NodeBuilder builder, IndexDefinition indexDefinition);
+    abstract OakDirectoryBuilder getOakDirectoryBuilder(NodeBuilder builder, LuceneIndexDefinition indexDefinition);
 
     abstract MemoryBlobStore getBlackHoleBlobStore();
 
@@ -823,10 +855,10 @@ abstract public class OakDirectoryTestBase {
 
     static class OakDirectoryBuilder {
         private final NodeBuilder builder;
-        private final IndexDefinition defn;
+        private final LuceneIndexDefinition defn;
         private final boolean streamingEnabled;
 
-        public OakDirectoryBuilder(NodeBuilder builder, IndexDefinition defn, boolean streamingEnabled) {
+        public OakDirectoryBuilder(NodeBuilder builder, LuceneIndexDefinition defn, boolean streamingEnabled) {
             this.builder = builder;
             this.defn = defn;
             this.streamingEnabled = streamingEnabled;

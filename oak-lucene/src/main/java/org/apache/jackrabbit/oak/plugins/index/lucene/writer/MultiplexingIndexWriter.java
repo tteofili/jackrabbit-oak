@@ -19,22 +19,21 @@
 
 package org.apache.jackrabbit.oak.plugins.index.lucene.writer;
 
-import java.io.IOException;
-import java.util.Map;
-
-
 import com.google.common.collect.Maps;
-import org.apache.jackrabbit.oak.plugins.index.lucene.IndexDefinition;
+import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.DirectoryFactory;
 import org.apache.jackrabbit.oak.spi.mount.Mount;
 import org.apache.jackrabbit.oak.spi.mount.MountInfoProvider;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.lucene.index.IndexableField;
 
+import java.io.IOException;
+import java.util.Map;
+
 class MultiplexingIndexWriter implements LuceneIndexWriter {
     private final MountInfoProvider mountInfoProvider;
     private final DirectoryFactory directoryFactory;
-    private final IndexDefinition definition;
+    private final LuceneIndexDefinition definition;
     private final NodeBuilder definitionBuilder;
     private final boolean reindex;
     private final LuceneIndexWriterConfig writerConfig;
@@ -42,7 +41,7 @@ class MultiplexingIndexWriter implements LuceneIndexWriter {
     private final Map<Mount, DefaultIndexWriter> writers = Maps.newHashMap();
 
     public MultiplexingIndexWriter(DirectoryFactory directoryFactory, MountInfoProvider mountInfoProvider,
-                                   IndexDefinition definition, NodeBuilder definitionBuilder,
+                                   LuceneIndexDefinition definition, NodeBuilder definitionBuilder,
                                    boolean reindex, LuceneIndexWriterConfig writerConfig) {
         this.mountInfoProvider = mountInfoProvider;
         this.definition = definition;

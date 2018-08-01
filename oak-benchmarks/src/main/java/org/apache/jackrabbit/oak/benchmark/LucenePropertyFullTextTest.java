@@ -55,8 +55,8 @@ import org.apache.jackrabbit.oak.fixture.JcrCreator;
 import org.apache.jackrabbit.oak.fixture.OakRepositoryFixture;
 import org.apache.jackrabbit.oak.fixture.RepositoryFixture;
 import org.apache.jackrabbit.oak.jcr.Jcr;
-import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexEditorProvider;
-import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexProvider;
+import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexEditorProvider;
+import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexProvider;
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.LuceneInitializerHelper;
 import org.apache.jackrabbit.oak.plugins.tree.factories.TreeFactory;
 import org.apache.jackrabbit.oak.spi.commit.Observer;
@@ -74,13 +74,13 @@ import org.slf4j.LoggerFactory;
  * use of the {@link WikipediaImport} to use a Wikipedia dump for content injestion.
  * </p>
  * <p>
- * Suggested dump: 
+ * Suggested dump:
  * <a href="https://dumps.wikimedia.org/enwiki/20150403/enwiki-20150403-pages-articles.xml.bz2">https://dumps.wikimedia.org/enwiki/20150403/enwiki-20150403-pages-articles.xml.bz2</a>
  * </p>
  * <p>
  * Usage example:
  * </p>
- * 
+ *
  * <pre>
  * java -Druntime=900 -Dlogback.configurationFile=logback-benchmark.xml \
  *      -jar ~/.m2/repository/org/apache/jackrabbit/oak-run/1.4-SNAPSHOT/oak-run-1.4-SNAPSHOT.jar \
@@ -93,19 +93,19 @@ import org.slf4j.LoggerFactory;
  */
 public class LucenePropertyFullTextTest extends AbstractTest<LucenePropertyFullTextTest.TestContext> {
     private static final Logger LOG = LoggerFactory.getLogger(LucenePropertyFullTextTest.class);
-    private WikipediaImport importer;    
+    private WikipediaImport importer;
     private Thread asyncImporter;
     private boolean benchmarkCompleted, importerCompleted;
     Boolean storageEnabled;
     String currentFixture, currentTest;
-    
+
     /**
      * context used across the tests
      */
     class TestContext {
         final Session session = loginWriter();
         final String title;
-        
+
         public TestContext(@NotNull final String title) {
             this.title = checkNotNull(title);
         }
@@ -123,12 +123,12 @@ public class LucenePropertyFullTextTest extends AbstractTest<LucenePropertyFullT
             this.name = checkNotNull(name);
             this.properties = checkNotNull(properties);
         }
-                
+
         private boolean isAlreadyThere(@NotNull final NodeBuilder root) {
             return checkNotNull(root).hasChildNode(INDEX_DEFINITIONS_NAME) &&
                 root.getChildNode(INDEX_DEFINITIONS_NAME).hasChildNode(name);
         }
-        
+
         @Override
         public void initialize(final NodeBuilder builder) {
             if (!isAlreadyThere(builder)) {
@@ -139,17 +139,17 @@ public class LucenePropertyFullTextTest extends AbstractTest<LucenePropertyFullT
                 t.setProperty(TYPE_PROPERTY_NAME, TYPE_LUCENE, STRING);
                 t.setProperty(ASYNC_PROPERTY_NAME, "async", STRING);
                 t.setProperty(REINDEX_PROPERTY_NAME, true);
-                
+
                 t = t.addChild(INDEX_RULES);
                 t.setOrderableChildren(true);
                 t.setProperty("jcr:primaryType", "nt:unstructured", NAME);
-                
+
                 t = t.addChild("nt:base");
-                
+
                 Tree propnode = t.addChild(PROP_NODE);
                 propnode.setOrderableChildren(true);
                 propnode.setProperty("jcr:primaryType", "nt:unstructured", NAME);
-                
+
                 for (String p : properties) {
                     Tree t1 = propnode.addChild(PathUtils.getName(p));
                     t1.setProperty(PROP_PROPERTY_INDEX, true, BOOLEAN);
@@ -158,15 +158,15 @@ public class LucenePropertyFullTextTest extends AbstractTest<LucenePropertyFullT
             }
         }
     }
-    
+
     /**
      * reference to the last added title. Used for looking up with queries.
      */
     private AtomicReference<String> lastTitle = new AtomicReference<String>();
-    
-    public LucenePropertyFullTextTest(final File dump, 
-                                      final boolean flat, 
-                                      final boolean doReport, 
+
+    public LucenePropertyFullTextTest(final File dump,
+                                      final boolean flat,
+                                      final boolean doReport,
                                       final Boolean storageEnabled) {
         this.importer = new WikipediaImport(dump, flat, doReport) {
 
@@ -225,7 +225,7 @@ public class LucenePropertyFullTextTest extends AbstractTest<LucenePropertyFullT
         });
         asyncImporter.start();
 
-        // allowing the async index to catch up. 
+        // allowing the async index to catch up.
         TimeUnit.SECONDS.sleep(10);
     }
 
@@ -234,7 +234,7 @@ public class LucenePropertyFullTextTest extends AbstractTest<LucenePropertyFullT
         LOG.debug("afterSuite() - {} - {}", currentFixture, currentTest);
         asyncImporter.join();
     }
-    
+
     @Override
     protected void runTest() throws Exception {
         if (lastTitle.get() == null) {
@@ -251,14 +251,14 @@ public class LucenePropertyFullTextTest extends AbstractTest<LucenePropertyFullT
         final long maxWait = TimeUnit.MINUTES.toMillis(5);
         final long waitUnit = 50;
         long sleptSoFar = 0;
-        
+
         while (!performQuery(ec) && sleptSoFar < maxWait) {
             LOG.trace("title '{}' not found. Waiting and retry. sleptSoFar: {}ms", ec.title,
                 sleptSoFar);
             sleptSoFar += waitUnit;
             TimeUnit.MILLISECONDS.sleep(waitUnit);
         }
-        
+
         if (sleptSoFar < maxWait) {
             // means we exited the loop as we found it.
             LOG.info("{} - {} - title '{}' found with a wait/try of {}ms", currentFixture,
@@ -268,13 +268,13 @@ public class LucenePropertyFullTextTest extends AbstractTest<LucenePropertyFullT
                 currentTest, ec.title, sleptSoFar);
         }
     }
-    
+
     private boolean performQuery(@NotNull final TestContext ec) throws RepositoryException {
         QueryManager qm = ec.session.getWorkspace().getQueryManager();
         ValueFactory vf = ec.session.getValueFactory();
         Query q = qm.createQuery("SELECT * FROM [nt:base] WHERE [title] = $title", Query.JCR_SQL2);
         q.bindValue("title", vf.createValue(ec.title));
-        LOG.trace("statement: {} - title: {}", q.getStatement(), ec.title);        
+        LOG.trace("statement: {} - title: {}", q.getStatement(), ec.title);
         RowIterator rows = q.execute().getRows();
         if (rows.hasNext()) {
             rows.nextRow().getPath();

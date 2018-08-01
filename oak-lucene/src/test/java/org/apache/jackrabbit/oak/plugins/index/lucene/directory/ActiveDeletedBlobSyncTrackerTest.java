@@ -16,12 +16,6 @@
  */
 package org.apache.jackrabbit.oak.plugins.index.lucene.directory;
 
-import java.io.File;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
-
 import org.apache.commons.io.FileUtils;
 import org.apache.jackrabbit.oak.InitialContent;
 import org.apache.jackrabbit.oak.Oak;
@@ -31,12 +25,11 @@ import org.apache.jackrabbit.oak.plugins.blob.datastore.BlobIdTracker;
 import org.apache.jackrabbit.oak.plugins.blob.datastore.DataStoreBlobStore;
 import org.apache.jackrabbit.oak.plugins.blob.datastore.OakFileDataStore;
 import org.apache.jackrabbit.oak.plugins.index.AsyncIndexUpdate;
-import org.apache.jackrabbit.oak.plugins.index.lucene.ExtractedTextCache;
 import org.apache.jackrabbit.oak.plugins.index.lucene.IndexCopier;
-import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexEditorProvider;
-import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexProvider;
-import org.apache.jackrabbit.oak.plugins.index.lucene.directory.ActiveDeletedBlobCollectorFactory
-    .ActiveDeletedBlobCollectorImpl;
+import org.apache.jackrabbit.oak.plugins.index.lucene.directory.ActiveDeletedBlobCollectorFactory.ActiveDeletedBlobCollectorImpl;
+import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexEditorProvider;
+import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexProvider;
+import org.apache.jackrabbit.oak.plugins.index.search.ExtractedTextCache;
 import org.apache.jackrabbit.oak.segment.SegmentNodeStoreBuilders;
 import org.apache.jackrabbit.oak.segment.file.FileStore;
 import org.apache.jackrabbit.oak.segment.file.FileStoreBuilder;
@@ -50,9 +43,14 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
+import java.io.File;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+
 import static com.google.common.collect.ImmutableSet.of;
 import static com.google.common.collect.Lists.newArrayList;
-import static com.google.common.collect.Sets.intersection;
 import static com.google.common.collect.Sets.newHashSet;
 import static org.apache.jackrabbit.oak.spi.cluster.ClusterRepositoryInfo.getOrCreateId;
 import static org.junit.Assert.assertEquals;

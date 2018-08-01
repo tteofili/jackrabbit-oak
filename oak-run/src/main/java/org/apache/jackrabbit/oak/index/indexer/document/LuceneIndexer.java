@@ -24,26 +24,26 @@ import java.util.Set;
 
 import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.plugins.document.NodeDocument;
-import org.apache.jackrabbit.oak.plugins.index.lucene.IndexDefinition;
-import org.apache.jackrabbit.oak.plugins.index.lucene.IndexDefinition.IndexingRule;
-import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneDocumentMaker;
-import org.apache.jackrabbit.oak.plugins.index.lucene.binary.BinaryTextExtractor;
+import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexDefinition;
+import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneDocumentMaker;
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.FacetHelper;
 import org.apache.jackrabbit.oak.plugins.index.lucene.writer.LuceneIndexWriter;
 import org.apache.jackrabbit.oak.plugins.index.progress.IndexingProgressReporter;
+import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition.IndexingRule;
+import org.apache.jackrabbit.oak.plugins.index.search.spi.binary.FulltextBinaryTextExtractor;
 import org.apache.jackrabbit.oak.spi.filter.PathFilter;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.lucene.document.Document;
 
 public class LuceneIndexer implements NodeStateIndexer {
-    private final IndexDefinition definition;
-    private final BinaryTextExtractor binaryTextExtractor;
+    private final LuceneIndexDefinition definition;
+    private final FulltextBinaryTextExtractor binaryTextExtractor;
     private final NodeBuilder definitionBuilder;
     private final LuceneIndexWriter indexWriter;
     private final IndexingProgressReporter progressReporter;
 
-    public LuceneIndexer(IndexDefinition definition, LuceneIndexWriter indexWriter,
-                         NodeBuilder builder, BinaryTextExtractor binaryTextExtractor,
+    public LuceneIndexer(LuceneIndexDefinition definition, LuceneIndexWriter indexWriter,
+                         NodeBuilder builder, FulltextBinaryTextExtractor binaryTextExtractor,
                          IndexingProgressReporter progressReporter) {
         this.definition = definition;
         this.binaryTextExtractor = binaryTextExtractor;

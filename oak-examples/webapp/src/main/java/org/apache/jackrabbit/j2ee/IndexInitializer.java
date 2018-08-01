@@ -35,7 +35,7 @@ import org.apache.jackrabbit.JcrConstants;
 import org.apache.jackrabbit.commons.JcrUtils;
 import org.apache.jackrabbit.oak.api.AuthInfo;
 import org.apache.jackrabbit.oak.plugins.index.IndexConstants;
-import org.apache.jackrabbit.oak.plugins.index.lucene.IndexFormatVersion;
+import org.apache.jackrabbit.oak.plugins.index.search.IndexFormatVersion;
 import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants;
 import org.apache.jackrabbit.oak.spi.security.authentication.AuthInfoImpl;
 import org.apache.jackrabbit.oak.spi.security.principal.AdminPrincipal;

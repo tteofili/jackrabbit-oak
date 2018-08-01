@@ -19,11 +19,11 @@
 
 package org.apache.jackrabbit.oak.index.indexer.document;
 
-import org.apache.jackrabbit.oak.plugins.index.lucene.IndexDefinition;
-import org.apache.jackrabbit.oak.plugins.index.lucene.binary.BinaryTextExtractor;
+import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.IndexDefinitionBuilder;
 import org.apache.jackrabbit.oak.plugins.index.lucene.writer.LuceneIndexWriter;
 import org.apache.jackrabbit.oak.plugins.index.progress.IndexingProgressReporter;
+import org.apache.jackrabbit.oak.plugins.index.search.spi.binary.FulltextBinaryTextExtractor;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.junit.Test;
@@ -43,11 +43,11 @@ public class LuceneIndexerTest {
         idxb.includedPaths("/content");
 
         NodeState defn = idxb.build();
-        IndexDefinition idxDefn = new IndexDefinition(root, defn, "/oak:index/testIndex");
+        LuceneIndexDefinition idxDefn = new LuceneIndexDefinition(root, defn, "/oak:index/testIndex");
 
         NodeBuilder builder = root.builder();
         LuceneIndexer indexer = new LuceneIndexer(idxDefn, mock(LuceneIndexWriter.class), builder,
-                mock(BinaryTextExtractor.class), mock(IndexingProgressReporter.class));
+                mock(FulltextBinaryTextExtractor.class), mock(IndexingProgressReporter.class));
 
         NodeState testNode = EMPTY_NODE.builder().setProperty("foo","bar").getNodeState();
 

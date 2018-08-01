@@ -38,7 +38,7 @@ import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.plugins.index.IndexConstants;
 import org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.IndexingMode;
-import org.apache.jackrabbit.oak.plugins.index.search.util.IndexHelper;
+import org.apache.jackrabbit.oak.plugins.index.search.util.IndexDefinitionUtils;
 import org.apache.jackrabbit.oak.plugins.memory.MemoryNodeStore;
 import org.apache.jackrabbit.oak.plugins.memory.ModifiedNodeState;
 import org.apache.jackrabbit.oak.plugins.name.NamespaceEditorProvider;
@@ -92,7 +92,7 @@ public class TestUtil {
     public static NodeBuilder newFTIndexDefinitionV2(
             @NotNull NodeBuilder index, @NotNull String name, String type,
             @Nullable Set<String> propertyTypes) {
-        NodeBuilder nb = IndexHelper.newFTIndexDefinition(index, name, type, propertyTypes, null, null, null);
+        NodeBuilder nb = IndexDefinitionUtils.newFTIndexDefinition(index, name, type, propertyTypes, null, null, null);
         useV2(nb);
         return nb;
     }
@@ -112,7 +112,7 @@ public class TestUtil {
         prop.setProperty(FulltextIndexConstants.PROP_USE_IN_SPELLCHECK, true);
         return prop;
     }
-    
+
     public static Tree enableForOrdered(Tree props, String propName) {
         Tree prop = enablePropertyIndex(props, propName, false);
         prop.setProperty("ordered", true);

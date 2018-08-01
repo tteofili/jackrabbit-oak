@@ -19,6 +19,19 @@
 
 package org.apache.jackrabbit.oak.plugins.index.lucene.hybrid;
 
+import static com.google.common.collect.ImmutableList.of;
+import static com.google.common.util.concurrent.MoreExecutors.sameThreadExecutor;
+import static org.apache.jackrabbit.oak.api.QueryEngine.NO_BINDINGS;
+import static org.apache.jackrabbit.oak.spi.mount.Mounts.defaultMountInfoProvider;
+import static org.hamcrest.CoreMatchers.containsString;
+import static org.hamcrest.Matchers.lessThanOrEqualTo;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertThat;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+import static org.junit.Assume.assumeNoException;
+
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
@@ -35,16 +48,12 @@ import javax.management.AttributeNotFoundException;
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
 
-import ch.qos.logback.classic.Level;
-import com.google.common.base.Predicate;
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Iterators;
 import org.apache.commons.exec.CommandLine;
 import org.apache.commons.exec.DefaultExecutor;
 import org.apache.commons.exec.PumpStreamHandler;
 import org.apache.commons.io.IOUtils;
 import org.apache.jackrabbit.JcrConstants;
+import org.apache.jackrabbit.oak.InitialContent;
 import org.apache.jackrabbit.oak.Oak;
 import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.api.ContentRepository;
@@ -59,25 +68,24 @@ import org.apache.jackrabbit.oak.plugins.index.AsyncIndexUpdate;
 import org.apache.jackrabbit.oak.plugins.index.IndexConstants;
 import org.apache.jackrabbit.oak.plugins.index.counter.NodeCounterEditorProvider;
 import org.apache.jackrabbit.oak.plugins.index.lucene.IndexCopier;
-import org.apache.jackrabbit.oak.plugins.index.lucene.IndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.lucene.IndexTracker;
-import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants;
-import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.IndexingMode;
-import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexEditorProvider;
-import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexProvider;
-import org.apache.jackrabbit.oak.plugins.index.lucene.LucenePropertyIndex;
+import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndex;
 import org.apache.jackrabbit.oak.plugins.index.lucene.TestUtil;
 import org.apache.jackrabbit.oak.plugins.index.lucene.TestUtil.OptionalEditorProvider;
+import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexEditorProvider;
+import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexProvider;
 import org.apache.jackrabbit.oak.plugins.index.lucene.reader.DefaultIndexReaderFactory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.reader.LuceneIndexReaderFactory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.IndexDefinitionBuilder;
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.IndexDefinitionBuilder.IndexRule;
 import org.apache.jackrabbit.oak.plugins.index.nodetype.NodeTypeIndexProvider;
 import org.apache.jackrabbit.oak.plugins.index.property.PropertyIndexEditorProvider;
+import org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants;
+import org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.IndexingMode;
+import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
 import org.apache.jackrabbit.oak.plugins.memory.ArrayBasedBlob;
 import org.apache.jackrabbit.oak.plugins.memory.MemoryNodeStore;
 import org.apache.jackrabbit.oak.plugins.nodetype.TypeEditorProvider;
-import org.apache.jackrabbit.oak.InitialContent;
 import org.apache.jackrabbit.oak.plugins.nodetype.write.NodeTypeRegistry;
 import org.apache.jackrabbit.oak.query.AbstractQueryTest;
 import org.apache.jackrabbit.oak.spi.commit.Observer;
@@ -96,23 +104,16 @@ import org.apache.lucene.store.SimpleFSDirectory;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.junit.After;
-import org.junit.Ignore;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
-import static com.google.common.collect.ImmutableList.of;
-import static com.google.common.util.concurrent.MoreExecutors.sameThreadExecutor;
-import static org.apache.jackrabbit.oak.api.QueryEngine.NO_BINDINGS;
-import static org.apache.jackrabbit.oak.spi.mount.Mounts.defaultMountInfoProvider;
-import static org.hamcrest.CoreMatchers.containsString;
-import static org.hamcrest.Matchers.lessThanOrEqualTo;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertThat;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
-import static org.junit.Assume.assumeNoException;
+import com.google.common.base.Predicate;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Iterators;
+
+import ch.qos.logback.classic.Level;
 
 public class HybridIndexTest extends AbstractQueryTest {
     private ExecutorService executorService = Executors.newFixedThreadPool(2);
@@ -398,21 +399,21 @@ public class HybridIndexTest extends AbstractQueryTest {
         root.commit();
         runAsyncIndex();
 
-        createTestData("/content", LucenePropertyIndex.LUCENE_QUERY_BATCH_SIZE * 2);
+        createTestData("/content", LuceneIndex.LUCENE_QUERY_BATCH_SIZE * 2);
         runAsyncIndex();
 
         String query = "select [jcr:path] from [nt:base] where [foo] = 'bar'";
         Result result = executeQuery(query, SQL2, NO_BINDINGS);
         Iterator<? extends ResultRow> itr = result.getRows().iterator();
         int count = 0;
-        for (int i = 0; i < LucenePropertyIndex.LUCENE_QUERY_BATCH_SIZE - 10; i++) {
+        for (int i = 0; i < LuceneIndex.LUCENE_QUERY_BATCH_SIZE - 10; i++) {
             assertTrue(itr.hasNext());
             itr.next();
             count++;
         }
 
         createTestData("/content2", 5);
-        LogCustomizer lc = LogCustomizer.forLogger(LucenePropertyIndex.class.getName())
+        LogCustomizer lc = LogCustomizer.forLogger(LuceneIndex.class.getName())
                 .filter(Level.WARN)
                 .create();
         lc.starting();
@@ -425,7 +426,7 @@ public class HybridIndexTest extends AbstractQueryTest {
 
         lc.finished();
 
-        int totalSize = LucenePropertyIndex.LUCENE_QUERY_BATCH_SIZE * 2 + 5;
+        int totalSize = LuceneIndex.LUCENE_QUERY_BATCH_SIZE * 2 + 5;
         assertEquals(totalSize, count + size);
     }
 
@@ -521,7 +522,7 @@ public class HybridIndexTest extends AbstractQueryTest {
         IndexDefinitionBuilder idx = new IndexDefinitionBuilder();
         idx.evaluatePathRestrictions();
         idx.indexRule("nt:base")
-                .property(LuceneIndexConstants.REGEX_ALL_PROPS, true)
+                .property(FulltextIndexConstants.REGEX_ALL_PROPS, true)
                 .analyzed()
                 .nodeScopeIndex()
                 .useInExcerpt();

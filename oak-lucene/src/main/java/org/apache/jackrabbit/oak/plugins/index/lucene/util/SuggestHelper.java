@@ -27,7 +27,7 @@ import java.util.List;
 import com.google.common.io.Closer;
 import com.google.common.io.Files;
 import org.apache.commons.io.FileUtils;
-import org.apache.jackrabbit.oak.plugins.index.lucene.FieldNames;
+import org.apache.jackrabbit.oak.plugins.index.search.FieldNames;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.search.spell.Dictionary;

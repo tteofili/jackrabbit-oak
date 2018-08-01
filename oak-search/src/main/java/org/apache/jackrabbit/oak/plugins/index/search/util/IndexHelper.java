@@ -48,15 +48,17 @@ import static org.apache.jackrabbit.oak.plugins.memory.PropertyStates.createProp
 import static org.apache.jackrabbit.oak.spi.security.user.UserConstants.GROUP_PROPERTY_NAMES;
 import static org.apache.jackrabbit.oak.spi.security.user.UserConstants.USER_PROPERTY_NAMES;
 
+/**
+ * A helper class that helps decide what to (not) index.
+ */
 public class IndexHelper {
 
     public static final Set<String> JR_PROPERTY_INCLUDES = of(TYPENAME_STRING,
             TYPENAME_BINARY);
 
     /**
-     * Nodes that represent content that shold not be tokenized (like UUIDs,
+     * Nodes that represent content that should not be tokenized (like UUIDs,
      * etc)
-     * 
      */
     private final static Set<String> NOT_TOKENIZED = newHashSet(JCR_UUID);
 
@@ -167,8 +169,7 @@ public class IndexHelper {
     }
 
     /**
-     * Nodes that represent UUIDs and shold not be tokenized
-     * 
+     * Nodes that represent UUIDs and should not be tokenized
      */
     public static boolean skipTokenization(String name) {
         return NOT_TOKENIZED.contains(name);

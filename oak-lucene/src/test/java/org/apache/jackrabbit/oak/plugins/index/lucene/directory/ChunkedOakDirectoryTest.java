@@ -19,11 +19,25 @@
 
 package org.apache.jackrabbit.oak.plugins.index.lucene.directory;
 
+import static com.google.common.collect.Lists.newArrayList;
+import static org.apache.jackrabbit.oak.api.Type.BINARIES;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.directory.OakDirectory.UNIQUE_KEY_SIZE;
+import static org.hamcrest.CoreMatchers.containsString;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThat;
+import static org.junit.Assert.fail;
+
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.Arrays;
+import java.util.List;
+
 import org.apache.commons.io.IOUtils;
 import org.apache.jackrabbit.oak.api.Blob;
 import org.apache.jackrabbit.oak.api.PropertyState;
-import org.apache.jackrabbit.oak.plugins.index.lucene.IndexDefinition;
-import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants;
+import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexDefinition;
+import org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants;
 import org.apache.jackrabbit.oak.segment.SegmentNodeStore;
 import org.apache.jackrabbit.oak.segment.SegmentNodeStoreBuilders;
 import org.apache.jackrabbit.oak.segment.SegmentTestConstants;
@@ -36,25 +50,11 @@ import org.apache.lucene.store.IOContext;
 import org.apache.lucene.store.IndexOutput;
 import org.junit.Test;
 
-import java.io.ByteArrayInputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.util.Arrays;
-import java.util.List;
-
-import static com.google.common.collect.Lists.newArrayList;
-import static org.apache.jackrabbit.oak.api.Type.BINARIES;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.directory.OakDirectory.UNIQUE_KEY_SIZE;
-import static org.hamcrest.CoreMatchers.containsString;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertThat;
-import static org.junit.Assert.fail;
-
 public class ChunkedOakDirectoryTest extends OakDirectoryTestBase {
 
     @Test
     public void writes_CustomBlobSize() throws Exception{
-        builder.setProperty(LuceneIndexConstants.BLOB_SIZE, 300);
+        builder.setProperty(FulltextIndexConstants.BLOB_SIZE, 300);
         Directory dir = createDir(builder, false, "/foo");
         assertWrites(dir, 300);
     }
@@ -74,7 +74,7 @@ public class ChunkedOakDirectoryTest extends OakDirectoryTestBase {
         int blobSize = minFileSize + 1000;
 
         builder = nodeStore.getRoot().builder();
-        builder.setProperty(LuceneIndexConstants.BLOB_SIZE, blobSize);
+        builder.setProperty(FulltextIndexConstants.BLOB_SIZE, blobSize);
         Directory dir = createDir(builder, false, indexPath);
 
         IndexOutput o3 = dir.createOutput("test1.txt", IOContext.DEFAULT);
@@ -99,7 +99,7 @@ public class ChunkedOakDirectoryTest extends OakDirectoryTestBase {
     }
 
     @Override
-    OakDirectoryBuilder getOakDirectoryBuilder(NodeBuilder builder, IndexDefinition indexDefinition) {
+    OakDirectoryBuilder getOakDirectoryBuilder(NodeBuilder builder, LuceneIndexDefinition indexDefinition) {
         return new OakDirectoryBuilder(builder, indexDefinition, false);
     }
 

@@ -24,27 +24,31 @@ import java.util.List;
 import java.util.Map;
 
 
-import org.apache.jackrabbit.oak.plugins.index.lucene.FieldNames;
-import org.apache.jackrabbit.oak.plugins.index.lucene.IndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants;
-import org.apache.jackrabbit.oak.plugins.index.lucene.PropertyDefinition;
+import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.fv.LSHAnalyzer;
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.SuggestHelper;
+import org.apache.jackrabbit.oak.plugins.index.search.FieldNames;
+import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
+import org.apache.jackrabbit.oak.plugins.index.search.PropertyDefinition;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.miscellaneous.PerFieldAnalyzerWrapper;
 import org.apache.lucene.analysis.shingle.ShingleAnalyzerWrapper;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.index.SerialMergeScheduler;
 
+import java.util.HashMap;
+import java.util.Map;
+
 import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.VERSION;
 
 public class IndexWriterUtils {
 
-    public static IndexWriterConfig getIndexWriterConfig(IndexDefinition definition, boolean remoteDir){
+    public static IndexWriterConfig getIndexWriterConfig(LuceneIndexDefinition definition, boolean remoteDir){
         return getIndexWriterConfig(definition, remoteDir, new LuceneIndexWriterConfig());
     }
 
-    public static IndexWriterConfig getIndexWriterConfig(IndexDefinition definition, boolean remoteDir,
+    public static IndexWriterConfig getIndexWriterConfig(LuceneIndexDefinition definition, boolean remoteDir,
                                                          LuceneIndexWriterConfig writerConfig) {
         // FIXME: Hack needed to make Lucene work in an OSGi environment
         Thread thread = Thread.currentThread();

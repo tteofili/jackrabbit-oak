@@ -19,6 +19,7 @@ package org.apache.jackrabbit.oak.plugins.index.lucene;
 import java.util.Collections;
 import java.util.List;
 
+import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexProvider;
 import org.apache.jackrabbit.oak.spi.query.Filter;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 
@@ -30,11 +31,11 @@ import org.apache.jackrabbit.oak.spi.state.NodeState;
 public class LowCostLuceneIndexProvider extends LuceneIndexProvider {
 
     @Override
-    protected LuceneIndex newLuceneIndex() {
+    protected LuceneIndexOld newLuceneIndex() {
         return new LowCostLuceneIndex(tracker, aggregator);
     }
 
-    private static class LowCostLuceneIndex extends LuceneIndex {
+    private static class LowCostLuceneIndex extends LuceneIndexOld {
         public LowCostLuceneIndex(IndexTracker tracker, NodeAggregator aggregator) {
             super(tracker, aggregator);
         }
@@ -46,7 +47,7 @@ public class LowCostLuceneIndexProvider extends LuceneIndexProvider {
 
         @Override
         public List<IndexPlan> getPlans(Filter filter, List<OrderEntry> sortOrder, NodeState rootState) {
-            String indexPath = new LuceneIndexLookup(rootState).getOldFullTextIndexPath(filter, tracker);
+            String indexPath = LuceneIndexLookupUtil.getOldFullTextIndexPath(rootState, filter, tracker);
             if (indexPath == null){
                 return Collections.emptyList();
             }

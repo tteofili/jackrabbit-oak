@@ -27,7 +27,7 @@ import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.core.ImmutableRoot;
 import org.apache.jackrabbit.oak.plugins.index.IndexConstants;
-import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants;
+import org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants;
 import org.apache.jackrabbit.oak.plugins.tree.factories.TreeFactory;
 import org.apache.jackrabbit.oak.spi.filter.PathFilter;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
@@ -38,7 +38,8 @@ import org.junit.Test;
 
 import static java.util.Arrays.asList;
 import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.REINDEX_PROPERTY_NAME;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.AGGREGATES;
+import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.AGGREGATES;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.TYPE_LUCENE;
 import static org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState.EMPTY_NODE;
 import static org.junit.Assert.*;
 
@@ -56,7 +57,7 @@ public class IndexDefinitionBuilderTest {
         NodeState state = builder.build();
         assertEquals(2, state.getLong("compatVersion"));
         assertEquals("async", state.getString("async"));
-        assertEquals("lucene", state.getString("type"));
+        assertEquals(TYPE_LUCENE, state.getString("type"));
     }
 
     @Test
@@ -148,11 +149,11 @@ public class IndexDefinitionBuilderTest {
     @Test
     public void regexProperty() throws Exception{
         builder.indexRule("nt:base")
-                .property(LuceneIndexConstants.REGEX_ALL_PROPS, true);
+                .property(FulltextIndexConstants.REGEX_ALL_PROPS, true);
 
         NodeState state = builder.build();
         assertTrue(NodeStateUtils.getNode(state, "indexRules/nt:base/properties/prop")
-                .getBoolean(LuceneIndexConstants.PROP_IS_REGEX));
+                .getBoolean(FulltextIndexConstants.PROP_IS_REGEX));
     }
 
     @Test
@@ -265,7 +266,7 @@ public class IndexDefinitionBuilderTest {
     @Test
     public void typeNotChangedIfSet() throws Exception{
         NodeState state = builder.build();
-        assertEquals("lucene", state.getString("type"));
+        assertEquals(TYPE_LUCENE, state.getString("type"));
 
         NodeBuilder updated = state.builder();
         updated.setProperty("type", "disabled");
@@ -276,7 +277,7 @@ public class IndexDefinitionBuilderTest {
 
         //Type other than 'disabled' would be reset
         updated.setProperty("type", "foo");
-        assertEquals("lucene", new IndexDefinitionBuilder(updated).build().getString("type"));
+        assertEquals(TYPE_LUCENE, new IndexDefinitionBuilder(updated).build().getString("type"));
     }
 
     @Test
@@ -288,8 +289,8 @@ public class IndexDefinitionBuilderTest {
         assertTrue(state.getChildNode("indexRules").exists());
         NodeState ntFileRule = state.getChildNode("indexRules").getChildNode("nt:file");
         assertTrue(ntFileRule.exists());
-        assertTrue(state.getBoolean(LuceneIndexConstants.PROP_INDEX_NODE_TYPE));
-        assertFalse(ntFileRule.getBoolean(LuceneIndexConstants.PROP_SYNC));
+        assertTrue(state.getBoolean(FulltextIndexConstants.PROP_INDEX_NODE_TYPE));
+        assertFalse(ntFileRule.getBoolean(FulltextIndexConstants.PROP_SYNC));
     }
 
     @Test
@@ -301,8 +302,8 @@ public class IndexDefinitionBuilderTest {
         assertTrue(state.getChildNode("indexRules").exists());
         NodeState ntFileRule = state.getChildNode("indexRules").getChildNode("nt:file");
         assertTrue(ntFileRule.exists());
-        assertTrue(state.getBoolean(LuceneIndexConstants.PROP_INDEX_NODE_TYPE));
-        assertTrue(ntFileRule.getBoolean(LuceneIndexConstants.PROP_SYNC));
+        assertTrue(state.getBoolean(FulltextIndexConstants.PROP_INDEX_NODE_TYPE));
+        assertTrue(ntFileRule.getBoolean(FulltextIndexConstants.PROP_SYNC));
     }
 
     @Test

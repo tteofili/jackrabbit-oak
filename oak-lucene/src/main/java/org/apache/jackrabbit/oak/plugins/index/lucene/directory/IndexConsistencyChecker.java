@@ -19,18 +19,6 @@
 
 package org.apache.jackrabbit.oak.plugins.index.lucene.directory;
 
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.PrintStream;
-import java.io.PrintWriter;
-import java.io.StringWriter;
-import java.util.ArrayList;
-import java.util.List;
-
-import javax.jcr.PropertyType;
-
 import com.google.common.base.Stopwatch;
 import com.google.common.io.ByteStreams;
 import com.google.common.io.Closer;
@@ -43,8 +31,8 @@ import org.apache.jackrabbit.oak.api.Root;
 import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.commons.PathUtils;
-import org.apache.jackrabbit.oak.plugins.index.lucene.IndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants;
+import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.lucene.writer.MultiplexersLucene;
 import org.apache.jackrabbit.oak.plugins.tree.factories.RootFactory;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
@@ -57,6 +45,17 @@ import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.store.IOContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.jcr.PropertyType;
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.PrintStream;
+import java.io.PrintWriter;
+import java.io.StringWriter;
+import java.util.ArrayList;
+import java.util.List;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 import static org.apache.jackrabbit.oak.commons.IOUtils.humanReadableByteCount;
@@ -273,7 +272,7 @@ public class IndexConsistencyChecker {
 
     private void checkIndex(Result result, Closer closer) throws IOException {
         NodeState idx = NodeStateUtils.getNode(rootState, indexPath);
-        IndexDefinition defn = IndexDefinition.newBuilder(rootState, idx, indexPath).build();
+        LuceneIndexDefinition defn = LuceneIndexDefinition.newBuilder(rootState, idx, indexPath).build();
         workDir = createWorkDir(workDirRoot, PathUtils.getName(indexPath));
 
         for (String dirName : idx.getChildNodeNames()){
@@ -296,7 +295,7 @@ public class IndexConsistencyChecker {
         }
     }
 
-    private void checkIndexDirectory(DirectoryStatus dirStatus, NodeState idx, IndexDefinition defn,
+    private void checkIndexDirectory(DirectoryStatus dirStatus, NodeState idx, LuceneIndexDefinition defn,
                                      File workDir, String dirName, Closer closer) throws IOException {
         File idxDir = createWorkDir(workDir, dirName);
         Directory sourceDir = new OakDirectory(new ReadOnlyBuilder(idx), dirName, defn, true);

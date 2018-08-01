@@ -46,6 +46,15 @@ import static com.google.common.collect.Lists.newArrayListWithCapacity;
 import static org.apache.jackrabbit.oak.commons.PathUtils.elements;
 import static org.apache.jackrabbit.oak.commons.PathUtils.getParentPath;
 
+/**
+ * Aggregates text from child nodes for fulltext queries.
+ *
+ * Example: let's say node /x is of type 'web page', but the actual content is
+ * stored in child nodes; say /x/section1 contains "Hello" and /x/section2
+ * contains "World". If index aggregation is configured correctly, it will
+ * combine all the text of the child nodes, and index that as /x. When doing a
+ * fulltext search for for "Hello World", the index will then return /x.
+ */
 public class Aggregate {
 
     public static final String MATCH_ALL = "*";
@@ -56,7 +65,7 @@ public class Aggregate {
     public static final int RECURSIVE_AGGREGATION_LIMIT_DEFAULT = 5;
     private final String nodeTypeName;
     private final List<? extends Include> includes;
-    final int reAggregationLimit;
+    public final int reAggregationLimit;
     private final List<NodeInclude> relativeNodeIncludes;
     private final boolean nodeAggregates;
 
@@ -64,7 +73,7 @@ public class Aggregate {
        this(nodeTypeName, Collections.<Include>emptyList());
     }
 
-    Aggregate(String nodeTypeName, List<? extends Include> includes) {
+    public Aggregate(String nodeTypeName, List<? extends Include> includes) {
         this(nodeTypeName, includes, RECURSIVE_AGGREGATION_LIMIT_DEFAULT);
     }
 
@@ -221,7 +230,7 @@ public class Aggregate {
 
     //~-----------------------------------------------------< Includes >
 
-    public static abstract class Include<T> {
+    public static abstract class Include {
         protected final String[] elements;
 
         public Include(String pattern) {
@@ -242,7 +251,7 @@ public class Aggregate {
             return elements.length;
         }
 
-        public void collectResults(T rootInclude, String rootIncludePath,
+        public void collectResults(Include rootInclude, String rootIncludePath,
                                    String nodePath, NodeState nodeState,  ResultCollector results) {
             collectResults(nodePath, nodeState, results);
         }
@@ -271,9 +280,9 @@ public class Aggregate {
         }
     }
 
-    public static class NodeInclude extends Include<NodeInclude> {
-        final String primaryType;
-        final boolean relativeNode;
+    public static class NodeInclude extends Include {
+        public final String primaryType;
+        public final boolean relativeNode;
         private final String pattern;
         private final AggregateMapper aggMapper;
 
@@ -302,9 +311,13 @@ public class Aggregate {
         }
 
         @Override
-        public void collectResults(NodeInclude rootInclude, String rootIncludePath, String nodePath,
+        public void collectResults(Include include, String rootIncludePath, String nodePath,
                                    NodeState nodeState, ResultCollector results) {
             //For supporting jcr:contains(jcr:content, 'foo')
+            if (!(include instanceof NodeInclude)) {
+                throw new IllegalArgumentException("" + include);
+            }
+            NodeInclude rootInclude = (NodeInclude) include;
             if (rootInclude.relativeNode){
                 results.onResult(new NodeIncludeResult(nodePath, rootIncludePath, nodeState));
             }
@@ -364,7 +377,7 @@ public class Aggregate {
         }
     }
 
-    public static class PropertyInclude extends Include<PropertyInclude> {
+    public static class PropertyInclude extends Include {
         private final PropertyDefinition propertyDefinition;
         private final String propertyName;
         private final Pattern pattern;

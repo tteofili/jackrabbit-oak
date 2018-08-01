@@ -22,6 +22,8 @@ package org.apache.jackrabbit.oak.plugins.index.lucene;
 import com.google.common.collect.Sets;
 import com.google.common.io.Closer;
 import org.apache.commons.io.FileUtils;
+import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexEditorContext;
+import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.apache.jackrabbit.oak.stats.Clock;
@@ -46,8 +48,8 @@ import java.util.concurrent.TimeUnit;
 
 import static com.google.common.util.concurrent.MoreExecutors.sameThreadExecutor;
 import static org.apache.jackrabbit.oak.InitialContentHelper.INITIAL_CONTENT;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.INDEX_DATA_CHILD_NAME;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.directory.CopyOnReadDirectory.DELETE_MARGIN_MILLIS_NAME;
+import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.INDEX_DATA_CHILD_NAME;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -79,7 +81,7 @@ public class IndexCopierCleanupTest {
 
     private final Closer closer = Closer.create();
 
-    private IndexDefinition defn = null;
+    private LuceneIndexDefinition defn = null;
 
     private CloseSafeRemoteRAMDirectory remote = null;
 
@@ -92,7 +94,7 @@ public class IndexCopierCleanupTest {
         System.setProperty(DELETE_MARGIN_MILLIS_NAME, String.valueOf(SAFE_MARGIN_FOR_DELETION));
         LuceneIndexEditorContext.configureUniqueId(builder);
 
-        defn = new IndexDefinition(root, builder.getNodeState(), indexPath);
+        defn = new LuceneIndexDefinition(root, builder.getNodeState(), indexPath);
         remote = new CloseSafeRemoteRAMDirectory(closer);
 
         localFSDir = temporaryFolder.newFolder();
@@ -377,12 +379,12 @@ public class IndexCopierCleanupTest {
         }
 
         @Override
-        protected Directory createLocalDirForIndexReader(String indexPath, IndexDefinition definition, String dirName) throws IOException {
+        protected Directory createLocalDirForIndexReader(String indexPath, LuceneIndexDefinition definition, String dirName) throws IOException {
             return new DelayCopyingSimpleFSDirectory(baseFSDir);
         }
 
         @Override
-        protected Directory createLocalDirForIndexWriter(IndexDefinition definition, String dirName) throws IOException {
+        protected Directory createLocalDirForIndexWriter(LuceneIndexDefinition definition, String dirName) throws IOException {
             return new DelayCopyingSimpleFSDirectory(baseFSDir);
         }
 

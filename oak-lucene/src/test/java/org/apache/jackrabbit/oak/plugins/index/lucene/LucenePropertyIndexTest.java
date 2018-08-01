@@ -72,10 +72,17 @@ import org.apache.jackrabbit.oak.plugins.index.fulltext.ExtractedText;
 import org.apache.jackrabbit.oak.plugins.index.fulltext.ExtractedText.ExtractionResult;
 import org.apache.jackrabbit.oak.plugins.index.fulltext.PreExtractedTextProvider;
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.CopyOnReadDirectory;
+import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexEditorProvider;
+import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexInfoProvider;
+import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexProvider;
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.IndexDefinitionBuilder;
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.fv.SimSearchUtils;
 import org.apache.jackrabbit.oak.plugins.index.nodetype.NodeTypeIndexProvider;
 import org.apache.jackrabbit.oak.plugins.index.property.PropertyIndexEditorProvider;
+import org.apache.jackrabbit.oak.plugins.index.search.ExtractedTextCache;
+import org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants;
+import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
+import org.apache.jackrabbit.oak.plugins.index.search.IndexFormatVersion;
 import org.apache.jackrabbit.oak.plugins.memory.ArrayBasedBlob;
 import org.apache.jackrabbit.oak.plugins.memory.MemoryNodeStore;
 import org.apache.jackrabbit.oak.plugins.memory.PropertyStates;
@@ -120,20 +127,10 @@ import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.INDEX_DEFIN
 import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.QUERY_PATHS;
 import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.REINDEX_PROPERTY_NAME;
 import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.TYPE_PROPERTY_NAME;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.IndexDefinition.INDEX_DEFINITION_NODE;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.ANALYZERS;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.INCLUDE_PROPERTY_NAMES;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.INDEX_ORIGINAL_TERM;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.ORDERED_PROP_NAMES;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.PROPDEF_PROP_NODE_NAME;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.PROP_ANALYZED;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.PROP_NAME;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.PROP_NODE;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.PROP_NODE_SCOPE_INDEX;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.PROP_PROPERTY_INDEX;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.PROP_TYPE;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.TIKA;
-import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexEditorTest.createCal;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.TestUtil.child;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.TestUtil.newNodeAggregator;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.TestUtil.useV2;
@@ -151,12 +148,26 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
 
+import static com.google.common.collect.ImmutableSet.of;
+import static com.google.common.collect.Lists.newArrayList;
+import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.INCLUDE_PROPERTY_NAMES;
+import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.ORDERED_PROP_NAMES;
+import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.PROP_ANALYZED;
+import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.PROP_NAME;
+import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.PROP_NODE;
+import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.PROP_NODE_SCOPE_INDEX;
+import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.PROP_PROPERTY_INDEX;
+import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.PROP_TYPE;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.TYPE_LUCENE;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexEditorTest.createCal;
+import static org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition.INDEX_DEFINITION_NODE;
+
 @SuppressWarnings("ArraysAsListWithZeroOrOneArgument")
 public class LucenePropertyIndexTest extends AbstractQueryTest {
     /**
      * Set the size to twice the batch size to test the pagination with sorting
      */
-    static final int NUMBER_OF_NODES = LucenePropertyIndex.LUCENE_QUERY_BATCH_SIZE * 2;
+    static final int NUMBER_OF_NODES = LuceneIndex.LUCENE_QUERY_BATCH_SIZE * 2;
 
     private ExecutorService executorService = Executors.newFixedThreadPool(2);
 
@@ -210,7 +221,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
         try {
             return new IndexCopier(executorService, temporaryFolder.getRoot()) {
                 @Override
-                public Directory wrapForRead(String indexPath, IndexDefinition definition,
+                public Directory wrapForRead(String indexPath, LuceneIndexDefinition definition,
                                              Directory remote, String dirName) throws IOException {
                     Directory ret = super.wrapForRead(indexPath, definition, remote, dirName);
                     corDir = getFSDirPath(ret);
@@ -218,7 +229,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
                 }
 
                 @Override
-                public Directory wrapForWrite(IndexDefinition definition,
+                public Directory wrapForWrite(LuceneIndexDefinition definition,
                                               Directory remote, boolean reindexMode, String dirName) throws IOException {
                     Directory ret = super.wrapForWrite(definition, remote, reindexMode, dirName);
                     cowDir = getFSDirPath(ret);
@@ -493,7 +504,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
 
         Tree indexWithType = createIndex("test2", of("propb"));
         indexWithType.setProperty(PropertyStates.createProperty(DECLARING_NODE_TYPES, of("nt:file"), NAMES));
-        indexWithType.setProperty(LuceneIndexConstants.FULL_TEXT_ENABLED, true);
+        indexWithType.setProperty(FulltextIndexConstants.FULL_TEXT_ENABLED, true);
         TestUtil.useV2(indexWithType);
 
         Tree test = root.getTree("/").addChild("test");
@@ -518,10 +529,10 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
     @Test
     public void nodeName() throws Exception{
         Tree idx = createIndex("test1", of("propa", "propb"));
-        Tree rules = idx.addChild(LuceneIndexConstants.INDEX_RULES);
+        Tree rules = idx.addChild(FulltextIndexConstants.INDEX_RULES);
         rules.setOrderableChildren(true);
         Tree rule = rules.addChild("nt:base");
-        rule.setProperty(LuceneIndexConstants.INDEX_NODE_NAME, true);
+        rule.setProperty(FulltextIndexConstants.INDEX_NODE_NAME, true);
         root.commit();
 
         Tree test = root.getTree("/");
@@ -548,7 +559,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
         //make index
         Tree idx = createIndex("test1", Collections.EMPTY_SET);
         useV2(idx);
-        Tree rules = idx.addChild(LuceneIndexConstants.INDEX_RULES);
+        Tree rules = idx.addChild(FulltextIndexConstants.INDEX_RULES);
         rules.setOrderableChildren(true);
         Tree rule = rules.addChild("nt:base");
         Tree propDef = rule.addChild(PROP_NODE).addChild("nodeName");
@@ -697,9 +708,9 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
         Tree idx = createIndex("test1", of("propa", "propb"));
         Tree props = TestUtil.newRulePropTree(idx, TestUtil.NT_TEST);
         Tree prop = props.addChild(TestUtil.unique("prop"));
-        prop.setProperty(LuceneIndexConstants.PROP_NAME, "propa");
-        prop.setProperty(LuceneIndexConstants.PROP_PROPERTY_INDEX, true);
-        prop.setProperty(LuceneIndexConstants.PROP_NOT_NULL_CHECK_ENABLED, true);
+        prop.setProperty(FulltextIndexConstants.PROP_NAME, "propa");
+        prop.setProperty(FulltextIndexConstants.PROP_PROPERTY_INDEX, true);
+        prop.setProperty(FulltextIndexConstants.PROP_NOT_NULL_CHECK_ENABLED, true);
         root.commit();
 
         Tree test = root.getTree("/").addChild("test");
@@ -720,9 +731,9 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
         Tree idx = createIndex("test1", of("propa", "propb"));
         Tree props = TestUtil.newRulePropTree(idx, TestUtil.NT_TEST);
         Tree prop = props.addChild(TestUtil.unique("prop"));
-        prop.setProperty(LuceneIndexConstants.PROP_NAME, "propa");
-        prop.setProperty(LuceneIndexConstants.PROP_PROPERTY_INDEX, true);
-        prop.setProperty(LuceneIndexConstants.PROP_NULL_CHECK_ENABLED, true);
+        prop.setProperty(FulltextIndexConstants.PROP_NAME, "propa");
+        prop.setProperty(FulltextIndexConstants.PROP_PROPERTY_INDEX, true);
+        prop.setProperty(FulltextIndexConstants.PROP_NULL_CHECK_ENABLED, true);
         root.commit();
 
         Tree test = root.getTree("/").addChild("test");
@@ -827,7 +838,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
     public void rangeQueriesWithLong() throws Exception {
         Tree idx = createIndex("test1", of("propa", "propb"));
         Tree propIdx = idx.addChild(PROP_NODE).addChild("propa");
-        propIdx.setProperty(LuceneIndexConstants.PROP_TYPE, PropertyType.TYPENAME_LONG);
+        propIdx.setProperty(FulltextIndexConstants.PROP_TYPE, PropertyType.TYPENAME_LONG);
         root.commit();
 
         Tree test = root.getTree("/").addChild("test");
@@ -899,7 +910,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
     @Test
     public void wildcardQueryToLookupUnanalyzedText() throws Exception {
         Tree idx = createIndex("test1", of("propa", "propb"));
-        idx.setProperty(PROP_TYPE, "lucene");
+        idx.setProperty(PROP_TYPE, TYPE_LUCENE);
         idx.addChild(ANALYZERS).setProperty(INDEX_ORIGINAL_TERM, true);
         useV2(idx);
         //Do not provide type information
@@ -1193,7 +1204,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
     public void rangeQueriesWithDouble() throws Exception {
         Tree idx = createIndex("test1", of("propa", "propb"));
         Tree propIdx = idx.addChild(PROP_NODE).addChild("propa");
-        propIdx.setProperty(LuceneIndexConstants.PROP_TYPE, PropertyType.TYPENAME_DOUBLE);
+        propIdx.setProperty(FulltextIndexConstants.PROP_TYPE, PropertyType.TYPENAME_DOUBLE);
         root.commit();
 
         Tree test = root.getTree("/").addChild("test");
@@ -1243,7 +1254,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
     public void rangeQueriesWithDate() throws Exception {
         Tree idx = createIndex("test1", of("propa", "propb"));
         Tree propIdx = idx.addChild(PROP_NODE).addChild("propa");
-        propIdx.setProperty(LuceneIndexConstants.PROP_TYPE, PropertyType.TYPENAME_DATE);
+        propIdx.setProperty(FulltextIndexConstants.PROP_TYPE, PropertyType.TYPENAME_DATE);
         root.commit();
 
         Tree test = root.getTree("/").addChild("test");
@@ -1285,7 +1296,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
     public void nativeQueries() throws Exception {
         Tree idx = createIndex("test1", of("propa", "propb"));
         idx.addChild(PROP_NODE).addChild("propa");
-        idx.setProperty(LuceneIndexConstants.FUNC_NAME, "foo");
+        idx.setProperty(FulltextIndexConstants.FUNC_NAME, "foo");
         root.commit();
 
         Tree test = root.getTree("/").addChild("test");
@@ -1316,7 +1327,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
     public void indexDefinitionBelowRoot() throws Exception {
         Tree parent = root.getTree("/").addChild("test");
         Tree idx = createIndex(parent, "test1", of("propa", "propb"));
-        idx.setProperty(LuceneIndexConstants.EVALUATE_PATH_RESTRICTION, true);
+        idx.setProperty(FulltextIndexConstants.EVALUATE_PATH_RESTRICTION, true);
         idx.addChild(PROP_NODE).addChild("propa");
         root.commit();
 
@@ -1331,7 +1342,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
     public void indexDefinitionBelowRoot2() throws Exception {
         Tree parent = root.getTree("/").addChild("test");
         Tree idx = createIndex(parent, "test1", of("propa", "propb"));
-        idx.setProperty(LuceneIndexConstants.EVALUATE_PATH_RESTRICTION, true);
+        idx.setProperty(FulltextIndexConstants.EVALUATE_PATH_RESTRICTION, true);
         idx.addChild(PROP_NODE).addChild("propa");
         root.commit();
 
@@ -1410,7 +1421,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
     public void sortQueriesWithLong() throws Exception {
         Tree idx = createIndex("test1", of("foo", "bar"));
         Tree propIdx = idx.addChild(PROP_NODE).addChild("foo");
-        propIdx.setProperty(LuceneIndexConstants.PROP_TYPE, PropertyType.TYPENAME_LONG);
+        propIdx.setProperty(FulltextIndexConstants.PROP_TYPE, PropertyType.TYPENAME_LONG);
         root.commit();
 
         assertSortedLong();
@@ -1422,7 +1433,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
         idx.setProperty(createProperty(INCLUDE_PROPERTY_NAMES, of("bar"), STRINGS));
         idx.setProperty(createProperty(ORDERED_PROP_NAMES, of("foo"), STRINGS));
         Tree propIdx = idx.addChild(PROP_NODE).addChild("foo");
-        propIdx.setProperty(LuceneIndexConstants.PROP_TYPE, PropertyType.TYPENAME_LONG);
+        propIdx.setProperty(FulltextIndexConstants.PROP_TYPE, PropertyType.TYPENAME_LONG);
         root.commit();
 
         assertSortedLong();
@@ -1433,7 +1444,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
         Tree idx = createIndex("test1", Collections.<String>emptySet());
         idx.setProperty(createProperty(ORDERED_PROP_NAMES, of("foo"), STRINGS));
         Tree propIdx = idx.addChild(PROP_NODE).addChild("foo");
-        propIdx.setProperty(LuceneIndexConstants.PROP_TYPE, PropertyType.TYPENAME_LONG);
+        propIdx.setProperty(FulltextIndexConstants.PROP_TYPE, PropertyType.TYPENAME_LONG);
         root.commit();
 
         assertThat(explain("select [jcr:path] from [nt:base] order by [jcr:score], [foo]"), containsString("lucene:test1"));
@@ -1450,7 +1461,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
         Tree idx = createIndex("test1", Collections.<String>emptySet());
         idx.setProperty(createProperty(ORDERED_PROP_NAMES, of("foo/bar"), STRINGS));
         Tree propIdx = idx.addChild(PROP_NODE).addChild("foo").addChild("bar");
-        propIdx.setProperty(LuceneIndexConstants.PROP_TYPE, PropertyType.TYPENAME_LONG);
+        propIdx.setProperty(FulltextIndexConstants.PROP_TYPE, PropertyType.TYPENAME_LONG);
         root.commit();
 
         assertThat(explain("select [jcr:path] from [nt:base] order by [foo/bar]"), containsString("lucene:test1"));
@@ -1493,7 +1504,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
     public void sortQueriesWithDouble() throws Exception {
         Tree idx = createIndex("test1", of("foo", "bar"));
         Tree propIdx = idx.addChild(PROP_NODE).addChild("foo");
-        propIdx.setProperty(LuceneIndexConstants.PROP_TYPE, PropertyType.TYPENAME_DOUBLE);
+        propIdx.setProperty(FulltextIndexConstants.PROP_TYPE, PropertyType.TYPENAME_DOUBLE);
         root.commit();
 
         assertSortedDouble();
@@ -1505,7 +1516,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
         idx.setProperty(createProperty(INCLUDE_PROPERTY_NAMES, of("bar"), STRINGS));
         idx.setProperty(createProperty(ORDERED_PROP_NAMES, of("foo"), STRINGS));
         Tree propIdx = idx.addChild(PROP_NODE).addChild("foo");
-        propIdx.setProperty(LuceneIndexConstants.PROP_TYPE, PropertyType.TYPENAME_DOUBLE);
+        propIdx.setProperty(FulltextIndexConstants.PROP_TYPE, PropertyType.TYPENAME_DOUBLE);
         root.commit();
 
         assertSortedDouble();
@@ -1602,7 +1613,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
     public void sortQueriesWithDate() throws Exception {
         Tree idx = createIndex("test1", of("foo", "bar"));
         Tree propIdx = idx.addChild(PROP_NODE).addChild("foo");
-        propIdx.setProperty(LuceneIndexConstants.PROP_TYPE, PropertyType.TYPENAME_DATE);
+        propIdx.setProperty(FulltextIndexConstants.PROP_TYPE, PropertyType.TYPENAME_DATE);
         root.commit();
 
         assertSortedDate();
@@ -1614,7 +1625,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
         idx.setProperty(createProperty(INCLUDE_PROPERTY_NAMES, of("bar"), STRINGS));
         idx.setProperty(createProperty(ORDERED_PROP_NAMES, of("foo"), STRINGS));
         Tree propIdx = idx.addChild(PROP_NODE).addChild("foo");
-        propIdx.setProperty(LuceneIndexConstants.PROP_TYPE, PropertyType.TYPENAME_DATE);
+        propIdx.setProperty(FulltextIndexConstants.PROP_TYPE, PropertyType.TYPENAME_DATE);
         root.commit();
 
         assertSortedDate();
@@ -1645,7 +1656,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
         idx.setProperty(createProperty(INCLUDE_PROPERTY_NAMES, of("bar"), STRINGS));
         idx.setProperty(createProperty(ORDERED_PROP_NAMES, of("foo"), STRINGS));
         Tree propIdx = idx.addChild(PROP_NODE).addChild("foo");
-        propIdx.setProperty(LuceneIndexConstants.PROP_TYPE, PropertyType.TYPENAME_DATE);
+        propIdx.setProperty(FulltextIndexConstants.PROP_TYPE, PropertyType.TYPENAME_DATE);
         root.commit();
 
         Tree test = root.getTree("/").addChild("test");
@@ -1679,7 +1690,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
         Tree idx = createIndex("test1", of("foo", "bar", "baz"));
         idx.setProperty(createProperty(ORDERED_PROP_NAMES, ImmutableSet.of("foo", "baz"), STRINGS));
         Tree propIdx = idx.addChild(PROP_NODE).addChild("baz");
-        propIdx.setProperty(LuceneIndexConstants.PROP_TYPE, PropertyType.TYPENAME_LONG);
+        propIdx.setProperty(FulltextIndexConstants.PROP_TYPE, PropertyType.TYPENAME_LONG);
         root.commit();
 
         Tree test = root.getTree("/").addChild("test");
@@ -1705,22 +1716,22 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
     public void indexTimeFieldBoost() throws Exception {
         // Index Definition
         Tree idx = createIndex("test1", of("propa", "propb", "propc"));
-        idx.setProperty(LuceneIndexConstants.FULL_TEXT_ENABLED, true);
+        idx.setProperty(FulltextIndexConstants.FULL_TEXT_ENABLED, true);
 
         Tree propNode = idx.addChild(PROP_NODE);
 
         // property definition for index test1
         Tree propA = propNode.addChild("propa");
-        propA.setProperty(LuceneIndexConstants.PROP_TYPE, PropertyType.TYPENAME_STRING);
-        propA.setProperty(LuceneIndexConstants.FIELD_BOOST, 2.0);
+        propA.setProperty(FulltextIndexConstants.PROP_TYPE, PropertyType.TYPENAME_STRING);
+        propA.setProperty(FulltextIndexConstants.FIELD_BOOST, 2.0);
 
         Tree propB = propNode.addChild("propb");
-        propB.setProperty(LuceneIndexConstants.PROP_TYPE, PropertyType.TYPENAME_STRING);
-        propB.setProperty(LuceneIndexConstants.FIELD_BOOST, 1.0);
+        propB.setProperty(FulltextIndexConstants.PROP_TYPE, PropertyType.TYPENAME_STRING);
+        propB.setProperty(FulltextIndexConstants.FIELD_BOOST, 1.0);
 
         Tree propC = propNode.addChild("propc");
-        propC.setProperty(LuceneIndexConstants.PROP_TYPE, PropertyType.TYPENAME_STRING);
-        propC.setProperty(LuceneIndexConstants.FIELD_BOOST, 4.0);
+        propC.setProperty(FulltextIndexConstants.PROP_TYPE, PropertyType.TYPENAME_STRING);
+        propC.setProperty(FulltextIndexConstants.FIELD_BOOST, 4.0);
         root.commit();
 
         // create test data
@@ -1745,18 +1756,18 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
         Tree props = TestUtil.newRulePropTree(idx, TestUtil.NT_TEST);
 
         Tree title = props.addChild("title");
-        title.setProperty(LuceneIndexConstants.PROP_NAME, "jcr:content/jcr:title");
-        title.setProperty(LuceneIndexConstants.PROP_NODE_SCOPE_INDEX, true);
-        title.setProperty(LuceneIndexConstants.FIELD_BOOST, 4.0);
+        title.setProperty(FulltextIndexConstants.PROP_NAME, "jcr:content/jcr:title");
+        title.setProperty(FulltextIndexConstants.PROP_NODE_SCOPE_INDEX, true);
+        title.setProperty(FulltextIndexConstants.FIELD_BOOST, 4.0);
 
         Tree desc = props.addChild("desc");
-        desc.setProperty(LuceneIndexConstants.PROP_NAME, "jcr:content/jcr:description");
-        desc.setProperty(LuceneIndexConstants.PROP_NODE_SCOPE_INDEX, true);
-        desc.setProperty(LuceneIndexConstants.FIELD_BOOST, 2.0);
+        desc.setProperty(FulltextIndexConstants.PROP_NAME, "jcr:content/jcr:description");
+        desc.setProperty(FulltextIndexConstants.PROP_NODE_SCOPE_INDEX, true);
+        desc.setProperty(FulltextIndexConstants.FIELD_BOOST, 2.0);
 
         Tree text = props.addChild("text");
-        text.setProperty(LuceneIndexConstants.PROP_NAME, "jcr:content/text");
-        text.setProperty(LuceneIndexConstants.PROP_NODE_SCOPE_INDEX, true);
+        text.setProperty(FulltextIndexConstants.PROP_NAME, "jcr:content/text");
+        text.setProperty(FulltextIndexConstants.PROP_NODE_SCOPE_INDEX, true);
 
         root.commit();
 
@@ -1815,7 +1826,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
     public void sortFulltextQueriesWithJcrScore() throws Exception {
         // Index Definition
         Tree idx = createIndex("test1", of("propa"));
-        idx.setProperty(LuceneIndexConstants.FULL_TEXT_ENABLED, true);
+        idx.setProperty(FulltextIndexConstants.FULL_TEXT_ENABLED, true);
         useV2(idx);
 
         // create test data
@@ -1839,7 +1850,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
     private void fulltextBooleanComplexOrQueries(boolean ver2) throws Exception {
         // Index Definition
         Tree idx = createIndex("test1", of("propa", "propb"));
-        idx.setProperty(LuceneIndexConstants.FULL_TEXT_ENABLED, true);
+        idx.setProperty(FulltextIndexConstants.FULL_TEXT_ENABLED, true);
         if (ver2) {
             useV2(idx);
         }
@@ -1882,7 +1893,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
     @Test
     // Copied and modified slightly from org.apache.jackrabbit.core.query.FulltextQueryTest#testFulltextExcludeSQL
     public void luceneAndExclude() throws Exception {
-        Tree indexDefn = createTestIndexNode(root.getTree("/"), LuceneIndexConstants.TYPE_LUCENE);
+        Tree indexDefn = createTestIndexNode(root.getTree("/"), TYPE_LUCENE);
         Tree r = root.getTree("/").addChild("test");
 
         Tree n = r.addChild("node1");
@@ -1914,7 +1925,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
     public void indexTimeFieldBoostAndRelativeProperty() throws Exception {
         // Index Definition
         Tree index = root.getTree("/");
-        Tree indexDefn = createTestIndexNode(index, LuceneIndexConstants.TYPE_LUCENE);
+        Tree indexDefn = createTestIndexNode(index, TYPE_LUCENE);
         useV2(indexDefn);
 
         addPropertyDefn(indexDefn, "jcr:content/metadata/title", 4.0);
@@ -1965,8 +1976,8 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
                 "  </parsers>\n" +
                 "</properties>";
 
-        idx.addChild(LuceneIndexConstants.TIKA)
-                .addChild(LuceneIndexConstants.TIKA_CONFIG)
+        idx.addChild(FulltextIndexConstants.TIKA)
+                .addChild(FulltextIndexConstants.TIKA_CONFIG)
                 .addChild(JCR_CONTENT)
                 .setProperty(JCR_DATA, tikaConfig.getBytes());
         idx.setProperty(IndexConstants.REINDEX_PROPERTY_NAME, true);
@@ -2092,7 +2103,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
         assertQuery("select * from [nt:base] where CONTAINS(*, 'jumping')", asList("/test"));
 
         idx = root.getTree("/oak:index/test");
-        idx.setProperty(LuceneIndexConstants.MAX_FIELD_LENGTH, 2);
+        idx.setProperty(FulltextIndexConstants.MAX_FIELD_LENGTH, 2);
         idx.setProperty(IndexConstants.REINDEX_PROPERTY_NAME, true);
         root.commit();
 
@@ -2112,7 +2123,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
         assertQuery("select * from [nt:base] where CONTAINS(*, 'red')", asList("/test/text/jcr:content"));
 
         idx = root.getTree("/oak:index/test");
-        idx.addChild(TIKA).setProperty(LuceneIndexConstants.TIKA_MAX_EXTRACT_LENGTH, 15);
+        idx.addChild(TIKA).setProperty(FulltextIndexConstants.TIKA_MAX_EXTRACT_LENGTH, 15);
         idx.setProperty(IndexConstants.REINDEX_PROPERTY_NAME, true);
         root.commit();
 
@@ -2158,14 +2169,14 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
         // Index Definition
         Tree idx = createIndex("test1", of("propa", "propb"));
         TestUtil.useV2(idx);
-        idx.setProperty(LuceneIndexConstants.FULL_TEXT_ENABLED, true);
+        idx.setProperty(FulltextIndexConstants.FULL_TEXT_ENABLED, true);
 
         Tree propNode = idx.addChild(PROP_NODE);
 
         // property definition for index test1
         Tree propA = propNode.addChild("propa");
-        propA.setProperty(LuceneIndexConstants.PROP_TYPE, PropertyType.TYPENAME_STRING);
-        propA.setProperty(LuceneIndexConstants.FIELD_BOOST, 2.0);
+        propA.setProperty(FulltextIndexConstants.PROP_TYPE, PropertyType.TYPENAME_STRING);
+        propA.setProperty(FulltextIndexConstants.FIELD_BOOST, 2.0);
 
         root.commit();
 
@@ -2173,7 +2184,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
         //with boost set we ensure that correct result comes *after* the batch size of results
         Tree test = root.getTree("/").addChild("test");
         root.commit();
-        for (int i = 0; i < LucenePropertyIndex.LUCENE_QUERY_BATCH_SIZE; i++) {
+        for (int i = 0; i < LuceneIndex.LUCENE_QUERY_BATCH_SIZE; i++) {
             test.addChild("a"+i).addChild("doNotInclude").setProperty("propa", "foo");
         }
         test.addChild("b").addChild("jcr:content").setProperty("propb", "foo");
@@ -2276,13 +2287,13 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
         Tree idx = createIndex("test1", of("propa", "propb"));
         Tree props = TestUtil.newRulePropTree(idx, TestUtil.NT_TEST);
         Tree prop = props.addChild(TestUtil.unique("prop"));
-        prop.setProperty(LuceneIndexConstants.PROP_NAME, "jcr:title");
-        prop.setProperty(LuceneIndexConstants.PROP_PROPERTY_INDEX, true);
+        prop.setProperty(FulltextIndexConstants.PROP_NAME, "jcr:title");
+        prop.setProperty(FulltextIndexConstants.PROP_PROPERTY_INDEX, true);
 
         Tree prop1 = props.addChild(TestUtil.unique("prop"));
-        prop1.setProperty(LuceneIndexConstants.PROP_NAME, "original/jcr:content/type");
-        prop1.setProperty(LuceneIndexConstants.PROP_EXCLUDE_FROM_AGGREGATE, true);
-        prop1.setProperty(LuceneIndexConstants.PROP_PROPERTY_INDEX, true);
+        prop1.setProperty(FulltextIndexConstants.PROP_NAME, "original/jcr:content/type");
+        prop1.setProperty(FulltextIndexConstants.PROP_EXCLUDE_FROM_AGGREGATE, true);
+        prop1.setProperty(FulltextIndexConstants.PROP_PROPERTY_INDEX, true);
 
         newNodeAggregator(idx)
                 .newRuleWithName(NT_FILE, newArrayList(JCR_CONTENT, JCR_CONTENT + "/*"))
@@ -2314,12 +2325,12 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
         Tree idx = createIndex("test1", of("propa", "propb"));
         Tree props = TestUtil.newRulePropTree(idx, TestUtil.NT_TEST);
         Tree prop = props.addChild(TestUtil.unique("prop"));
-        prop.setProperty(LuceneIndexConstants.PROP_NAME, "jcr:title");
-        prop.setProperty(LuceneIndexConstants.PROP_PROPERTY_INDEX, true);
+        prop.setProperty(FulltextIndexConstants.PROP_NAME, "jcr:title");
+        prop.setProperty(FulltextIndexConstants.PROP_PROPERTY_INDEX, true);
 
         Tree prop1 = props.addChild(TestUtil.unique("prop"));
-        prop1.setProperty(LuceneIndexConstants.PROP_NAME, "original/jcr:content/type");
-        prop1.setProperty(LuceneIndexConstants.PROP_PROPERTY_INDEX, true);
+        prop1.setProperty(FulltextIndexConstants.PROP_NAME, "original/jcr:content/type");
+        prop1.setProperty(FulltextIndexConstants.PROP_PROPERTY_INDEX, true);
 
         newNodeAggregator(idx)
                 .newRuleWithName(NT_FILE, newArrayList(JCR_CONTENT, JCR_CONTENT + "/*"))
@@ -2350,8 +2361,8 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
         Tree idx = createIndex("test1", of("propa", "propb"));
         Tree props = TestUtil.newRulePropTree(idx, "mix:title");
         Tree prop = props.addChild(TestUtil.unique("prop"));
-        prop.setProperty(LuceneIndexConstants.PROP_NAME, "jcr:title");
-        prop.setProperty(LuceneIndexConstants.PROP_PROPERTY_INDEX, true);
+        prop.setProperty(FulltextIndexConstants.PROP_NAME, "jcr:title");
+        prop.setProperty(FulltextIndexConstants.PROP_PROPERTY_INDEX, true);
         root.commit();
 
         Tree test = root.getTree("/").addChild("test");
@@ -2370,8 +2381,8 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
         Tree idx = createIndex("test1", of("propa", "propb"));
         Tree props = TestUtil.newRulePropTree(idx, "mix:mimeType");
         Tree prop = props.addChild(TestUtil.unique("prop"));
-        prop.setProperty(LuceneIndexConstants.PROP_NAME, "jcr:mimeType");
-        prop.setProperty(LuceneIndexConstants.PROP_PROPERTY_INDEX, true);
+        prop.setProperty(FulltextIndexConstants.PROP_NAME, "jcr:mimeType");
+        prop.setProperty(FulltextIndexConstants.PROP_PROPERTY_INDEX, true);
         root.commit();
 
         Tree test = root.getTree("/").addChild("test");
@@ -2393,14 +2404,14 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
         // idx.setProperty("async", "async");
         idx.setProperty(JcrConstants.JCR_PRIMARYTYPE,
                 INDEX_DEFINITIONS_NODE_TYPE, Type.NAME);
-        // idx.setProperty(LuceneIndexConstants.FULL_TEXT_ENABLED, true);
-        idx.setProperty(TYPE_PROPERTY_NAME, LuceneIndexConstants.TYPE_LUCENE);
+        // idx.setProperty(FulltextIndexConstants.FULL_TEXT_ENABLED, true);
+        idx.setProperty(TYPE_PROPERTY_NAME, TYPE_LUCENE);
         idx.setProperty(REINDEX_PROPERTY_NAME, true);
         Tree props = TestUtil.newRulePropTree(idx, "nt:base");
         Tree prop = props.addChild(TestUtil.unique("jcr:mimeType"));
-        prop.setProperty(LuceneIndexConstants.PROP_NAME, "jcr:mimeType");
-        prop.setProperty(LuceneIndexConstants.PROP_PROPERTY_INDEX, true);
-        prop.setProperty(LuceneIndexConstants.PROP_ANALYZED, true);
+        prop.setProperty(FulltextIndexConstants.PROP_NAME, "jcr:mimeType");
+        prop.setProperty(FulltextIndexConstants.PROP_PROPERTY_INDEX, true);
+        prop.setProperty(FulltextIndexConstants.PROP_ANALYZED, true);
         root.commit();
 
         Tree test = root.getTree("/").addChild("test");
@@ -2434,13 +2445,13 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
         Tree idx = index.addChild(INDEX_DEFINITIONS_NAME).addChild("test2");
         idx.setProperty(JcrConstants.JCR_PRIMARYTYPE,
                 INDEX_DEFINITIONS_NODE_TYPE, Type.NAME);
-        idx.setProperty(TYPE_PROPERTY_NAME, LuceneIndexConstants.TYPE_LUCENE);
+        idx.setProperty(TYPE_PROPERTY_NAME, TYPE_LUCENE);
         idx.setProperty(REINDEX_PROPERTY_NAME, true);
         Tree props = TestUtil.newRulePropTree(idx, "nt:base");
         Tree prop = props.addChild(TestUtil.unique("text"));
-        prop.setProperty(LuceneIndexConstants.PROP_NAME, "text");
-        prop.setProperty(LuceneIndexConstants.PROP_PROPERTY_INDEX, true);
-        prop.setProperty(LuceneIndexConstants.PROP_ANALYZED, true);
+        prop.setProperty(FulltextIndexConstants.PROP_NAME, "text");
+        prop.setProperty(FulltextIndexConstants.PROP_PROPERTY_INDEX, true);
+        prop.setProperty(FulltextIndexConstants.PROP_ANALYZED, true);
         root.commit();
 
         Tree test = root.getTree("/").addChild("test");
@@ -2462,12 +2473,12 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
         Tree idx = createIndex("test1", of("propa", "propb"));
         Tree props = TestUtil.newRulePropTree(idx, "mix:title");
         Tree prop1 = props.addChild(TestUtil.unique("prop"));
-        prop1.setProperty(LuceneIndexConstants.PROP_NAME, "jcr:title");
-        prop1.setProperty(LuceneIndexConstants.PROP_PROPERTY_INDEX, true);
+        prop1.setProperty(FulltextIndexConstants.PROP_NAME, "jcr:title");
+        prop1.setProperty(FulltextIndexConstants.PROP_PROPERTY_INDEX, true);
 
         Tree prop2 = props.addChild(TestUtil.unique("prop"));
-        prop2.setProperty(LuceneIndexConstants.PROP_NAME, "jcr:content/type");
-        prop2.setProperty(LuceneIndexConstants.PROP_PROPERTY_INDEX, true);
+        prop2.setProperty(FulltextIndexConstants.PROP_NAME, "jcr:content/type");
+        prop2.setProperty(FulltextIndexConstants.PROP_PROPERTY_INDEX, true);
         root.commit();
 
         Tree test = root.getTree("/").addChild("test");
@@ -2492,8 +2503,8 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
         Tree idx = createIndex("test1", of("propa", "propb"));
         Tree props = TestUtil.newRulePropTree(idx, "mix:title");
         Tree prop1 = props.addChild(TestUtil.unique("prop"));
-        prop1.setProperty(LuceneIndexConstants.PROP_NAME, "jcr:title");
-        prop1.setProperty(LuceneIndexConstants.PROP_PROPERTY_INDEX, true);
+        prop1.setProperty(FulltextIndexConstants.PROP_NAME, "jcr:title");
+        prop1.setProperty(FulltextIndexConstants.PROP_PROPERTY_INDEX, true);
         root.commit();
 
         //force CoR
@@ -2517,8 +2528,8 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
         Tree idx = createIndex("test1", of("propa", "propb"));
         Tree props = TestUtil.newRulePropTree(idx, "nt:base");
         Tree prop1 = props.addChild(TestUtil.unique("prop"));
-        prop1.setProperty(LuceneIndexConstants.PROP_NAME, "jcr:title");
-        prop1.setProperty(LuceneIndexConstants.PROP_PROPERTY_INDEX, true);
+        prop1.setProperty(FulltextIndexConstants.PROP_NAME, "jcr:title");
+        prop1.setProperty(FulltextIndexConstants.PROP_PROPERTY_INDEX, true);
         root.commit();
 
         //Make some changes such incremental indexing happens
@@ -2551,8 +2562,8 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
         Tree idx = createIndex("test1", of("propa", "propb"));
         Tree props = TestUtil.newRulePropTree(idx, "nt:base");
         Tree prop1 = props.addChild(TestUtil.unique("prop"));
-        prop1.setProperty(LuceneIndexConstants.PROP_NAME, "tag");
-        prop1.setProperty(LuceneIndexConstants.PROP_ANALYZED, true);
+        prop1.setProperty(FulltextIndexConstants.PROP_NAME, "tag");
+        prop1.setProperty(FulltextIndexConstants.PROP_ANALYZED, true);
         root.commit();
 
         Tree test = root.getTree("/").addChild("test");
@@ -2583,8 +2594,8 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
         Tree idx = createIndex("test1", of("propa", "propb"));
         Tree props = TestUtil.newRulePropTree(idx, "nt:base");
         Tree prop1 = props.addChild(TestUtil.unique("prop"));
-        prop1.setProperty(LuceneIndexConstants.PROP_NAME, "jcr:content/metadata/comment");
-        prop1.setProperty(LuceneIndexConstants.PROP_ANALYZED, true);
+        prop1.setProperty(FulltextIndexConstants.PROP_NAME, "jcr:content/metadata/comment");
+        prop1.setProperty(FulltextIndexConstants.PROP_ANALYZED, true);
         root.commit();
 
         Tree test = root.getTree("/").addChild("test");
@@ -2664,10 +2675,10 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
         Tree idx = createIndex("test1", of("propa", "propb"));
         Tree props = TestUtil.newRulePropTree(idx, "nt:base");
         Tree prop1 = props.addChild(TestUtil.unique("prop"));
-        prop1.setProperty(LuceneIndexConstants.PROP_PROPERTY_INDEX, true);
-        prop1.setProperty(LuceneIndexConstants.PROP_NAME, "tag");
-        prop1.setProperty(LuceneIndexConstants.PROP_INDEX, true);
-        prop1.setProperty(LuceneIndexConstants.PROP_USE_IN_SUGGEST, true);
+        prop1.setProperty(FulltextIndexConstants.PROP_PROPERTY_INDEX, true);
+        prop1.setProperty(FulltextIndexConstants.PROP_NAME, "tag");
+        prop1.setProperty(FulltextIndexConstants.PROP_INDEX, true);
+        prop1.setProperty(FulltextIndexConstants.PROP_USE_IN_SUGGEST, true);
         root.commit();
 
         String query = "select * from [nt:base] where [tag] = 'foo'";
@@ -2677,7 +2688,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
     @Test
     public void relativePropertyWithIndexOnNtBase() throws Exception {
         Tree idx = createIndex("test1", of("propa"));
-        idx.setProperty(PROP_TYPE, "lucene");
+        idx.setProperty(PROP_TYPE, TYPE_LUCENE);
         useV2(idx);
         //Do not provide type information
         root.commit();
@@ -2842,12 +2853,12 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
         assertThat(explain(query), not(containsString("lucene:test1(/oak:index/test1)")));
 
         //Instead of reindex just refresh the index definition so that new index definition gets picked up
-        root.getTree("/oak:index/test1").setProperty(LuceneIndexConstants.PROP_REFRESH_DEFN, true);
+        root.getTree("/oak:index/test1").setProperty(FulltextIndexConstants.PROP_REFRESH_DEFN, true);
         root.commit();
 
         //Plan would reflect new defintion
         assertThat(explain(query), containsString("lucene:test1(/oak:index/test1)"));
-        assertFalse(root.getTree("/oak:index/test1").hasProperty(LuceneIndexConstants.PROP_REFRESH_DEFN));
+        assertFalse(root.getTree("/oak:index/test1").hasProperty(FulltextIndexConstants.PROP_REFRESH_DEFN));
 
         //However as reindex was not done query would result in empty set
         assertPlanAndQuery(query, "lucene:test1(/oak:index/test1)", Collections.<String>emptyList());
@@ -3082,11 +3093,11 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
     private Tree addPropertyDefn(Tree indexDefn, String propName, double boost){
         Tree props = TestUtil.newRulePropTree(indexDefn, "oak:Unstructured");
         Tree prop = props.addChild(TestUtil.unique("prop"));
-        prop.setProperty(LuceneIndexConstants.PROP_NAME, propName);
-        prop.setProperty(LuceneIndexConstants.PROP_PROPERTY_INDEX, true);
-        prop.setProperty(LuceneIndexConstants.PROP_ANALYZED, true);
-        prop.setProperty(LuceneIndexConstants.PROP_NODE_SCOPE_INDEX, true);
-        prop.setProperty(LuceneIndexConstants.FIELD_BOOST, boost);
+        prop.setProperty(FulltextIndexConstants.PROP_NAME, propName);
+        prop.setProperty(FulltextIndexConstants.PROP_PROPERTY_INDEX, true);
+        prop.setProperty(FulltextIndexConstants.PROP_ANALYZED, true);
+        prop.setProperty(FulltextIndexConstants.PROP_NODE_SCOPE_INDEX, true);
+        prop.setProperty(FulltextIndexConstants.FIELD_BOOST, boost);
         return prop;
     }
 
@@ -3130,10 +3141,10 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
         Tree def = index.addChild(INDEX_DEFINITIONS_NAME).addChild(name);
         def.setProperty(JcrConstants.JCR_PRIMARYTYPE,
                 INDEX_DEFINITIONS_NODE_TYPE, Type.NAME);
-        def.setProperty(TYPE_PROPERTY_NAME, LuceneIndexConstants.TYPE_LUCENE);
+        def.setProperty(TYPE_PROPERTY_NAME, TYPE_LUCENE);
         def.setProperty(REINDEX_PROPERTY_NAME, true);
-        def.setProperty(LuceneIndexConstants.FULL_TEXT_ENABLED, false);
-        def.setProperty(PropertyStates.createProperty(LuceneIndexConstants.INCLUDE_PROPERTY_NAMES, propNames, Type.STRINGS));
+        def.setProperty(FulltextIndexConstants.FULL_TEXT_ENABLED, false);
+        def.setProperty(PropertyStates.createProperty(FulltextIndexConstants.INCLUDE_PROPERTY_NAMES, propNames, Type.STRINGS));
         def.setProperty(LuceneIndexConstants.SAVE_DIR_LISTING, true);
         return index.getChild(INDEX_DEFINITIONS_NAME).getChild(name);
     }
@@ -3141,21 +3152,21 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
     private Tree createFullTextIndex(Tree index, String name) throws CommitFailedException {
         Tree def = index.addChild(INDEX_DEFINITIONS_NAME).addChild(name);
         def.setProperty(JcrConstants.JCR_PRIMARYTYPE, INDEX_DEFINITIONS_NODE_TYPE, Type.NAME);
-        def.setProperty(TYPE_PROPERTY_NAME, LuceneIndexConstants.TYPE_LUCENE);
+        def.setProperty(TYPE_PROPERTY_NAME, TYPE_LUCENE);
         def.setProperty(REINDEX_PROPERTY_NAME, true);
-        def.setProperty(LuceneIndexConstants.EVALUATE_PATH_RESTRICTION, true);
-        def.setProperty(LuceneIndexConstants.COMPAT_MODE, IndexFormatVersion.V2.getVersion());
+        def.setProperty(FulltextIndexConstants.EVALUATE_PATH_RESTRICTION, true);
+        def.setProperty(FulltextIndexConstants.COMPAT_MODE, IndexFormatVersion.V2.getVersion());
 
-        Tree props = def.addChild(LuceneIndexConstants.INDEX_RULES)
+        Tree props = def.addChild(FulltextIndexConstants.INDEX_RULES)
                 .addChild("nt:base")
-                .addChild(LuceneIndexConstants.PROP_NODE)
+                .addChild(FulltextIndexConstants.PROP_NODE)
                 .addChild("allProps");
 
-        props.setProperty(LuceneIndexConstants.PROP_ANALYZED, true);
-        props.setProperty(LuceneIndexConstants.PROP_NODE_SCOPE_INDEX, true);
-        props.setProperty(LuceneIndexConstants.PROP_USE_IN_EXCERPT, true);
-        props.setProperty(LuceneIndexConstants.PROP_NAME, LuceneIndexConstants.REGEX_ALL_PROPS);
-        props.setProperty(LuceneIndexConstants.PROP_IS_REGEX, true);
+        props.setProperty(FulltextIndexConstants.PROP_ANALYZED, true);
+        props.setProperty(FulltextIndexConstants.PROP_NODE_SCOPE_INDEX, true);
+        props.setProperty(FulltextIndexConstants.PROP_USE_IN_EXCERPT, true);
+        props.setProperty(FulltextIndexConstants.PROP_NAME, FulltextIndexConstants.REGEX_ALL_PROPS);
+        props.setProperty(FulltextIndexConstants.PROP_IS_REGEX, true);
         return def;
     }
 

@@ -24,9 +24,9 @@ import java.io.File;
 import java.io.IOException;
 
 import org.apache.jackrabbit.oak.plugins.index.lucene.IndexCopier;
-import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexEditorProvider;
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.ActiveDeletedBlobCollectorFactory.BlobDeletionCallback;
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.DirectoryFactory;
+import org.apache.jackrabbit.oak.plugins.index.lucene.editor.LuceneIndexEditorProvider;
 import org.apache.jackrabbit.oak.plugins.index.lucene.writer.LuceneIndexWriterConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

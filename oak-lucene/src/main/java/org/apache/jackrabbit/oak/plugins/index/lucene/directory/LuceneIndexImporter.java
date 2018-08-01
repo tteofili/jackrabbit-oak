@@ -19,19 +19,20 @@
 
 package org.apache.jackrabbit.oak.plugins.index.lucene.directory;
 
-import java.io.File;
-import java.io.IOException;
-
 import com.google.common.io.Closer;
 import org.apache.jackrabbit.oak.plugins.index.importer.IndexImporterProvider;
-import org.apache.jackrabbit.oak.plugins.index.lucene.IndexDefinition;
-import org.apache.jackrabbit.oak.plugins.index.lucene.ReindexOperations;
+import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexDefinition;
+import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
+import org.apache.jackrabbit.oak.plugins.index.search.ReindexOperations;
 import org.apache.jackrabbit.oak.spi.blob.GarbageCollectableBlobStore;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.store.IOContext;
+
+import java.io.File;
+import java.io.IOException;
 
 import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.TYPE_LUCENE;
 
@@ -55,8 +56,9 @@ public class LuceneIndexImporter implements IndexImporterProvider {
 
         definitionBuilder.getChildNode(IndexDefinition.STATUS_NODE).remove();
 
-        ReindexOperations reindexOps = new ReindexOperations(root, definitionBuilder, localIndex.getJcrPath());
-        IndexDefinition definition = reindexOps.apply(true);
+        ReindexOperations reindexOps = new ReindexOperations(root, definitionBuilder, localIndex.getJcrPath(),
+                new LuceneIndexDefinition.Builder());
+        LuceneIndexDefinition definition = (LuceneIndexDefinition)reindexOps.apply(true);
 
         for (File dir : localIndex.dir.listFiles(File::isDirectory)) {
             String jcrName = localIndex.indexMeta.getJcrNameFromFSName(dir.getName());
@@ -75,7 +77,7 @@ public class LuceneIndexImporter implements IndexImporterProvider {
         this.blobStore = blobStore;
     }
 
-    private void copyDirectory(IndexDefinition definition, NodeBuilder definitionBuilder, String jcrName, File dir)
+    private void copyDirectory(LuceneIndexDefinition definition, NodeBuilder definitionBuilder, String jcrName, File dir)
             throws IOException {
         try (Closer closer = Closer.create()) {
             Directory sourceDir = FSDirectory.open(dir);
