@@ -22,9 +22,9 @@ package org.apache.jackrabbit.oak.run.osgi
 import org.apache.felix.connect.launch.PojoServiceRegistry
 
 import org.apache.jackrabbit.oak.plugins.index.aggregate.SimpleNodeAggregator
+import org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants
 import org.apache.jackrabbit.oak.plugins.index.search.IndexFormatVersion
 import org.apache.jackrabbit.oak.plugins.index.search.util.IndexHelper
-import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.LuceneIndexHelper
 import org.apache.jackrabbit.oak.spi.lifecycle.RepositoryInitializer
 import org.apache.jackrabbit.oak.spi.query.QueryIndex
@@ -104,7 +104,7 @@ class LuceneSupportTest extends AbstractRepositoryFactoryTest {
                         if (!index.hasChildNode("lucene")) {
                             NodeBuilder nb = LuceneIndexHelper.newLuceneIndexDefinition(
                                     index, "lucene", IndexHelper.JR_PROPERTY_INCLUDES, null, "async")
-                            nb.setProperty(LuceneIndexConstants.COMPAT_MODE, IndexFormatVersion.V1.getVersion());
+                            nb.setProperty(FulltextIndexConstants.COMPAT_MODE, IndexFormatVersion.V1.getVersion());
                         }
                     }
                 }
