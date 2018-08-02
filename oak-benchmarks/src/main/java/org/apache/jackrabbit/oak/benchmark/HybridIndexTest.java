@@ -97,6 +97,7 @@ import static java.util.Collections.singleton;
 import static java.util.Collections.singletonList;
 import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.DECLARING_NODE_TYPES;
 import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.INDEX_DEFINITIONS_NODE_TYPE;
+import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.REGEX_ALL_PROPS;
 import static org.apache.jackrabbit.oak.spi.nodetype.NodeTypeConstants.NT_OAK_UNSTRUCTURED;
 import static org.apache.jackrabbit.oak.spi.whiteboard.WhiteboardUtils.scheduleWithFixedDelay;
 
@@ -497,7 +498,7 @@ public class HybridIndexTest extends AbstractTest<HybridIndexTest.TestContext> {
             defnBuilder.async("async", "async");
             defnBuilder.codec("Lucene46");
             defnBuilder.indexRule("nt:base")
-                    .property(LuceneIndexConstants.REGEX_ALL_PROPS, true)
+                    .property(REGEX_ALL_PROPS, true)
                     .nodeScopeIndex();
             oakIndex.setChildNode("globalIndex", defnBuilder.build());
         }

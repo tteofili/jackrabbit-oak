@@ -43,6 +43,18 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import static java.util.Collections.singleton;
+import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.AGGREGATES;
+import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.AGG_PATH;
+import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.COMPAT_MODE;
+import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.EVALUATE_PATH_RESTRICTION;
+import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.INCLUDE_PROPERTY_TYPES;
+import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.INDEX_RULES;
+import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.PROP_ANALYZED;
+import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.PROP_IS_REGEX;
+import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.PROP_NAME;
+import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.PROP_NODE;
+import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.PROP_NODE_SCOPE_INDEX;
+import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.REGEX_ALL_PROPS;
 
 /**
  * IndexInitializer configures the repository with required fulltext index
@@ -76,31 +88,31 @@ public class IndexInitializer {
                 "oak:QueryIndexDefinition", s, false);
         lucene.setProperty("async", "async");
         lucene.setProperty(IndexConstants.TYPE_PROPERTY_NAME, "lucene");
-        lucene.setProperty(LuceneIndexConstants.EVALUATE_PATH_RESTRICTION, true);
+        lucene.setProperty(EVALUATE_PATH_RESTRICTION, true);
         lucene.setProperty(LuceneIndexConstants.INDEX_PATH, indexPath);
-        lucene.setProperty(LuceneIndexConstants.COMPAT_MODE, IndexFormatVersion.V2.getVersion());
+        lucene.setProperty(COMPAT_MODE, IndexFormatVersion.V2.getVersion());
 
-        Node indexRules = lucene.addNode(LuceneIndexConstants.INDEX_RULES, JcrConstants.NT_UNSTRUCTURED);
+        Node indexRules = lucene.addNode(INDEX_RULES, JcrConstants.NT_UNSTRUCTURED);
         Node ntBaseRule = indexRules.addNode(JcrConstants.NT_BASE);
 
         //Fulltext index only includes property of type String and Binary
-        ntBaseRule.setProperty(LuceneIndexConstants.INCLUDE_PROPERTY_TYPES,
+        ntBaseRule.setProperty(INCLUDE_PROPERTY_TYPES,
                 new String[] {PropertyType.TYPENAME_BINARY, PropertyType.TYPENAME_STRING});
 
-        Node propNode = ntBaseRule.addNode(LuceneIndexConstants.PROP_NODE);
+        Node propNode = ntBaseRule.addNode(PROP_NODE);
 
         Node allPropNode = propNode.addNode("allProps");
-        allPropNode.setProperty(LuceneIndexConstants.PROP_ANALYZED, true);
-        allPropNode.setProperty(LuceneIndexConstants.PROP_NODE_SCOPE_INDEX, true);
-        allPropNode.setProperty(LuceneIndexConstants.PROP_NAME, LuceneIndexConstants.REGEX_ALL_PROPS);
-        allPropNode.setProperty(LuceneIndexConstants.PROP_IS_REGEX, true);
+        allPropNode.setProperty(PROP_ANALYZED, true);
+        allPropNode.setProperty(PROP_NODE_SCOPE_INDEX, true);
+        allPropNode.setProperty(PROP_NAME, REGEX_ALL_PROPS);
+        allPropNode.setProperty(PROP_IS_REGEX, true);
         allPropNode.setProperty(LuceneIndexConstants.PROP_USE_IN_SPELLCHECK, true);
 
         //Create aggregates for nt:file
-        Node aggNode = lucene.addNode(LuceneIndexConstants.AGGREGATES);
+        Node aggNode = lucene.addNode(AGGREGATES);
 
         Node aggFile = aggNode.addNode(JcrConstants.NT_FILE);
-        aggFile.addNode("include0").setProperty(LuceneIndexConstants.AGG_PATH, JcrConstants.JCR_CONTENT);
+        aggFile.addNode("include0").setProperty(AGG_PATH, JcrConstants.JCR_CONTENT);
 
         log.info("Created fulltext index definition at {}", indexPath);
     }

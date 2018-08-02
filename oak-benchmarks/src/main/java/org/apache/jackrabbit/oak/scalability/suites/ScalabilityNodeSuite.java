@@ -20,6 +20,7 @@ package org.apache.jackrabbit.oak.scalability.suites;
 
 import static com.google.common.collect.Lists.newArrayList;
 import static com.google.common.collect.Lists.newArrayListWithCapacity;
+import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.PROP_TYPE;
 
 import java.util.Calendar;
 import java.util.List;
@@ -275,7 +276,7 @@ public class ScalabilityNodeSuite extends ScalabilityAbstractSuite {
                         .valueOf(System.currentTimeMillis());
             case LUCENE_DOC:
                 Map<String, String> propMap = Maps.newHashMap();
-                propMap.put(LuceneIndexConstants.PROP_TYPE, PropertyType.TYPENAME_DATE);
+                propMap.put(PROP_TYPE, PropertyType.TYPENAME_DATE);
                 orderedMap.put(DATE_PROP, propMap);
             case LUCENE:
                 OakIndexUtils.luceneIndexDefinition(session, "customIndex", ASYNC_INDEX,

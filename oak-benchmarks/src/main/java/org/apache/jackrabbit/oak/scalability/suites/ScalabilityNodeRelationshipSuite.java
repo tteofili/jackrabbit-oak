@@ -52,6 +52,8 @@ import com.google.common.base.StandardSystemProperty;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 
+import static org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants.PROP_TYPE;
+
 /**
  * The suite test will incrementally increase the load and execute searches.
  * Each test run thus adds nodes and executes different benchmarks. This way we measure time
@@ -208,7 +210,7 @@ public class ScalabilityNodeRelationshipSuite extends ScalabilityNodeSuite {
                         .valueOf(System.currentTimeMillis());
             case LUCENE_DOC:
                 Map<String, String> propMap = Maps.newHashMap();
-                propMap.put(LuceneIndexConstants.PROP_TYPE, PropertyType.TYPENAME_DATE);
+                propMap.put(PROP_TYPE, PropertyType.TYPENAME_DATE);
                 orderedMap.put(CREATED, propMap);
             case LUCENE:
                 OakIndexUtils.luceneIndexDefinition(session, "customIndexActivity", ASYNC_INDEX,

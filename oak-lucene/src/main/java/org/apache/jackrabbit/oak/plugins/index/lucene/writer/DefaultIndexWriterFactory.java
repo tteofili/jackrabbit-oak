@@ -22,6 +22,7 @@ package org.apache.jackrabbit.oak.plugins.index.lucene.writer;
 import com.google.common.base.Preconditions;
 import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants;
 import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexDefinition;
+import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexWriterFactory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.DirectoryFactory;
 import org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants;
 import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
@@ -31,7 +32,7 @@ import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 
-public class DefaultIndexWriterFactory implements FulltextIndexWriterFactory {
+public class DefaultIndexWriterFactory implements LuceneIndexWriterFactory {
     private final MountInfoProvider mountInfoProvider;
     private final DirectoryFactory directoryFactory;
     private final LuceneIndexWriterConfig writerConfig;
